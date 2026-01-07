@@ -621,10 +621,11 @@ def unify_snapshot_times(
             )
     elif doing_scale_factor:
         # Convert the first snapshot to scale factor
-        first_snap = first_snap_scale_factor
-        if first_snap is None and first_snap_z is not None:
+        if first_snap_scale_factor is not None:
+            first_snap = first_snap_scale_factor
+        elif first_snap_z is not None:
             first_snap = float(convert_redshift_to_scale_factor(first_snap_z))
-        elif first_snap is None and first_snap_time is not None:
+        elif first_snap_time is not None:
             first_snap = float(
                 convert_redshift_to_scale_factor(
                     float(convert_time_to_redshift(first_snap_time))
@@ -637,10 +638,11 @@ def unify_snapshot_times(
             )
 
         # Convert the final snapshot to scale factor
-        final_snap = final_snap_scale_factor
-        if final_snap is None and final_snap_z is not None:
+        if final_snap_scale_factor is not None:
+            final_snap = final_snap_scale_factor
+        elif final_snap_z is not None:
             final_snap = float(convert_redshift_to_scale_factor(final_snap_z))
-        elif final_snap is None and final_snap_time is not None:
+        elif final_snap_time is not None:
             final_snap = float(
                 convert_redshift_to_scale_factor(
                     float(convert_time_to_redshift(final_snap_time))
