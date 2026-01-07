@@ -553,10 +553,11 @@ def unify_snapshot_times(
     # Convert start and finishes to appropriate types
     if doing_z:
         # Convert the first snapshot to redshift
-        first_snap = first_snap_z
-        if first_snap is None and first_snap_time is not None:
+        if first_snap_z is not None:
+            first_snap = first_snap_z
+        elif first_snap_time is not None:
             first_snap = float(convert_time_to_redshift(first_snap_time))
-        elif first_snap is None and first_snap_scale_factor is not None:
+        elif first_snap_scale_factor is not None:
             first_snap = float(
                 convert_scale_factor_to_redshift(first_snap_scale_factor)
             )
@@ -567,10 +568,11 @@ def unify_snapshot_times(
             )
 
         # Convert the final snapshot to redshift
-        final_snap = final_snap_z
-        if final_snap is None and final_snap_time is not None:
+        if final_snap_z is not None:
+            final_snap = final_snap_z
+        elif final_snap_time is not None:
             final_snap = float(convert_time_to_redshift(final_snap_time))
-        elif final_snap is None and final_snap_scale_factor is not None:
+        elif final_snap_scale_factor is not None:
             final_snap = float(
                 convert_scale_factor_to_redshift(final_snap_scale_factor)
             )
@@ -581,10 +583,11 @@ def unify_snapshot_times(
             )
     elif doing_time:
         # Convert the first snapshot to time
-        first_snap = first_snap_time
-        if first_snap is None and first_snap_z is not None:
+        if first_snap_time is not None:
+            first_snap = first_snap_time
+        elif first_snap_z is not None:
             first_snap = float(convert_redshift_to_time(first_snap_z))
-        elif first_snap is None and first_snap_scale_factor is not None:
+        elif first_snap_scale_factor is not None:
             first_snap = float(
                 convert_redshift_to_time(
                     float(
@@ -601,10 +604,11 @@ def unify_snapshot_times(
             )
 
         # Convert the final snapshot to time
-        final_snap = final_snap_time
-        if final_snap is None and final_snap_z is not None:
+        if final_snap_time is not None:
+            final_snap = final_snap_time
+        elif final_snap_z is not None:
             final_snap = float(convert_redshift_to_time(final_snap_z))
-        elif final_snap is None and final_snap_scale_factor is not None:
+        elif final_snap_scale_factor is not None:
             final_snap = float(
                 convert_redshift_to_time(
                     float(
@@ -786,18 +790,23 @@ def _generate_output_list_with_cosmo(args: dict, cosmo) -> None:
         doing_scale_factor=doing_scale_factor,
         doing_log_scale_factor=doing_log_scale_factor,
     )
-    snip_first_snap, snip_final_snap = unify_snapshot_times(
-        first_snap_z=first_snap_z,
-        first_snap_time=first_snap_time,
-        first_snap_scale_factor=first_snap_scale_factor,
-        final_snap_z=final_snap_z,
-        final_snap_time=final_snap_time,
-        final_snap_scale_factor=final_snap_scale_factor,
-        doing_z=snip_doing_z,
-        doing_time=snip_doing_time,
-        doing_scale_factor=snip_doing_scale_factor,
-        doing_log_scale_factor=snip_doing_log_scale_factor,
-    )
+
+    # Only convert snipshot times if we're actually doing snipshots
+    if has_snipshots:
+        snip_first_snap, snip_final_snap = unify_snapshot_times(
+            first_snap_z=first_snap_z,
+            first_snap_time=first_snap_time,
+            first_snap_scale_factor=first_snap_scale_factor,
+            final_snap_z=final_snap_z,
+            final_snap_time=final_snap_time,
+            final_snap_scale_factor=final_snap_scale_factor,
+            doing_z=snip_doing_z,
+            doing_time=snip_doing_time,
+            doing_scale_factor=snip_doing_scale_factor,
+            doing_log_scale_factor=snip_doing_log_scale_factor,
+        )
+    else:
+        snip_first_snap, snip_final_snap = None, None
 
     # Check that this first snap is after a_begin in the parameter file
     a_begin = params["Cosmology"]["a_begin"]
