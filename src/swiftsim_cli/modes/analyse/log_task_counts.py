@@ -241,31 +241,41 @@ def analyse_swift_task_counts(
             if not snaps:
                 continue
 
-            # Just take the first snapshot for this step
-            snap = snaps[0]
-
+            # Sum task counts across all ranks for this step
+            # Use simulation time from first snapshot (should be same for all)
             steps.append(step)
-            sim_times.append(snap.sim_time)
+            sim_times.append(snaps[0].sim_time)
 
-            # Store individual task counts
-            for task_name, count in snap.counts.items():
+            # Aggregate task counts across all ranks
+            aggregated_counts: dict[str, int] = {}
+            for snap in snaps:
+                for task_name, count in snap.counts.items():
+                    aggregated_counts[task_name] = (
+                        aggregated_counts.get(task_name, 0) + count
+                    )
+
+            # Store individual task counts (summed over ranks)
+            for task_name, count in aggregated_counts.items():
                 if task_name not in task_counts_per_step:
                     task_counts_per_step[task_name] = []
                 task_counts_per_step[task_name].append(count)
 
-            # Calculate total tasks
+            # Calculate total tasks (summed over ranks)
             if task_filter:
                 total = sum(
-                    snap.counts.get(task_name, 0) for task_name in task_filter
+                    aggregated_counts.get(task_name, 0)
+                    for task_name in task_filter
                 )
                 totals.append(total)
             else:
-                if snap.total_tasks is not None:
-                    totals.append(int(snap.total_tasks))
-                elif snap.system_total is not None:
-                    totals.append(int(snap.system_total))
-                else:
-                    totals.append(0)
+                # Sum total_tasks or system_total across all ranks
+                total = 0
+                for snap in snaps:
+                    if snap.total_tasks is not None:
+                        total += int(snap.total_tasks)
+                    elif snap.system_total is not None:
+                        total += int(snap.system_total)
+                totals.append(total)
 
         if not steps:
             print("  WARNING: No usable data found in this log")
