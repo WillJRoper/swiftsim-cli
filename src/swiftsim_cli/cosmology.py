@@ -31,10 +31,16 @@ def _get_cosmology() -> FlatLambdaCDM:
     # Extract cosmology parameters
     cosmo_params = params["Cosmology"]
 
+    # Calculate Omega_m if not provided (Omega_m = Omega_cdm + Omega_b)
+    if "Omega_m" in cosmo_params:
+        omega_m = cosmo_params["Omega_m"]
+    else:
+        omega_m = cosmo_params["Omega_cdm"] + cosmo_params["Omega_b"]
+
     # Create a FlatLambdaCDM cosmology object
     cosmo = FlatLambdaCDM(
         H0=cosmo_params["h"] * 100,
-        Om0=cosmo_params["Omega_m"],
+        Om0=omega_m,
         Ob0=cosmo_params["Omega_b"],
     )
 
