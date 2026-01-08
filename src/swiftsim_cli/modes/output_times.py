@@ -145,6 +145,17 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         default=1.0,
         help="Scale factor of the final snapshot to include (default: 1.0).",
     )
+    parser.add_argument(
+        "--list-units",
+        "-u",
+        type=str,
+        default=None,
+        choices=["redshift", "time", "scale-factor"],
+        help=(
+            "Override the units of the output file (redshift, time, or "
+            "scale-factor)."
+        ),
+    )
 
 
 def _get_out_list_z(
@@ -292,6 +303,14 @@ def _generate_output_list_no_cosmo(args: dict) -> None:
     final_snap_z = args.get("final_snap_z", None)
     final_snap_time = args.get("final_snap_time", None)
     final_snap_scale_factor = args.get("final_snap_scale_factor", None)
+
+    # Check if the user wants to convert units (which we can't do without a
+    # cosmology)
+    if args.get("list_units") is not None:
+        raise ValueError(
+            "Cannot convert output units without cosmology parameters. "
+            "Please provide a parameter file with -p."
+        )
 
     # Are we doing redshift, time, or scale factor?
     doing_z = first_snap_z is not None
@@ -623,7 +642,7 @@ def unify_snapshot_times(
                 "You must specify the final snapshot in terms of redshift, "
                 "time, or scale factor."
             )
-    elif doing_scale_factor:
+    elif doing_scale_factor or doing_log_scale_factor:
         # Convert the first snapshot to scale factor
         if first_snap_scale_factor is not None:
             first_snap = first_snap_scale_factor
@@ -650,52 +669,6 @@ def unify_snapshot_times(
             final_snap = float(
                 convert_redshift_to_scale_factor(
                     float(convert_time_to_redshift(final_snap_time))
-                )
-            )
-        else:
-            raise ValueError(
-                "You must specify the final snapshot in terms of redshift, "
-                "time, or scale factor."
-            )
-    elif doing_log_scale_factor:
-        # Convert the first snapshot to log10 scale factor
-        if first_snap_scale_factor is not None:
-            first_snap = float(np.log10(first_snap_scale_factor))
-        elif first_snap_z is not None:
-            first_snap = float(
-                np.log10(float(convert_redshift_to_scale_factor(first_snap_z)))
-            )
-        elif first_snap_time is not None:
-            first_snap = float(
-                np.log10(
-                    float(
-                        convert_redshift_to_scale_factor(
-                            float(convert_time_to_redshift(first_snap_time))
-                        )
-                    )
-                )
-            )
-        else:
-            raise ValueError(
-                "You must specify the first snapshot in terms of redshift, "
-                "time, or scale factor."
-            )
-
-        # Convert the final snapshot to log10 scale factor
-        if final_snap_scale_factor is not None:
-            final_snap = float(np.log10(final_snap_scale_factor))
-        elif final_snap_z is not None:
-            final_snap = float(
-                np.log10(float(convert_redshift_to_scale_factor(final_snap_z)))
-            )
-        elif final_snap_time is not None:
-            final_snap = float(
-                np.log10(
-                    float(
-                        convert_redshift_to_scale_factor(
-                            float(convert_time_to_redshift(final_snap_time))
-                        )
-                    )
                 )
             )
         else:
@@ -830,15 +803,12 @@ def _generate_output_list_with_cosmo(args: dict, cosmo) -> None:
             f"The first snapshot time ({first_snap}) is before the "
             f"beginning of the simulation ({t_begin})."
         )
-    elif doing_scale_factor and first_snap < a_begin:
+    elif (
+        doing_scale_factor or doing_log_scale_factor
+    ) and first_snap < a_begin:
         raise ValueError(
             f"The first snapshot scale factor ({first_snap}) is before the "
             f"beginning of the simulation ({a_begin})."
-        )
-    elif doing_log_scale_factor and 10**first_snap < a_begin:
-        raise ValueError(
-            f"The first snapshot scale factor ({10**first_snap}) is "
-            f"before the beginning of the simulation ({a_begin})."
         )
     else:
         pass  # nothing to do, we are good
@@ -865,15 +835,10 @@ def _generate_output_list_with_cosmo(args: dict, cosmo) -> None:
             f"The final snapshot time ({final_snap}) is after the "
             f"end of the simulation ({t_end})."
         )
-    elif doing_scale_factor and final_snap > a_end:
+    elif (doing_scale_factor or doing_log_scale_factor) and final_snap > a_end:
         raise ValueError(
             f"The final snapshot scale factor ({final_snap}) is after the "
             f"end of the simulation ({a_end})."
-        )
-    elif doing_log_scale_factor and 10**final_snap > a_end:
-        raise ValueError(
-            f"The final snapshot scale factor ({10**final_snap}) is "
-            f"after the end of the simulation ({a_end})."
         )
     else:
         pass  # nothing to do, we are good
@@ -1001,16 +966,64 @@ def _generate_output_list_with_cosmo(args: dict, cosmo) -> None:
                     np.asarray(convert_time_to_redshift(snipshot_times))
                 )
             )
-        else:
-            raise ValueError(
-                "You surely haven't been able to get here, something went "
-                "very wrong! (Or we didn't cover all bases, contact the "
-                "developers to fix this.)"
-            )
-
     else:
         snipshot_times = np.array([])
 
+    # Handle unit conversion override
+    list_units = args.get("list_units")
+    if list_units is not None:
+        if list_units == "redshift":
+            if doing_time:
+                snapshot_times = convert_time_to_redshift(snapshot_times)
+                snipshot_times = convert_time_to_redshift(snipshot_times)
+            elif doing_scale_factor or doing_log_scale_factor:
+                snapshot_times = convert_scale_factor_to_redshift(
+                    snapshot_times
+                )
+                snipshot_times = convert_scale_factor_to_redshift(
+                    snipshot_times
+                )
+            doing_z = True
+            doing_time = False
+            doing_scale_factor = False
+            doing_log_scale_factor = False
+
+        elif list_units == "time":
+            if doing_z:
+                snapshot_times = convert_redshift_to_time(snapshot_times)
+                snipshot_times = convert_redshift_to_time(snipshot_times)
+            elif doing_scale_factor or doing_log_scale_factor:
+                # scale factor -> redshift -> time
+                snapshot_times = convert_redshift_to_time(
+                    convert_scale_factor_to_redshift(snapshot_times)
+                )
+                snipshot_times = convert_redshift_to_time(
+                    convert_scale_factor_to_redshift(snipshot_times)
+                )
+            doing_z = False
+            doing_time = True
+            doing_scale_factor = False
+            doing_log_scale_factor = False
+
+        elif list_units == "scale-factor":
+            if doing_z:
+                snapshot_times = convert_redshift_to_scale_factor(
+                    snapshot_times
+                )
+                snipshot_times = convert_redshift_to_scale_factor(
+                    snipshot_times
+                )
+            elif doing_time:
+                # time -> redshift -> scale factor
+                snapshot_times = convert_redshift_to_scale_factor(
+                    convert_time_to_redshift(snapshot_times)
+                )
+                snipshot_times = convert_redshift_to_scale_factor(
+                    convert_time_to_redshift(snipshot_times)
+                )
+            doing_z = False
+            doing_time = False
+            doing_scale_factor = True
     # Write the output list to the file
     write_output_list(
         out_file,
@@ -1018,7 +1031,7 @@ def _generate_output_list_with_cosmo(args: dict, cosmo) -> None:
         snipshot_times,
         doing_z=doing_z,
         doing_time=doing_time,
-        doing_scale_factor=doing_scale_factor,
+        doing_scale_factor=doing_scale_factor or doing_log_scale_factor,
     )
 
 
