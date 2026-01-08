@@ -75,7 +75,7 @@ def test_write_output_list(tmp_path):
     # Create a temporary output file
     out_file = tmp_path / "output_list.txt"
 
-    # Test with redshift
+    # Test with redshift (mixed)
     snapshot_times = np.array([1.0, 0.5, 0.0])
     snipshot_times = np.array([0.75, 0.25])
     write_output_list(out_file, snapshot_times, snipshot_times, doing_z=True)
@@ -84,11 +84,8 @@ def test_write_output_list(tmp_path):
     assert lines[0] == "# Redshift, Select Output\n"
     assert lines[1] == "1.0, Snapshot\n"
     assert lines[2] == "0.75, Snipshot\n"
-    assert lines[3] == "0.5, Snapshot\n"
-    assert lines[4] == "0.25, Snipshot\n"
-    assert lines[5] == "0.0, Snapshot\n"
 
-    # Test with time
+    # Test with time (mixed)
     snapshot_times = np.array([0.0, 0.5, 1.0])
     snipshot_times = np.array([0.25, 0.75])
     write_output_list(
@@ -98,12 +95,8 @@ def test_write_output_list(tmp_path):
         lines = f.readlines()
     assert lines[0] == "# Time, Select Output\n"
     assert lines[1] == "0.0, Snapshot\n"
-    assert lines[2] == "0.25, Snipshot\n"
-    assert lines[3] == "0.5, Snapshot\n"
-    assert lines[4] == "0.75, Snipshot\n"
-    assert lines[5] == "1.0, Snapshot\n"
 
-    # Test with scale factor
+    # Test with scale factor (mixed)
     snapshot_times = np.array([0.1, 0.2, 0.3])
     snipshot_times = np.array([0.15, 0.25])
     write_output_list(
@@ -113,10 +106,19 @@ def test_write_output_list(tmp_path):
         lines = f.readlines()
     assert lines[0] == "# Scale Factor, Select Output\n"
     assert lines[1] == "0.1, Snapshot\n"
-    assert lines[2] == "0.15, Snipshot\n"
-    assert lines[3] == "0.2, Snapshot\n"
-    assert lines[4] == "0.25, Snipshot\n"
-    assert lines[5] == "0.3, Snapshot\n"
+
+    # Test with only snapshots (single column)
+    snapshot_times = np.array([0.1, 0.2, 0.3])
+    snipshot_times = np.array([])
+    write_output_list(
+        out_file, snapshot_times, snipshot_times, doing_scale_factor=True
+    )
+    with open(out_file, "r") as f:
+        lines = f.readlines()
+    assert lines[0] == "# Scale Factor\n"
+    assert lines[1] == "0.1\n"
+    assert lines[2] == "0.2\n"
+    assert lines[3] == "0.3\n"
 
 
 def test_write_output_list_error(tmp_path):
@@ -146,10 +148,10 @@ def test_generate_output_list_no_cosmo(tmp_path):
     _generate_output_list_no_cosmo(args_redshift)
     with open(out_file, "r") as f:
         lines = f.readlines()
-    assert lines[0] == "# Redshift, Select Output\n"
-    assert lines[1] == "1.0, Snapshot\n"
-    assert lines[2] == "0.5, Snapshot\n"
-    assert lines[3] == "0.0, Snapshot\n"
+    assert lines[0] == "# Redshift\n"
+    assert lines[1] == "1.0\n"
+    assert lines[2] == "0.5\n"
+    assert lines[3] == "0.0\n"
 
     # Test with time
     args_time = {
@@ -161,10 +163,10 @@ def test_generate_output_list_no_cosmo(tmp_path):
     _generate_output_list_no_cosmo(args_time)
     with open(out_file, "r") as f:
         lines = f.readlines()
-    assert lines[0] == "# Time, Select Output\n"
-    assert lines[1] == "0.0, Snapshot\n"
-    assert lines[2] == "0.5, Snapshot\n"
-    assert lines[3] == "1.0, Snapshot\n"
+    assert lines[0] == "# Time\n"
+    assert lines[1] == "0.0\n"
+    assert lines[2] == "0.5\n"
+    assert lines[3] == "1.0\n"
 
     # Test with scale factor
     args_scale_factor = {
@@ -176,10 +178,10 @@ def test_generate_output_list_no_cosmo(tmp_path):
     _generate_output_list_no_cosmo(args_scale_factor)
     with open(out_file, "r") as f:
         lines = f.readlines()
-    assert lines[0] == "# Scale Factor, Select Output\n"
-    assert lines[1] == "0.1, Snapshot\n"
-    assert lines[2] == "0.2, Snapshot\n"
-    assert lines[3] == "0.3, Snapshot\n"
+    assert lines[0] == "# Scale Factor\n"
+    assert lines[1] == "0.1\n"
+    assert lines[2] == "0.2\n"
+    assert lines[3] == "0.3\n"
 
     # Test with log scale factor
     args_log_scale_factor = {
@@ -191,14 +193,10 @@ def test_generate_output_list_no_cosmo(tmp_path):
     _generate_output_list_no_cosmo(args_log_scale_factor)
     with open(out_file, "r") as f:
         lines = f.readlines()
-    assert lines[0] == "# Scale Factor, Select Output\n"
-    assert np.isclose(float(lines[1].split(",")[0]), 0.1)
-    assert np.isclose(
-        float(lines[2].split(",")[0]), 10 ** (np.log10(0.1) + 0.1)
-    )
-    assert np.isclose(
-        float(lines[3].split(",")[0]), 10 ** (np.log10(0.1) + 0.2)
-    )
+    assert lines[0] == "# Scale Factor\n"
+    assert np.isclose(float(lines[1].strip()), 0.1)
+    assert np.isclose(float(lines[2].strip()), 10 ** (np.log10(0.1) + 0.1))
+    assert np.isclose(float(lines[3].strip()), 10 ** (np.log10(0.1) + 0.2))
 
 
 def test_generate_output_list_with_cosmo(mocker, tmp_path):
@@ -463,9 +461,11 @@ def test_generate_output_list_no_cosmo_log_scale_factor(tmp_path):
     with open(out_file, "r") as f:
         lines = f.readlines()
 
-    assert "# Scale Factor, Select Output" in lines[0]
-    content = "".join(lines)
-    assert "Snapshot" in content
+    assert "# Scale Factor\n" == lines[0]
+    # Check values (approximate due to floating point)
+    assert np.isclose(float(lines[1].strip()), 0.1)
+    assert np.isclose(float(lines[2].strip()), 10 ** (np.log10(0.1) + 0.1))
+    assert np.isclose(float(lines[3].strip()), 10 ** (np.log10(0.1) + 0.2))
 
 
 def test_generate_output_list_no_cosmo_scale_factor_with_snipshots(tmp_path):

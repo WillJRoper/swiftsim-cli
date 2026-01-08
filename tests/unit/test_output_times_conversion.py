@@ -200,9 +200,9 @@ def test_list_units_redshift_conversion(
     _generate_output_list_with_cosmo(args, mock_cosmo)
     with open(out_file, "r") as f:
         lines = f.readlines()
-    assert "# Redshift, Select Output" in lines[0]
+    assert "# Redshift\n" == lines[0]
     # Check first value is roughly 1.0
-    assert np.isclose(float(lines[1].split(",")[0]), 1.0)
+    assert np.isclose(float(lines[1].strip()), 1.0)
 
 
 def test_list_units_scale_factor_conversion(
@@ -221,9 +221,9 @@ def test_list_units_scale_factor_conversion(
     _generate_output_list_with_cosmo(args, mock_cosmo)
     with open(out_file, "r") as f:
         lines = f.readlines()
-    assert "# Scale Factor, Select Output" in lines[0]
+    assert "# Scale Factor\n" == lines[0]
     # Check first value is 0.5
-    assert np.isclose(float(lines[1].split(",")[0]), 0.5)
+    assert np.isclose(float(lines[1].strip()), 0.5)
 
 
 def test_list_units_time_conversion(mock_cosmo, mock_conversions, tmp_path):
@@ -240,8 +240,8 @@ def test_list_units_time_conversion(mock_cosmo, mock_conversions, tmp_path):
     _generate_output_list_with_cosmo(args, mock_cosmo)
     with open(out_file, "r") as f:
         lines = f.readlines()
-    assert "# Time, Select Output" in lines[0]
-    assert np.isclose(float(lines[1].split(",")[0]), 0.9)
+    assert "# Time\n" == lines[0]
+    assert np.isclose(float(lines[1].strip()), 0.9)
 
 
 def test_snipshot_conversion_logic(mock_cosmo, mock_conversions, tmp_path):
@@ -408,10 +408,8 @@ def test_list_units_conversion_permutations(
     _generate_output_list_with_cosmo(args, mock_cosmo)
     with open(out_file, "r") as f:
         lines = f.readlines()
-    assert "# Redshift, Select Output" in lines[0]
-    assert np.isclose(
-        float(lines[1].split(",")[0]), 1.0
-    )  # Sorted descending for Z
+    assert "# Redshift\n" == lines[0]
+    assert np.isclose(float(lines[1].strip()), 1.0)  # Sorted descending for Z
 
     # Case 2: Start in Redshift, Convert to Time
     # Wait, test_with_cosmo_converts_z_to_time covered this? Yes.

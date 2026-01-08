@@ -221,19 +221,27 @@ def write_output_list(
     # that are already in the snapshot list.
     snipshot_times = snipshot_times[~np.isin(snipshot_times, snapshot_times)]
 
+    # Do we have mixed output types?
+    mixed_output = len(snapshot_times) > 0 and len(snipshot_times) > 0
+
     # Define the first line of the output text file (with two columns)
     output_lines = []
+    header = "# "
     if doing_z:
-        output_lines.append("# Redshift, Select Output")
+        header += "Redshift"
     elif doing_time:
-        output_lines.append("# Time, Select Output")
+        header += "Time"
     elif doing_scale_factor:
-        output_lines.append("# Scale Factor, Select Output")
+        header += "Scale Factor"
     else:
         raise ValueError(
             "Shouldn't be able to get here, something went wrong with "
             "the input parameters and all the consistency checks."
         )
+
+    if mixed_output:
+        header += ", Select Output"
+    output_lines.append(header)
 
     # Report how many snapshots and snipshots we have
     print(f"Generated {len(snapshot_times)} snapshots")
@@ -265,7 +273,10 @@ def write_output_list(
     for time, select in zip(sorted_times, sorted_select_output):
         # Round to remove floating point precision artifacts
         time_rounded = round(time, 10)
-        output_lines.append(f"{time_rounded}, {select}")
+        if mixed_output:
+            output_lines.append(f"{time_rounded}, {select}")
+        else:
+            output_lines.append(f"{time_rounded}")
 
     # Write the output to the file
     with open(out_file, "w") as f:
