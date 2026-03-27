@@ -50,10 +50,13 @@ def add_timestep_arguments(subparsers) -> None:
     )
 
     timestep_parser.add_argument(
-        "--plot-time",
-        help="Plot against time instead of scale factor.",
-        action="store_true",
-        default=True,
+        "--time-column",
+        help=(
+            "Zero-based column index to use for the x-axis. "
+            "Use 1 for scale factor, 2 for internal time."
+        ),
+        type=int,
+        default=2,
     )
 
     timestep_parser.add_argument(
@@ -85,33 +88,46 @@ def run_timestep(args: argparse.Namespace) -> None:
     analyse_timestep_files(
         args.files,
         args.labels,
-        args.plot_time,
-        args.output_path,
-        args.prefix,
-        args.show_plot,
+        output_path=args.output_path,
+        prefix=args.prefix,
+        show_plot=args.show_plot,
+        time_column=args.time_column,
     )
+
+
+def _get_x_axis_label(time_column: int) -> str:
+    """Return the x-axis label for a selected timestep file column."""
+    if time_column == 1:
+        return "Scale factor"
+    if time_column == 2:
+        return "Time [Internal Units]"
+
+    return f"Column {time_column + 1}"
 
 
 def analyse_timestep_files(
     files: list[str],
     labels: list[str],
-    plot_time: bool = True,
+    plot_time: bool | None = None,
     output_path: str | None = None,
     prefix: str | None = None,
     show_plot: bool = True,
+    time_column: int | None = None,
 ) -> None:
     """Plot the timestep files of one or more SWIFT runs.
 
     Args:
         files: List of file paths to the timestep files.
         labels: List of labels for the runs.
-        plot_time: Whether to plot against time or scale factor. If True, plot
-            against time, otherwise plot against scale factor.
+        plot_time: Deprecated compatibility flag. If provided, True selects the
+            internal-time column and False selects the scale-factor column.
         output_path: Optional path to save the plot. If None, the plot is saved
             to the current directory.
         prefix: Optional prefix to add to the output filename. If None,
             the default filename is determined by create_output_path.
         show_plot: Whether to display the plot.
+        time_column: Zero-based column index to use for the x-axis. Defaults
+            to 2, which is the third column in the timestep table.
 
     Raises:
         ValueError: If the number of files and labels do not match.
@@ -120,8 +136,14 @@ def analyse_timestep_files(
     if len(files) != len(labels):
         raise ValueError("Number of files and labels must match.")
 
-    # Are we plotting against time or scale factor?
-    time_index = 1 if plot_time else 2
+    if time_column is None:
+        time_column = 2 if plot_time in (None, True) else 1
+
+    if time_column < 0:
+        raise ValueError("time_column must be non-negative.")
+
+    # Column indices in the timestep table
+    x_index = time_column
     wall_clock_index = 12
     deadtime_index = -1
     place_legend_below = len(labels) > 3
@@ -168,7 +190,7 @@ def analyse_timestep_files(
                     )
                     continue
 
-                xi.append(float(parts[time_index]))
+                xi.append(float(parts[x_index]))
                 yi.append(float(parts[wall_clock_index]))
                 dti.append(float(parts[deadtime_index]))
 
@@ -207,7 +229,7 @@ def analyse_timestep_files(
         ax1.plot(xi, dt, "--", color=color, alpha=0.6, linewidth=2)
 
     # Set labels and title for main plot
-    x_label = "Time [Internal Units]" if plot_time else "Scale factor"
+    x_label = _get_x_axis_label(time_column)
     ax1.set_ylabel("Time [hrs]")
 
     # Create custom legend with black lines showing line styles
