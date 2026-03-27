@@ -10,6 +10,7 @@ Key functions:
 """
 
 import argparse
+import math
 
 import matplotlib.cm as cm
 import matplotlib.pyplot as plt
@@ -124,6 +125,11 @@ def analyse_timestep_files(
     wall_clock_index = 12
     deadtime_index = -1
     place_legend_below = len(labels) > 3
+    figure_height = 8.0
+
+    if place_legend_below:
+        legend_rows = math.ceil(len(labels) / 4)
+        figure_height += 0.15 * legend_rows
 
     # Loop over the lines in the file and extract the relevant data
     x = []
@@ -175,7 +181,7 @@ def analyse_timestep_files(
     fig, (ax1, ax2) = plt.subplots(
         2,
         1,
-        figsize=(10, 8),
+        figsize=(10, figure_height),
         gridspec_kw={"height_ratios": [3, 1]},
         sharex=True,
     )
