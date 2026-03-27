@@ -129,7 +129,7 @@ def analyse_timestep_files(
 
     if place_legend_below:
         legend_rows = math.ceil(len(labels) / 4)
-        figure_height += 0.15 * legend_rows
+        figure_height += 0.2 * legend_rows
 
     # Loop over the lines in the file and extract the relevant data
     x = []
