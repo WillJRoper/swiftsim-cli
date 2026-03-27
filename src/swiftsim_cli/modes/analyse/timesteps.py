@@ -123,6 +123,7 @@ def analyse_timestep_files(
     time_index = 1 if plot_time else 2
     wall_clock_index = 12
     deadtime_index = -1
+    place_legend_below = len(labels) > 3
 
     # Loop over the lines in the file and extract the relevant data
     x = []
@@ -246,11 +247,23 @@ def analyse_timestep_files(
     # Set labels and formatting for deadtime percentage plot
     ax2.set_xlabel(x_label)
     ax2.set_ylabel("Dead Time [%]")
-    ax2.legend(loc="best")
+
+    if place_legend_below:
+        ax2.legend(
+            loc="upper center",
+            bbox_to_anchor=(0.5, -0.3),
+            ncol=min(4, len(labels)),
+        )
+    else:
+        ax2.legend(loc="best")
+
     ax2.set_ylim(0, None)  # Start y-axis at 0 for percentage
 
     # Adjust layout to prevent overlapping
-    plt.tight_layout()
+    if place_legend_below:
+        plt.tight_layout(rect=(0, 0.08, 1, 1))
+    else:
+        plt.tight_layout()
 
     # Create the output path
     output_file = create_output_path(
