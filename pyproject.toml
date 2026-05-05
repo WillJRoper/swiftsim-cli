@@ -69,6 +69,7 @@ dependencies = [
   "ruamel.yaml",  # Fixed: should be ruamel.yaml not ruamel_yaml
   "PyYAML",       # Added: used in profile.py and modes/profile.py
   "matplotlib >= 3.5",   # Added: used in analyse mode for plotting
+  "pandas >= 1.5",        # Added: used for mpiuse report parsing
   "tqdm >= 4.60",         # Added: used for progress bars in src_parser and analyse
   "tree-sitter",           # For C code parsing
   "tree-sitter-c",         # C language support for tree-sitter
