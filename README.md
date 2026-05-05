@@ -121,15 +121,17 @@ swift-cli analyse --help
 Which yields:
 
 ```bash
-usage: swift-cli analyse [-h] {timesteps,gravity-checks,gravity-error-map,log} ...
+usage: swift-cli analyse [-h] {timesteps,gravity-checks,gravity-error-maps,log,task-counts,mpiuse} ...
 
 positional arguments:
-  {timesteps,gravity-checks,gravity-error-map,log}
+  {timesteps,gravity-checks,gravity-error-maps,log,task-counts,mpiuse}
                         Type of analysis to perform
     timesteps           Analyse timestep files
     gravity-checks      Analyse gravity check files
-    gravity-error-map   Create hexbin error maps for gravity check files
+    gravity-error-maps  Create hexbin error maps for gravity check files
     log                 Analyse timing information from SWIFT log files. To get the most from this mode SWIFT should be run with -v 1 for verbose output.
+    task-counts         Analyse engine_print_task_counts output from SWIFT log files.
+    mpiuse              Analyse SWIFT mpiuse_report-rank*-step*.dat files.
 
 options:
   -h, --help            show this help message and exit
@@ -146,6 +148,34 @@ swift-cli update config --debug make -j 16
 # Update SWIFT, compile, and create new simulation in the test_run directory
 swift-cli update make -j 32 new test_run --ics initial_conditions.hdf5
 ```
+
+### MPI Use Analysis
+
+The `analyse mpiuse` subcommand compares MPI communication recorded by
+SWIFT when built with `--enable-mpiuse-reports`.
+
+Each input should be a directory, glob, or single
+`mpiuse_report-rank*-step*.dat` file set representing one run. Multiple
+inputs are compared side by side.
+
+```bash
+# Compare MPI communication between two runs
+swift-cli analyse mpiuse master_reports fewer_gpart_comms_reports \
+  --labels master fewer_gpart_comms \
+  --prefix gravity_cmp \
+  --format both \
+  --per-rank
+```
+
+This produces:
+
+- Per-input ASCII summary tables
+- A cross-input comparison table with byte deltas
+- Per-step and per-subtype plots in `<prefix>_mpiuse_analysis/`
+- Optional per-step CSV output with `--format csv` or `--format both`
+
+Useful filters include `--subtypes gpart grav_counts` and
+`--steps START END`.
 
 ## Development
 
