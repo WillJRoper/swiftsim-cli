@@ -712,7 +712,7 @@ class TestCreateTimeSeriesPlot:
 
         figure = plt.gcf()
         assert len(figure.axes) == 3
-        assert figure.get_size_inches()[1] == pytest.approx(10.5)
+        assert figure.get_size_inches()[1] == pytest.approx(19.5)
 
 
 class TestHierarchicalAnalysisDefaults:

@@ -943,7 +943,7 @@ def create_time_series_plot(
     if panel_count == 0:
         return None
 
-    fig_height = max(3.0 * panel_count + 1.5, 6.0)
+    fig_height = max(6.0 * panel_count + 1.5, 12.0)
     fig, axes = plt.subplots(
         panel_count,
         1,
