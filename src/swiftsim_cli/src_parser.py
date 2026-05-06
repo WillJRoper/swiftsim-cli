@@ -58,8 +58,16 @@ __all__ = [
 # Small regex helpers (kept fast & simple)
 # =============================================================================
 
-# Log step lines: first integer is the step number.
-_RE_STEP_LINE = re.compile(r"^\s*(?P<step>\d+)\b")
+# Log step table lines: whitespace, then a step number followed by at least
+# four numeric columns. This avoids misreading elapsed-time lines like
+# ``12.345 foo: ...`` as step ``12``.
+_RE_STEP_LINE = re.compile(
+    r"^\s+(?P<step>\d+)\s+"
+    r"(?P<time>[0-9.eE+\-]+)\s+"
+    r"(?P<col2>[0-9.eE+\-]+)\s+"
+    r"(?P<col3>[0-9.eE+\-]+)\s+"
+    r"(?P<col4>[0-9.eE+\-]+)(?:\s|$)"
+)
 
 # C string literal content.
 _RE_CSTRING = re.compile(r'"((?:[^"\\]|\\.)*)"')
@@ -246,7 +254,7 @@ def _build_log_pattern(function: str, fmt_text: str) -> Tuple[str, str]:
         body = re.sub(r"took\\s\+\.\*\?", r"took\\s+([\\d.]+)\\s+ms", body)
 
     pattern = (
-        r"^(?:\[\d{4}\]\s+)?"  # optional [rank]
+        r"^(?:\[\d+\]\s+)?"  # optional [rank]
         r"\S+\s+"  # elapsed token
         + re.escape(function)
         + r":\s+"
@@ -667,18 +675,27 @@ def _scan_balanced_call(
     return "".join(buf), i
 
 
-def load_timer_db() -> Dict[str, TimerDef]:
+def load_timer_db(force_regenerate: bool = False) -> Dict[str, TimerDef]:
     """Load timer definitions from YAML.
+
+    Args:
+        force_regenerate: If True, regenerate `timers.yaml` from the current
+            SWIFT source before loading it.
 
     Returns:
         Mapping from `timer_id` to `TimerDef` for quick access in analysis.
     """
-    # If file doesn't exist make it
-    if not TIMER_FILE.exists():
+    # If file doesn't exist, or if requested explicitly, regenerate it.
+    if force_regenerate or not TIMER_FILE.exists():
         config = load_swift_profile()
         os.makedirs(os.path.dirname(TIMER_FILE) or ".", exist_ok=True)
-        if config.swiftsim_dir is not None:
-            parse_src_timers(str(config.swiftsim_dir))
+        if config.swiftsim_dir is None:
+            raise ValueError(
+                "Cannot generate timer database: 'swiftsim_dir' not set in "
+                "profile. Run 'swift-cli profile --init' to configure your "
+                "SWIFT installation path."
+            )
+        parse_src_timers(str(config.swiftsim_dir))
 
     yaml_safe = YAML(typ="safe")
     with open(TIMER_FILE, "r", encoding="utf-8") as f:
@@ -1065,16 +1082,26 @@ class TimerNestingGenerator:
         """Extract all function calls from within a function body."""
         function_calls = []
 
+        def extract_callee_name(node):
+            if node.type == "identifier":
+                return source_code[node.start_byte : node.end_byte].decode(
+                    "utf-8"
+                )
+            if node.type == "parenthesized_expression":
+                for child in node.children:
+                    name = extract_callee_name(child)
+                    if name is not None:
+                        return name
+            return None
+
         def traverse(node):
             if node.type == "call_expression":
                 # Get the function name from the call
                 function_expr = node.children[
                     0
                 ]  # First child is the function expression
-                if function_expr.type == "identifier":
-                    func_name = source_code[
-                        function_expr.start_byte : function_expr.end_byte
-                    ].decode("utf-8")
+                func_name = extract_callee_name(function_expr)
+                if func_name is not None:
                     function_calls.append(func_name)
 
             # Recursively traverse children

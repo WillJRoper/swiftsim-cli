@@ -7,6 +7,8 @@ import matplotlib.pyplot as plt
 import pytest
 
 from swiftsim_cli.modes.analyse.log_timing import (
+    _hierarchy_corrected_total,
+    _hierarchy_direct_accounted_time,
     _print_hierarchical_analysis,
     add_log_arguments,
     analyse_swift_log_timings,
@@ -486,6 +488,143 @@ class TestBuildFunctionHierarchy:
         # Should return structure
         assert isinstance(result, dict)
 
+    def test_build_function_hierarchy_allows_repeated_function_in_branches(
+        self,
+    ):
+        """Repeated callees should still appear in separate branches."""
+        all_stats_dict = {
+            "timer_root": {"total_time": 100.0, "call_count": 1},
+            "timer_left": {"total_time": 40.0, "call_count": 1},
+            "timer_right": {"total_time": 30.0, "call_count": 1},
+            "timer_leaf": {"total_time": 20.0, "call_count": 2},
+        }
+        timer_db = {
+            "timer_root": Mock(function="root", timer_type="function"),
+            "timer_left": Mock(function="left", timer_type="function"),
+            "timer_right": Mock(function="right", timer_type="function"),
+            "timer_leaf": Mock(function="leaf", timer_type="function"),
+        }
+        nesting_db = {
+            "root": {"nested_functions": ["left", "right"]},
+            "left": {"nested_functions": ["leaf"]},
+            "right": {"nested_functions": ["leaf"]},
+            "leaf": {"nested_functions": []},
+        }
+
+        result = build_function_hierarchy(
+            "root", all_stats_dict, timer_db, nesting_db
+        )
+
+        assert "leaf" in result["nested_functions"]["left"]["nested_functions"]
+        assert (
+            "leaf" in result["nested_functions"]["right"]["nested_functions"]
+        )
+
+    def test_hierarchy_corrected_total_uses_recursive_child_totals(self):
+        """Recursive child totals should be used for corrected time."""
+        hierarchy = {
+            "function": (
+                "timer_parent",
+                {"total_time": 50.0, "call_count": 2},
+            ),
+            "operations": [
+                ("op_parent", {"total_time": 10.0, "call_count": 2})
+            ],
+            "nested_functions": {
+                "child": {
+                    "function": (
+                        "timer_child",
+                        {"total_time": 20.0, "call_count": 2},
+                    ),
+                    "operations": [
+                        ("op_child", {"total_time": 40.0, "call_count": 2})
+                    ],
+                    "nested_functions": {},
+                }
+            },
+        }
+
+        assert (
+            _hierarchy_corrected_total(hierarchy["nested_functions"]["child"])
+            == 40.0
+        )
+        assert _hierarchy_direct_accounted_time(hierarchy) == 50.0
+        assert _hierarchy_corrected_total(hierarchy) == 50.0
+
+    def test_hierarchy_unaccounted_shrinks_with_corrected_child_totals(self):
+        """Direct accounting should use corrected child totals."""
+        hierarchy = {
+            "function": (
+                "timer_prepare",
+                {"total_time": 100.0, "call_count": 1},
+            ),
+            "operations": [],
+            "nested_functions": {
+                "engine_rebuild": {
+                    "function": (
+                        "timer_rebuild",
+                        {"total_time": 10.0, "call_count": 1},
+                    ),
+                    "operations": [
+                        ("op_rebuild", {"total_time": 60.0, "call_count": 1})
+                    ],
+                    "nested_functions": {},
+                }
+            },
+        }
+
+        assert (
+            _hierarchy_corrected_total(
+                hierarchy["nested_functions"]["engine_rebuild"]
+            )
+            == 60.0
+        )
+        assert _hierarchy_direct_accounted_time(hierarchy) == 60.0
+        assert _hierarchy_corrected_total(hierarchy) == 100.0
+
+    def test_hierarchy_corrected_total_still_handles_cycles(self):
+        """Cycle prevention should still hold with path-based recursion."""
+        all_stats_dict = {
+            "timer_a": {"total_time": 10.0, "call_count": 1},
+            "timer_b": {"total_time": 5.0, "call_count": 1},
+        }
+        timer_db = {
+            "timer_a": Mock(function="func_a", timer_type="function"),
+            "timer_b": Mock(function="func_b", timer_type="function"),
+        }
+        nesting_db = {
+            "func_a": {"nested_functions": ["func_b"]},
+            "func_b": {"nested_functions": ["func_a"]},
+        }
+
+        result = build_function_hierarchy(
+            "func_a", all_stats_dict, timer_db, nesting_db
+        )
+
+        assert _hierarchy_corrected_total(result) == 10.0
+
+    def test_build_function_hierarchy_skips_phantom_parent_without_timer(self):
+        """Descendants alone should not create a displayed parent node."""
+        all_stats_dict = {
+            "timer_parent": {"total_time": 100.0, "call_count": 1},
+            "timer_child": {"total_time": 20.0, "call_count": 1},
+        }
+        timer_db = {
+            "timer_parent": Mock(function="parent", timer_type="function"),
+            "timer_child": Mock(function="child", timer_type="function"),
+        }
+        nesting_db = {
+            "parent": {"nested_functions": ["missing_mid"]},
+            "missing_mid": {"nested_functions": ["child"]},
+            "child": {"nested_functions": []},
+        }
+
+        result = build_function_hierarchy(
+            "parent", all_stats_dict, timer_db, nesting_db
+        )
+
+        assert "missing_mid" not in result["nested_functions"]
+
 
 class TestRunSwiftLogTiming:
     """Tests for run_swift_log_timing."""
@@ -580,7 +719,7 @@ class TestAnalyseSwiftLogTimingsWithMocks:
         )
 
         # Verify key functions were called
-        mock_load_db.assert_called_once()
+        mock_load_db.assert_called_once_with(force_regenerate=True)
         mock_compile.assert_called_once()
         mock_load_nesting.assert_called_once()
         mock_scan_log.assert_called_once()
@@ -638,8 +777,102 @@ class TestAnalyseSwiftLogTimingsWithMocks:
         )
 
         # Verify it handled empty data
-        mock_load_db.assert_called_once()
+        mock_load_db.assert_called_once_with(force_regenerate=True)
         mock_scan_log.assert_called_once()
+
+    def test_zoom_space_split_operations_attach_in_hierarchy(self):
+        """Zoom split operation timers should attach under space_split."""
+        timer_db = {
+            "space_split_fn": Mock(
+                function="space_split",
+                timer_type="function",
+                label_text="took %.3f %s.",
+            ),
+            "space_split_zoom": Mock(
+                function="space_split",
+                timer_type="operation",
+                label_text=(
+                    "Zoom cell tree and multipole construction took %.3f %s."
+                ),
+            ),
+            "space_split_bg": Mock(
+                function="space_split",
+                timer_type="operation",
+                label_text=(
+                    "Background cell tree and multipole construction took "
+                    "%.3f %s."
+                ),
+            ),
+        }
+        all_stats = {
+            "space_split_fn": {"total_time": 100.0, "call_count": 1},
+            "space_split_zoom": {"total_time": 60.0, "call_count": 1},
+            "space_split_bg": {"total_time": 40.0, "call_count": 1},
+        }
+        nesting_db = {
+            "space_split": {
+                "nested_functions": [],
+                "nested_operations": [
+                    "Zoom cell tree and multipole construction took %.3f %s.",
+                    "Background cell tree and multipole construction took "
+                    "%.3f %s.",
+                ],
+            }
+        }
+
+        hierarchy = build_function_hierarchy(
+            "space_split", all_stats, timer_db, nesting_db
+        )
+
+        operation_ids = [tid for tid, _ in hierarchy["operations"]]
+        assert operation_ids == ["space_split_zoom", "space_split_bg"]
+
+    @patch("swiftsim_cli.modes.analyse.log_timing.create_output_path")
+    @patch("swiftsim_cli.modes.analyse.log_timing.plt")
+    @patch("swiftsim_cli.modes.analyse.log_timing.classify_timers_by_max_time")
+    @patch("swiftsim_cli.modes.analyse.log_timing.scan_log_instances_by_step")
+    @patch("swiftsim_cli.modes.analyse.log_timing.load_timer_nesting")
+    @patch("swiftsim_cli.modes.analyse.log_timing.compile_site_patterns")
+    @patch("swiftsim_cli.modes.analyse.log_timing.load_timer_db")
+    def test_analysis_refreshes_timer_db_before_nesting_regeneration(
+        self,
+        mock_load_db,
+        mock_compile,
+        mock_load_nesting,
+        mock_scan_log,
+        mock_classify,
+        mock_plt,
+        mock_create_path,
+        tmp_path,
+    ):
+        """Analysis should refresh timer regex metadata alongside nesting."""
+        log_file = tmp_path / "test.log"
+        log_file.write_text("mock log content")
+        mock_create_path.return_value = tmp_path
+
+        timer_db = {
+            "timer1": Mock(function="space_split", timer_type="function")
+        }
+        mock_load_db.return_value = timer_db
+        mock_compile.return_value = []
+        mock_load_nesting.return_value = {}
+        mock_scan_log.return_value = ({}, {})
+        mock_classify.return_value = set()
+
+        analyse_swift_log_timings(
+            log_file=str(log_file),
+            output_path=None,
+            prefix="test",
+            show_plot=False,
+            top_n=10,
+            hierarchy_functions=None,
+        )
+
+        mock_load_db.assert_called_once_with(force_regenerate=True)
+        assert mock_compile.call_args_list[0].args[0] is timer_db
+        mock_load_nesting.assert_called_once_with(
+            auto_generate=True, force_regenerate=True
+        )
 
 
 class TestCreateTimeSeriesPlot:
@@ -789,3 +1022,31 @@ class TestHierarchicalAnalysisDefaults:
 
         output = capsys.readouterr().out
         assert "engine_prepare:" in output
+
+    def test_hierarchical_analysis_prints_context_note(self, capsys):
+        """Hierarchical output should document whole-run attribution."""
+        timer_db = {
+            "timer_parent": Mock(
+                function="engine_prepare",
+                timer_type="function",
+                label_text="took %.3f %s.",
+            )
+        }
+        all_stats = {"timer_parent": {"total_time": 120.0, "call_count": 1}}
+        nesting_db = {
+            "engine_prepare": {
+                "nested_functions": [],
+                "nested_operations": [],
+            }
+        }
+
+        _print_hierarchical_analysis(
+            all_stats=all_stats,
+            timer_db=timer_db,
+            nesting_db=nesting_db,
+            hierarchy_functions=["engine_prepare"],
+            top_n=10,
+        )
+
+        output = capsys.readouterr().out
+        assert "whole-run timer totals" in output

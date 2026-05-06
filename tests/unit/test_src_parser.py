@@ -1,5 +1,6 @@
 """Unit tests for the src_parser module."""
 
+import re
 from pathlib import Path
 from unittest.mock import patch
 
@@ -61,6 +62,12 @@ class TestUtilityFunctions:
         assert "took" in pattern
         assert "test_function" in pattern
         assert "([\\d.]+)" in pattern  # Captures decimal numbers
+
+    def test_build_log_pattern_accepts_variable_width_rank_prefix(self):
+        """Generated log regex should accept non-zero-padded ranks."""
+        _, pattern = _build_log_pattern("space_split", "took %.3f %s")
+
+        assert re.compile(pattern).search("[7] 12.3 space_split: took 4.5 ms.")
 
     def test_extract_function_name_from_header(self):
         """Test function name extraction from C headers."""
@@ -261,6 +268,35 @@ class TestLogScanning:
                 "nonexistent.log", compiled, sample_timer_db
             )
 
+    def test_scan_log_instances_does_not_treat_elapsed_lines_as_steps(
+        self, temp_dir
+    ):
+        """Leading elapsed-time values should not be mistaken for steps."""
+        timer_db = {
+            "test.c:1": TimerDef(
+                timer_id="test.c:1",
+                function="space_split",
+                log_pattern=r"^space_split:\s+took\s+([\d.]+)\s+ms\.\s*$",
+                start_line=1,
+                end_line=1,
+                label_text="took %.3f %s.",
+                timer_type="operation",
+            )
+        }
+        compiled = compile_site_patterns(timer_db)
+        log_file = temp_dir / "elapsed_not_step.log"
+        log_file.write_text(
+            "12.345 unrelated header line\nspace_split: took 4.0 ms.\n",
+            encoding="utf-8",
+        )
+
+        instances_by_step, step_lines = scan_log_instances_by_step(
+            str(log_file), compiled, timer_db
+        )
+
+        assert step_lines == []
+        assert None in instances_by_step
+
 
 class TestTimerNestingGeneration:
     """Test timer nesting generation functionality."""
@@ -299,9 +335,98 @@ class TestTimerNestingGeneration:
         assert generator.src_dir == Path("/fake/src")
         assert len(generator.timer_data) == 1
 
+    @pytest.mark.skipif(
+        not pytest.importorskip(
+            "tree_sitter", reason="tree-sitter not available"
+        ),
+        reason="Requires tree-sitter",
+    )
+    def test_extract_function_calls_handles_parenthesized_identifier(self):
+        """Parenthesized direct callees should still be recognized."""
+        import tree_sitter_c
+        from tree_sitter import Language, Parser
+
+        timer_data = [
+            {
+                "timer_id": "test.c:1",
+                "function": "caller",
+                "timer_type": "function",
+                "file": "test.c",
+            }
+        ]
+        generator = TimerNestingGenerator("/fake/src", timer_data)
+
+        parser = Parser(Language(tree_sitter_c.language()))
+        source_code = b"void caller(void) { (child)(); other(); }"
+        tree = parser.parse(source_code)
+        function_node = tree.root_node.children[0]
+
+        calls = generator._extract_function_calls(function_node, source_code)
+
+        assert "child" in calls
+        assert "other" in calls
+
 
 class TestTimerDatabase:
     """Test timer database loading functionality."""
+
+    def test_load_timer_db_force_regenerate(self, temp_dir):
+        """Forced reload should regenerate timers.yaml from source."""
+        from unittest.mock import Mock, patch
+
+        import yaml
+
+        timer_file = temp_dir / "timers.yaml"
+        timer_file.write_text("timers: []\n")
+
+        regenerated = {
+            "timers": [
+                {
+                    "timer_id": "zoom.c:10",
+                    "function": "space_split",
+                    "log_pattern": r"^.*space_split:.*$",
+                    "start_line": 1,
+                    "end_line": 10,
+                    "label_text": (
+                        "Zoom cell tree and multipole construction took "
+                        "%.3f %s."
+                    ),
+                    "timer_type": "operation",
+                }
+            ]
+        }
+
+        def fake_parse_src_timers(_src_dir):
+            with open(timer_file, "w", encoding="utf-8") as handle:
+                yaml.dump(regenerated, handle)
+            return regenerated
+
+        with patch("swiftsim_cli.src_parser.TIMER_FILE", timer_file), patch(
+            "swiftsim_cli.src_parser.load_swift_profile",
+            return_value=Mock(swiftsim_dir="/fake/swift"),
+        ), patch(
+            "swiftsim_cli.src_parser.parse_src_timers",
+            side_effect=fake_parse_src_timers,
+        ) as mock_parse:
+            timer_db = load_timer_db(force_regenerate=True)
+
+        mock_parse.assert_called_once_with("/fake/swift")
+        assert "zoom.c:10" in timer_db
+
+    def test_load_timer_db_force_regenerate_requires_swiftsim_dir(
+        self, temp_dir
+    ):
+        """Forced regeneration should fail clearly without a SWIFT path."""
+        from unittest.mock import Mock, patch
+
+        timer_file = temp_dir / "missing.yaml"
+
+        with patch("swiftsim_cli.src_parser.TIMER_FILE", timer_file), patch(
+            "swiftsim_cli.src_parser.load_swift_profile",
+            return_value=Mock(swiftsim_dir=None),
+        ):
+            with pytest.raises(ValueError, match="swiftsim_dir"):
+                load_timer_db(force_regenerate=True)
 
     def test_load_timer_db_with_existing_file(self, temp_dir, sample_timer_db):
         """Test loading timer database when file exists."""

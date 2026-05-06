@@ -96,7 +96,7 @@ def add_log_arguments(subparsers) -> None:
         nargs="*",
         help="Functions to show hierarchical timing for. If not specified, "
         "shows default important functions: engine_prepare, "
-        "engine_rebuild, space_rebuild, space_split, and "
+        "engine_rebuild, space_rebuild, and "
         "engine_maketasks. Use 'all' to show all functions with "
         "hierarchy data, or specify individual function names.",
         default=None,
@@ -1211,16 +1211,12 @@ def get_nested_timers_for_function(
                 # Check if this operation timer's description matches any
                 # in the nesting DB
                 timer_desc = timer_db_dict[tid].label_text
+                actual_desc = _normalize_timer_description(timer_desc)
                 for nested_op_pattern in nested_operations:
-                    # Remove the format specifiers to match descriptions
-                    expected_desc = (
-                        nested_op_pattern.replace("%.3f %s.", "")
-                        .replace("%.3f %s", "")
-                        .strip()
+                    expected_desc = _normalize_timer_description(
+                        nested_op_pattern
                     )
-                    if expected_desc in timer_desc or timer_desc.startswith(
-                        expected_desc
-                    ):
+                    if actual_desc == expected_desc:
                         nested_timers.append((tid, stats))
                         break
 
@@ -1265,7 +1261,8 @@ def build_function_hierarchy(
     if func_name in visited:
         return {"function": None, "operations": [], "nested_functions": {}}
 
-    visited.add(func_name)
+    path = set(visited)
+    path.add(func_name)
 
     hierarchy = {
         "function": None,
@@ -1302,20 +1299,18 @@ def build_function_hierarchy(
                 and timer_db_dict[tid].timer_type == "operation"
             ):
                 timer_desc = timer_db_dict[tid].label_text
+                actual_desc = _normalize_timer_description(timer_desc)
                 for nested_op_pattern in nested_operations:
-                    expected_desc = (
-                        nested_op_pattern.replace("%.3f %s.", "")
-                        .replace("%.3f %s", "")
-                        .strip()
+                    expected_desc = _normalize_timer_description(
+                        nested_op_pattern
                     )
-                    if expected_desc in timer_desc or timer_desc.startswith(
-                        expected_desc
-                    ):
+                    if actual_desc == expected_desc:
                         hierarchy["operations"].append((tid, stats))
                         break
 
-        # Build nested function hierarchies (using shared visited set to
-        # prevent duplication)
+        # Build nested function hierarchies while only guarding against cycles
+        # on the current call path, so repeated callees can still appear in
+        # separate branches.
         nested_functions = nesting_db_dict[func_name].get(
             "nested_functions", []
         )
@@ -1325,18 +1320,61 @@ def build_function_hierarchy(
                 all_stats_dict,
                 timer_db_dict,
                 nesting_db_dict,
-                visited,
+                path,
             )
-            if (
-                nested_hierarchy["function"]
-                or nested_hierarchy["operations"]
-                or nested_hierarchy["nested_functions"]
-            ):
+            if _hierarchy_has_direct_evidence(nested_hierarchy):
                 hierarchy["nested_functions"][nested_func_name] = (
                     nested_hierarchy
                 )
 
     return hierarchy
+
+
+def _hierarchy_has_direct_evidence(hierarchy: dict) -> bool:
+    """Return whether a hierarchy node has direct timer evidence."""
+    return bool(hierarchy["function"] or hierarchy["operations"])
+
+
+def _normalize_timer_description(description: str) -> str:
+    """Normalize timer descriptions for exact hierarchy matching."""
+    cleaned = description.replace("%.3f %s.", "")
+    cleaned = cleaned.replace("%.3f %s", "")
+    cleaned = cleaned.replace("%f %s.", "")
+    cleaned = cleaned.replace("%f %s", "")
+    cleaned = cleaned.replace("%f ms.", "")
+    cleaned = cleaned.replace("%f ms", "")
+    cleaned = re.sub(r"\s+", " ", cleaned)
+    return cleaned.strip(" .:;,-()")
+
+
+def _hierarchy_corrected_total(hierarchy: dict) -> float:
+    """Compute the corrected total for one hierarchy node recursively."""
+    explicit_function_timer_time = 0.0
+    if hierarchy["function"]:
+        _, func_stats = hierarchy["function"]
+        explicit_function_timer_time = func_stats["total_time"]
+
+    nested_sum = sum(
+        stats["total_time"] for _, stats in hierarchy["operations"]
+    )
+    nested_sum += sum(
+        _hierarchy_corrected_total(nested_hierarchy)
+        for nested_hierarchy in hierarchy["nested_functions"].values()
+    )
+
+    return max(explicit_function_timer_time, nested_sum)
+
+
+def _hierarchy_direct_accounted_time(hierarchy: dict) -> float:
+    """Compute the direct accounted time for one hierarchy node."""
+    direct_operations = sum(
+        stats["total_time"] for _, stats in hierarchy["operations"]
+    )
+    direct_nested_functions = sum(
+        _hierarchy_corrected_total(nested_hierarchy)
+        for nested_hierarchy in hierarchy["nested_functions"].values()
+    )
+    return direct_operations + direct_nested_functions
 
 
 def add_hierarchical_rows(
@@ -1388,9 +1426,10 @@ def add_hierarchical_rows(
     for nested_func_name, nested_hierarchy in hierarchy[
         "nested_functions"
     ].items():
+        corrected_total = _hierarchy_corrected_total(nested_hierarchy)
         if nested_hierarchy["function"]:
             _, func_stats = nested_hierarchy["function"]
-            total_time = func_stats["total_time"]
+            total_time = corrected_total
             calls = func_stats["call_count"]
             pct_of_func = (
                 (100 * total_time / function_timer_time)
@@ -1419,11 +1458,7 @@ def add_hierarchical_rows(
         else:
             # If no function timer, but we have operations, create a
             # synthetic function entry
-            if nested_hierarchy["operations"]:
-                total_ops_time = sum(
-                    stats["total_time"]
-                    for _, stats in nested_hierarchy["operations"]
-                )
+            if corrected_total > 0.0:
                 # Use the call count from the first operation as an
                 # approximation
                 calls = (
@@ -1432,7 +1467,7 @@ def add_hierarchical_rows(
                     else 1
                 )
                 pct_of_func = (
-                    (100 * total_ops_time / function_timer_time)
+                    (100 * corrected_total / function_timer_time)
                     if function_timer_time > 0
                     else 0.0
                 )
@@ -1444,14 +1479,14 @@ def add_hierarchical_rows(
                 row = [
                     description[:60]
                     + ("..." if len(description) > 60 else ""),
-                    f"{total_ops_time:.1f}",
+                    f"{corrected_total:.1f}",
                     f"{pct_of_func:.1f}%",
                     f"{calls}",
-                    f"{(total_ops_time / calls if calls > 0 else 0):.2f}",
+                    f"{(corrected_total / calls if calls > 0 else 0):.2f}",
                 ]
                 all_items.append(
                     (
-                        total_ops_time,
+                        corrected_total,
                         "function",
                         row,
                         nested_func_name,
@@ -1464,24 +1499,7 @@ def add_hierarchical_rows(
 
     # Calculate unaccounted time (only for top level, when indent is "")
     if indent == "":
-        # Sum up only direct children (level 1) - operations from this
-        # function plus nested functions
-        # This avoids double-counting since nested functions already
-        # include their own operations
-        accounted_time = 0.0
-
-        # Add direct operations from this function level
-        for tid, stats in hierarchy["operations"]:
-            accounted_time += stats["total_time"]
-
-        # Add direct nested functions (they already include their own
-        # nested content)
-        for nested_func_name, nested_hierarchy in hierarchy[
-            "nested_functions"
-        ].items():
-            if nested_hierarchy["function"]:
-                _, func_stats = nested_hierarchy["function"]
-                accounted_time += func_stats["total_time"]
+        accounted_time = _hierarchy_direct_accounted_time(hierarchy)
 
         # Calculate unaccounted time as the difference between total
         # function time and the sum of direct children
@@ -1510,7 +1528,6 @@ def add_hierarchical_rows(
                     None,
                 )
             )
-
     # Sort all items by time descending
     all_items.sort(key=lambda x: x[0], reverse=True)
 
@@ -1597,8 +1614,9 @@ def analyse_swift_log_timings(
     )
 
     print("Loading timer database and compiling patterns...")
-    # Load DB + compile patterns
-    timer_db = load_timer_db()
+    # Regenerate both timer definitions and nesting relationships from the
+    # current SWIFT source so regexes and hierarchy metadata stay in sync.
+    timer_db = load_timer_db(force_regenerate=True)
     compiled = compile_site_patterns(timer_db)
     nesting_db = load_timer_nesting(auto_generate=True, force_regenerate=True)
     print(
@@ -1999,6 +2017,11 @@ def _print_hierarchical_analysis(
     print("\n" + "=" * 100)
     print("TIMERS BY FUNCTION (using nesting relationships)")
     print("=" * 100)
+    print(
+        "Note: nested rows are attributed using source-derived call "
+        "relationships and whole-run timer totals; they are not call-context "
+        "exclusive timings."
+    )
 
     # Calculate total time per function including only nested timers
     func_totals = {}
@@ -2033,7 +2056,6 @@ def _print_hierarchical_analysis(
             "engine_prepare",
             "engine_rebuild",
             "space_rebuild",
-            "space_split",
             "engine_maketasks",
         ]
         functions_to_show = [
@@ -2091,23 +2113,7 @@ def _print_hierarchical_analysis(
 
         # Calculate function timer time using the rule:
         # function_timer = max(explicit_function_timer, sum_of_nested_timers)
-        explicit_function_timer_time = 0.0
-        if hierarchy["function"]:
-            _, func_stats = hierarchy["function"]
-            explicit_function_timer_time = func_stats["total_time"]
-
-        # Calculate sum of all nested timers (operations + nested functions)
-        nested_sum = 0.0
-        for _, stats in hierarchy["operations"]:
-            nested_sum += stats["total_time"]
-
-        for nested_func_hierarchy in hierarchy["nested_functions"].values():
-            if nested_func_hierarchy["function"]:
-                _, nested_func_stats = nested_func_hierarchy["function"]
-                nested_sum += nested_func_stats["total_time"]
-
-        # Apply the rule: function timer = max(explicit, sum_of_nested)
-        function_timer_time = max(explicit_function_timer_time, nested_sum)
+        function_timer_time = _hierarchy_corrected_total(hierarchy)
 
         if function_timer_time == 0.0:
             continue  # Skip if no timer data found
