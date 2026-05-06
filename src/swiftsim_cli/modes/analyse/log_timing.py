@@ -95,9 +95,10 @@ def add_log_arguments(subparsers) -> None:
         "--hierarchy-functions",
         nargs="*",
         help="Functions to show hierarchical timing for. If not specified, "
-        "shows default important functions: engine_rebuild, space_rebuild, "
-        "and engine_maketasks. Use 'all' to show all functions "
-        "with hierarchy data, or specify individual function names.",
+        "shows default important functions: engine_prepare, "
+        "engine_rebuild, space_rebuild, space_split, and "
+        "engine_maketasks. Use 'all' to show all functions with "
+        "hierarchy data, or specify individual function names.",
         default=None,
     )
 
@@ -931,8 +932,6 @@ def create_time_series_plot(
     if len(steps_with_data) <= 1 or not function_stats:
         return None
 
-    fig, ax = plt.subplots(figsize=(14, 8))
-
     # Get top 8 functions by total time for time series
     top_functions = sorted(
         function_stats.items(),
@@ -940,9 +939,25 @@ def create_time_series_plot(
         reverse=True,
     )[:8]
 
+    panel_count = len(top_functions)
+    if panel_count == 0:
+        return None
+
+    fig_height = max(3.0 * panel_count + 1.5, 6.0)
+    fig, axes = plt.subplots(
+        panel_count,
+        1,
+        figsize=(14, fig_height),
+        sharex=True,
+        squeeze=False,
+    )
+    axes_list = [axis for axis in axes.flat]
+
     colors = plt.cm.Set1(np.linspace(0, 1, len(top_functions)))
 
-    for i, (tid, stats) in enumerate(top_functions):
+    for i, ((tid, stats), ax) in enumerate(
+        zip(top_functions, axes_list, strict=False)
+    ):
         # Collect execution times per step for this function
         step_times = []
         step_numbers = []
@@ -964,37 +979,36 @@ def create_time_series_plot(
         else:
             clean_name = "Unknown Function"
 
-        # Plot the time series
+        # Plot one function per panel so the step evolution stays readable.
         ax.plot(
             step_numbers,
             step_times,
             "o-",
             color=colors[i],
             linewidth=2,
-            markersize=6,
+            markersize=4,
             alpha=0.8,
-            label=clean_name,
         )
+        ax.set_ylabel("Time (ms)", fontsize=11)
+        ax.set_title(clean_name, fontsize=12, loc="left", pad=8)
+        ax.grid(True, alpha=0.3, linestyle="--")
+        ax.set_yscale(
+            "log"
+        )  # Log scale for better visibility of different magnitudes
 
-    ax.set_xlabel("Simulation Step", fontsize=12)
-    ax.set_ylabel("Execution Time (ms)", fontsize=12)
-    ax.set_title(
+        # Remove top and right spines
+        ax.spines["top"].set_visible(False)
+        ax.spines["right"].set_visible(False)
+
+    fig.suptitle(
         "Function Execution Times Over Simulation Steps",
         fontsize=16,
         fontweight="bold",
-        pad=20,
+        y=0.995,
     )
-    ax.legend(bbox_to_anchor=(1.05, 1), loc="upper left", fontsize=10)
-    ax.grid(True, alpha=0.3, linestyle="--")
-    ax.set_yscale(
-        "log"
-    )  # Log scale for better visibility of different magnitudes
+    axes_list[-1].set_xlabel("Simulation Step", fontsize=12)
 
-    # Remove top and right spines
-    ax.spines["top"].set_visible(False)
-    ax.spines["right"].set_visible(False)
-
-    plt.tight_layout()
+    plt.tight_layout(rect=(0, 0, 1, 0.98))
     p = create_output_path(output_path, prefix, "07_time_series.png", out_dir)
     plt.savefig(p, dpi=300, bbox_inches="tight")
     if show_plot:
@@ -2016,6 +2030,7 @@ def _print_hierarchical_analysis(
     if hierarchy_functions is None:
         # Default to showing a few key functions that are typically important
         default_functions = [
+            "engine_prepare",
             "engine_rebuild",
             "space_rebuild",
             "space_split",

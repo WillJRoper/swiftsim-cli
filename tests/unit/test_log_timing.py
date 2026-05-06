@@ -3,14 +3,17 @@
 from pathlib import Path
 from unittest.mock import Mock, patch
 
+import matplotlib.pyplot as plt
 import pytest
 
 from swiftsim_cli.modes.analyse.log_timing import (
+    _print_hierarchical_analysis,
     add_log_arguments,
     analyse_swift_log_timings,
     build_function_hierarchy,
     build_stats,
     classify_timers_by_max_time,
+    create_time_series_plot,
     display_name,
     get_nested_timers_for_function,
     load_timer_nesting,
@@ -637,3 +640,152 @@ class TestAnalyseSwiftLogTimingsWithMocks:
         # Verify it handled empty data
         mock_load_db.assert_called_once()
         mock_scan_log.assert_called_once()
+
+
+class TestCreateTimeSeriesPlot:
+    """Tests for the time series plotting helper."""
+
+    @patch("swiftsim_cli.modes.analyse.log_timing.create_output_path")
+    @patch("swiftsim_cli.modes.analyse.log_timing.plt.savefig")
+    @patch("swiftsim_cli.modes.analyse.log_timing.plt.close")
+    @patch("swiftsim_cli.modes.analyse.log_timing.plt.show")
+    def test_create_time_series_plot_uses_stacked_subplots(
+        self,
+        mock_show,
+        mock_close,
+        mock_savefig,
+        mock_create_output_path,
+        tmp_path,
+    ):
+        """Top functions are rendered as one shared-x subplot per function."""
+        mock_create_output_path.return_value = tmp_path / "07_time_series.png"
+
+        timer_db = {
+            "timer_a": Mock(function="engine_prepare"),
+            "timer_b": Mock(function="engine_rebuild"),
+            "timer_c": Mock(function="engine_launch"),
+        }
+        function_stats = {
+            "timer_a": {"total_time": 30.0},
+            "timer_b": {"total_time": 20.0},
+            "timer_c": {"total_time": 10.0},
+        }
+
+        def make_instance(timer_id: str, time_ms: float) -> Mock:
+            inst = Mock()
+            inst.timer_id = timer_id
+            inst.time_ms = time_ms
+            return inst
+
+        instances_by_step = {
+            1: [
+                make_instance("timer_a", 10.0),
+                make_instance("timer_b", 7.0),
+                make_instance("timer_c", 3.0),
+            ],
+            2: [
+                make_instance("timer_a", 11.0),
+                make_instance("timer_b", 6.0),
+                make_instance("timer_c", 4.0),
+            ],
+            3: [
+                make_instance("timer_a", 9.0),
+                make_instance("timer_b", 7.0),
+                make_instance("timer_c", 3.0),
+            ],
+        }
+
+        output = create_time_series_plot(
+            instances_by_step=instances_by_step,
+            function_stats=function_stats,
+            timer_db=timer_db,
+            output_path=None,
+            prefix=None,
+            show_plot=False,
+            out_dir="analysis",
+        )
+
+        assert output == tmp_path / "07_time_series.png"
+        mock_savefig.assert_called_once()
+        mock_show.assert_not_called()
+        mock_close.assert_called_once()
+
+        figure = plt.gcf()
+        assert len(figure.axes) == 3
+        assert figure.get_size_inches()[1] == pytest.approx(10.5)
+
+
+class TestHierarchicalAnalysisDefaults:
+    """Tests for default hierarchical function selection."""
+
+    def test_default_hierarchy_includes_engine_prepare(self, capsys):
+        """Default hierarchical output should include engine_prepare."""
+        timer_db = {
+            "timer_prepare": Mock(
+                function="engine_prepare", timer_type="function"
+            ),
+            "timer_rebuild": Mock(
+                function="engine_rebuild", timer_type="function"
+            ),
+            "timer_space": Mock(
+                function="space_rebuild", timer_type="function"
+            ),
+            "timer_split": Mock(function="space_split", timer_type="function"),
+            "timer_tasks": Mock(
+                function="engine_maketasks", timer_type="function"
+            ),
+        }
+        all_stats = {
+            "timer_prepare": {
+                "total_time": 500.0,
+                "call_count": 5,
+                "mean_time": 100.0,
+            },
+            "timer_rebuild": {
+                "total_time": 400.0,
+                "call_count": 4,
+                "mean_time": 100.0,
+            },
+            "timer_space": {
+                "total_time": 300.0,
+                "call_count": 3,
+                "mean_time": 100.0,
+            },
+            "timer_split": {
+                "total_time": 200.0,
+                "call_count": 2,
+                "mean_time": 100.0,
+            },
+            "timer_tasks": {
+                "total_time": 100.0,
+                "call_count": 1,
+                "mean_time": 100.0,
+            },
+        }
+        nesting_db = {
+            "engine_prepare": {
+                "nested_functions": [],
+                "nested_operations": [],
+            },
+            "engine_rebuild": {
+                "nested_functions": [],
+                "nested_operations": [],
+            },
+            "space_rebuild": {"nested_functions": [], "nested_operations": []},
+            "space_split": {"nested_functions": [], "nested_operations": []},
+            "engine_maketasks": {
+                "nested_functions": [],
+                "nested_operations": [],
+            },
+        }
+
+        _print_hierarchical_analysis(
+            all_stats=all_stats,
+            timer_db=timer_db,
+            nesting_db=nesting_db,
+            hierarchy_functions=None,
+            top_n=20,
+        )
+
+        output = capsys.readouterr().out
+        assert "engine_prepare:" in output

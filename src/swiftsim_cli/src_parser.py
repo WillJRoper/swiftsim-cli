@@ -139,6 +139,7 @@ class TimerInstance:
         time_ms: Time printed on the line (milliseconds).
         line_index: Line index in the log file (0-based), used for ordering.
         timer_type: 'function' or 'operation' (from DB).
+        rank: MPI rank that emitted the line. Defaults to 0.
     """
 
     timer_id: str
@@ -147,6 +148,7 @@ class TimerInstance:
     time_ms: float
     line_index: int
     timer_type: str
+    rank: int = 0
 
 
 # =============================================================================
@@ -763,6 +765,7 @@ def scan_log_instances_by_step(
 
     # Pre-compile a check for "took" to quickly skip irrelevant lines
     took_pattern = re.compile(r"\btook\s+[\d.]+\s+ms")
+    rank_prefix = re.compile(r"^\[(?P<rank>\d+)\]\s+")
 
     current_step = None  # Track the current step for timer association
 
@@ -782,6 +785,9 @@ def scan_log_instances_by_step(
             if not took_pattern.search(line):
                 continue
 
+            rank_match = rank_prefix.match(line)
+            rank = int(rank_match.group("rank")) if rank_match else 0
+
             # Now test against all compiled patterns
             for tid, creg in compiled:
                 m = creg.search(line)
@@ -800,6 +806,7 @@ def scan_log_instances_by_step(
                         time_ms=val_ms,
                         line_index=idx,
                         timer_type=timer_db[tid].timer_type,
+                        rank=rank,
                     )
                 )
                 break  # one site per line

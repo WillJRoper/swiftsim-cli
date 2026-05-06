@@ -70,6 +70,16 @@ class TestAnalyseMode:
 
         mock_run_swift_task_counts.assert_called_once_with(args)
 
+    @patch("swiftsim_cli.modes.analyse.run_swift_scaling")
+    def test_run_scaling(self, mock_run_swift_scaling):
+        """Test running scaling analysis."""
+        args = Mock()
+        args.analysis_type = "scaling"
+
+        run(args)
+
+        mock_run_swift_scaling.assert_called_once_with(args)
+
     def test_run_unknown_type(self):
         """Test running with unknown analysis type."""
         args = Mock()
