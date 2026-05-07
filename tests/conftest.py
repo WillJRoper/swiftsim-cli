@@ -52,6 +52,15 @@ def sample_timer_db() -> Dict[str, TimerDef]:
             label_text="took %.3f %s.",
             timer_type="function",
         ),
+        "engine_launch.c:50|(tasks)": TimerDef(
+            timer_id="engine_launch.c:50|(tasks)",
+            function="engine_launch",
+            log_pattern=r"^.*engine_launch:\s+took\s+([\d.]+)\s+ms",
+            start_line=45,
+            end_line=50,
+            label_text="(tasks) took %.3f %s.",
+            timer_type="operation",
+        ),
     }
 
 
@@ -72,7 +81,7 @@ def sample_nesting_db() -> Dict:
         "engine_launch": {
             "function_timer": "took %.3f %s.",
             "file": "engine_launch.c",
-            "nested_operations": [],
+            "nested_operations": ["(tasks) took %.3f %s."],
             "nested_functions": ["space_split"],
         },
     }
@@ -107,6 +116,14 @@ def sample_timer_instances() -> Dict[int, List[TimerInstance]]:
                 line_index=50,
                 timer_type="function",
             ),
+            TimerInstance(
+                timer_id="engine_launch.c:50|(tasks)",
+                function="engine_launch",
+                step=0,
+                time_ms=9.54,
+                line_index=51,
+                timer_type="operation",
+            ),
         ]
     }
 
@@ -119,6 +136,7 @@ def sample_log_content() -> str:
         "took 609.098 ms."
         "[00009.1] space_split: Background cell tree and multipole "
         "construction took 15.180 ms."
+        "[00009.9] engine_launch: (tasks) took 9.540 ms."
         "[00010.0] engine_launch: took 800.000 ms."
     )
 

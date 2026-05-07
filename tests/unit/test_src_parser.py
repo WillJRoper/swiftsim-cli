@@ -12,10 +12,14 @@ from swiftsim_cli.src_parser import (
     TimerNestingGenerator,
     TimerSite,
     _build_log_pattern,
+    _build_runtime_variant_timer,
     _classify_timer_type,
+    _compile_timer_pattern,
     _extract_function_name_from_header,
+    _extract_runtime_timer_prefix,
     _printf_to_regex,
     _scan_balanced_call,
+    _timer_label_has_static_prefix,
     _unescape_minimal,
     compile_site_patterns,
     load_timer_db,
@@ -68,6 +72,70 @@ class TestUtilityFunctions:
         _, pattern = _build_log_pattern("space_split", "took %.3f %s")
 
         assert re.compile(pattern).search("[7] 12.3 space_split: took 4.5 ms.")
+
+    def test_extract_runtime_timer_prefix(self):
+        """Runtime-specific prefixes should be extracted from timer lines."""
+        assert (
+            _extract_runtime_timer_prefix(
+                "[0000] [03573.7] engine_launch: (tasks) took 9.540 ms.",
+                "engine_launch",
+            )
+            == "(tasks)"
+        )
+        assert (
+            _extract_runtime_timer_prefix(
+                "[0000] [03573.8] engine_launch: took 28.111 ms.",
+                "engine_launch",
+            )
+            is None
+        )
+
+    def test_timer_label_has_static_prefix(self):
+        """Static descriptions should be distinguished from generic timers."""
+        assert not _timer_label_has_static_prefix("took %.3f %s.")
+        assert _timer_label_has_static_prefix(
+            "Background cell tree took %.3f %s."
+        )
+
+    def test_build_runtime_variant_timer(self):
+        """Runtime timer variants inherit the base timer metadata."""
+        base_timer = TimerDef(
+            timer_id="engine_launch.c:50",
+            function="engine_launch",
+            log_pattern=r"^.*engine_launch:\s+took\s+([\d.]+)\s+ms",
+            start_line=45,
+            end_line=50,
+            label_text="took %.3f %s.",
+            timer_type="function",
+        )
+
+        variant_id, variant = _build_runtime_variant_timer(
+            base_timer, "(tasks)"
+        )
+
+        assert variant_id == "engine_launch.c:50|(tasks)"
+        assert variant.timer_id == variant_id
+        assert variant.function == "engine_launch"
+        assert variant.label_text == "(tasks) took %.3f %s."
+
+    def test_compile_timer_pattern_broadens_generic_timer_labels(self):
+        """Generic timers should accept runtime prefixes at match time."""
+        generic_timer = TimerDef(
+            timer_id="engine_launch.c:50",
+            function="engine_launch",
+            log_pattern=r"^(?:\[\d+\]\s+)?\S+\s+engine_launch:\s+"
+            r"took\s+([\d.]+)\s+ms\.?\s*$",
+            start_line=45,
+            end_line=50,
+            label_text="took %.3f %s.",
+            timer_type="function",
+        )
+
+        compiled = _compile_timer_pattern(generic_timer)
+
+        assert compiled.search(
+            "[0000] [03573.8] engine_launch: (tend) took 28.111 ms."
+        )
 
     def test_extract_function_name_from_header(self):
         """Test function name extraction from C headers."""
@@ -296,6 +364,56 @@ class TestLogScanning:
 
         assert step_lines == []
         assert None in instances_by_step
+
+    def test_scan_log_instances_splits_runtime_timer_variants(
+        self, temp_dir, sample_timer_db
+    ):
+        """Runtime timer variants should get distinct timer IDs."""
+        log_file = temp_dir / "engine_launch_variants.log"
+        log_file.write_text(
+            "[0000] [03573.7] engine_launch: (tasks) took 9.540 ms.\n"
+            "[0000] [03573.8] engine_launch: (tend) took 28.111 ms.\n"
+            "[0000] [03573.9] engine_launch: took 100.000 ms.\n",
+            encoding="utf-8",
+        )
+
+        timer_db = {
+            "engine_launch.c:50": TimerDef(
+                timer_id="engine_launch.c:50",
+                function="engine_launch",
+                log_pattern=r"^(?:\[\d+\]\s+)?\S+\s+engine_launch:\s+"
+                r"took\s+([\d.]+)\s+ms\.?\s*$",
+                start_line=45,
+                end_line=50,
+                label_text="took %.3f %s.",
+                timer_type="function",
+            ),
+            "engine_launch_tasks.c:51": TimerDef(
+                timer_id="engine_launch_tasks.c:51",
+                function="engine_launch",
+                log_pattern=r"^(?:\[\d+\]\s+)?\S+\s+engine_launch:\s+"
+                r"\(tasks\)\s+took\s+([\d.]+)\s+ms\.?\s*$",
+                start_line=45,
+                end_line=51,
+                label_text="(tasks) took %.3f %s.",
+                timer_type="operation",
+            ),
+        }
+        compiled = compile_site_patterns(timer_db)
+
+        instances_by_step, _ = scan_log_instances_by_step(
+            str(log_file), compiled, timer_db
+        )
+
+        instances = instances_by_step[None]
+        assert [inst.timer_id for inst in instances] == [
+            "engine_launch_tasks.c:51",
+            "engine_launch.c:50|(tend)",
+            "engine_launch.c:50",
+        ]
+        assert timer_db["engine_launch.c:50|(tend)"].label_text == (
+            "(tend) took %.3f %s."
+        )
 
 
 class TestTimerNestingGeneration:

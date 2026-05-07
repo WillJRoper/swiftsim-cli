@@ -111,6 +111,17 @@ class TestDisplayName:
         assert "my_function" in name
         assert "timer_foo" in name
 
+    def test_display_name_with_runtime_variant(self):
+        """Runtime-derived timer variants should keep the variant label."""
+        mock_timer_def = Mock()
+        mock_timer_def.function = "engine_launch"
+
+        timer_db = {"engine_launch.c:50|(tasks)": mock_timer_def}
+
+        name = display_name("engine_launch.c:50|(tasks)", timer_db)
+        assert "engine_launch" in name
+        assert "(tasks)" in name
+
     def test_display_name_synthetic(self):
         """Test display_name with synthetic timer."""
         timer_db = {}

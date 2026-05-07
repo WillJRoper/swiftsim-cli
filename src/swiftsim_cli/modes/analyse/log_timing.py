@@ -269,6 +269,9 @@ def display_name(tid: str, timer_db: Dict) -> str:
         func_name = tid[10:]  # Remove "SYNTHETIC:" prefix
         return f"{func_name} [SYNTHETIC:sum_of_operations]"
     td = timer_db[tid]
+    if "|" in tid:
+        _, runtime_variant = tid.split("|", 1)
+        return f"{td.function} {runtime_variant} [{tid}]"
     return f"{td.function} [{tid}]"
 
 

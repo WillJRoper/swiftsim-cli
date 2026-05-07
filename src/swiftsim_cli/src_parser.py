@@ -264,6 +264,60 @@ def _build_log_pattern(function: str, fmt_text: str) -> Tuple[str, str]:
     return label, pattern
 
 
+def _timer_label_has_static_prefix(label_text: str) -> bool:
+    """Return whether a timer label already encodes a fixed description."""
+    prefix = label_text.split("took", 1)[0]
+    prefix = _PRINTF_SPEC.sub("", prefix)
+    prefix = re.sub(r"[^A-Za-z0-9]+", "", prefix)
+    return bool(prefix)
+
+
+def _extract_runtime_timer_prefix(line: str, function: str) -> Optional[str]:
+    """Extract runtime text between ``function:`` and ``took`` if present."""
+    pattern = re.compile(
+        r"^(?:\[\d+\]\s+)?\S+\s+"
+        + re.escape(function)
+        + r":\s+(?P<prefix>.*?)took\s+[\d.]+\s+ms\.?\s*$"
+    )
+    match = pattern.match(line)
+    if not match:
+        return None
+
+    prefix = " ".join(match.group("prefix").split()).strip()
+    return prefix or None
+
+
+def _build_runtime_variant_timer(
+    base_timer: TimerDef, runtime_prefix: str
+) -> Tuple[str, TimerDef]:
+    """Create a timer definition for a runtime-specific variant."""
+    timer_id = f"{base_timer.timer_id}|{runtime_prefix}"
+    label_text = f"{runtime_prefix} took %.3f %s."
+    return timer_id, TimerDef(
+        timer_id=timer_id,
+        function=base_timer.function,
+        log_pattern=base_timer.log_pattern,
+        start_line=base_timer.start_line,
+        end_line=base_timer.end_line,
+        label_text=label_text,
+        timer_type=base_timer.timer_type,
+    )
+
+
+def _compile_timer_pattern(timer_def: TimerDef) -> re.Pattern:
+    """Compile one timer regex, broadening generic timers at runtime."""
+    pattern_text = timer_def.log_pattern
+    if not _timer_label_has_static_prefix(timer_def.label_text):
+        function_prefix = re.escape(timer_def.function) + r":\s+took"
+        broadened_prefix = (
+            re.escape(timer_def.function) + r":\s+(?:.*?\s+)?took"
+        )
+        pattern_text = pattern_text.replace(
+            function_prefix, broadened_prefix, 1
+        )
+    return re.compile(pattern_text)
+
+
 def _extract_function_name_from_header(header: str) -> Optional[str]:
     """Best-effort function-name extraction: last identifier before first '('.
 
@@ -738,9 +792,16 @@ def compile_site_patterns(
             corrupted timer database requiring regeneration from source.
     """
     out: List[Tuple[str, re.Pattern]] = []
-    for tid, td in timer_db.items():
+    sorted_items = sorted(
+        timer_db.items(),
+        key=lambda item: (
+            not _timer_label_has_static_prefix(item[1].label_text),
+            item[1].end_line,
+        ),
+    )
+    for tid, td in sorted_items:
         try:
-            out.append((tid, re.compile(td.log_pattern)))
+            out.append((tid, _compile_timer_pattern(td)))
         except re.error as e:
             raise ValueError(
                 f"Invalid regex pattern for timer '{tid}': {e}\n"
@@ -815,14 +876,28 @@ def scan_log_instances_by_step(
                 except Exception:
                     break
 
+                resolved_tid = tid
+                timer_def = timer_db[tid]
+                if not _timer_label_has_static_prefix(timer_def.label_text):
+                    runtime_prefix = _extract_runtime_timer_prefix(
+                        line, timer_def.function
+                    )
+                    if runtime_prefix is not None:
+                        resolved_tid, runtime_timer = (
+                            _build_runtime_variant_timer(
+                                timer_def, runtime_prefix
+                            )
+                        )
+                        timer_db.setdefault(resolved_tid, runtime_timer)
+
                 instances_by_step.setdefault(current_step, []).append(
                     TimerInstance(
-                        timer_id=tid,
-                        function=timer_db[tid].function,
+                        timer_id=resolved_tid,
+                        function=timer_db[resolved_tid].function,
                         step=current_step,
                         time_ms=val_ms,
                         line_index=idx,
-                        timer_type=timer_db[tid].timer_type,
+                        timer_type=timer_db[resolved_tid].timer_type,
                         rank=rank,
                     )
                 )
