@@ -11,6 +11,8 @@ Key functions:
 
 import argparse
 import math
+import re
+from typing import Any
 
 import matplotlib.cm as cm
 import matplotlib.pyplot as plt
@@ -25,6 +27,28 @@ except (AttributeError, ValueError):
     tab10 = cm.get_cmap("Set1")
 
 from swiftsim_cli.utilities import create_output_path
+
+_TIMESTEP_HEADER_LABELS = [
+    "Step",
+    "Time",
+    "Scale-factor",
+    "Redshift",
+    "Time-step",
+    "Time-bins",
+    "Updates",
+    "g-Updates",
+    "s-Updates",
+    "sink-Updates",
+    "b-Updates",
+    "Wall-clock time [ms]",
+    "Props",
+    "Dead time [ms]",
+]
+
+_TIMESTEP_LABEL_ALIASES = {
+    "Time": "Time [Internal Units]",
+    "Scale-factor": "Scale factor",
+}
 
 
 def add_timestep_arguments(subparsers) -> None:
@@ -53,7 +77,7 @@ def add_timestep_arguments(subparsers) -> None:
         "--time-column",
         help=(
             "Zero-based column index to use for the x-axis. "
-            "Use 1 for scale factor, 2 for internal time."
+            "Use 1 for internal time, 2 for scale factor."
         ),
         type=int,
         default=2,
@@ -82,6 +106,13 @@ def add_timestep_arguments(subparsers) -> None:
         default=False,
     )
 
+    timestep_parser.add_argument(
+        "--match-runtimes",
+        help=("Trim each input to the x-axis extent of the shortest dataset."),
+        action="store_true",
+        default=False,
+    )
+
 
 def run_timestep(args: argparse.Namespace) -> None:
     """Run timestep analysis."""
@@ -92,17 +123,63 @@ def run_timestep(args: argparse.Namespace) -> None:
         prefix=args.prefix,
         show_plot=args.show_plot,
         time_column=args.time_column,
+        match_runtimes=args.match_runtimes,
     )
 
 
 def _get_x_axis_label(time_column: int) -> str:
     """Return the x-axis label for a selected timestep file column."""
     if time_column == 1:
-        return "Scale factor"
-    if time_column == 2:
         return "Time [Internal Units]"
+    if time_column == 2:
+        return "Scale factor"
 
     return f"Column {time_column + 1}"
+
+
+def _normalise_timestep_label(label: str) -> str:
+    """Return a user-facing label for a timestep table header."""
+    return _TIMESTEP_LABEL_ALIASES.get(label, label)
+
+
+def _infer_timestep_column_labels(
+    header_line: str, data_line: str
+) -> dict[int, str]:
+    """Infer timestep column labels by aligning the header with a data row."""
+    header_positions = []
+    search_start = 0
+    for label in _TIMESTEP_HEADER_LABELS:
+        position = header_line.find(label, search_start)
+        if position == -1:
+            continue
+
+        header_positions.append((position, _normalise_timestep_label(label)))
+        search_start = position + len(label)
+
+    if not header_positions:
+        return {}
+
+    data_positions = [
+        match.start() for match in re.finditer(r"\S+", data_line)
+    ]
+    if not data_positions:
+        return {}
+
+    labels_by_column = {}
+    min_column = 0
+    for position, label in header_positions:
+        candidate_columns = range(min_column, len(data_positions))
+        if min_column >= len(data_positions):
+            break
+
+        column = min(
+            candidate_columns,
+            key=lambda index: abs(data_positions[index] - position),
+        )
+        labels_by_column[column] = label
+        min_column = column + 1
+
+    return labels_by_column
 
 
 def analyse_timestep_files(
@@ -113,6 +190,7 @@ def analyse_timestep_files(
     prefix: str | None = None,
     show_plot: bool = True,
     time_column: int | None = None,
+    match_runtimes: bool = False,
 ) -> None:
     """Plot the timestep files of one or more SWIFT runs.
 
@@ -127,7 +205,9 @@ def analyse_timestep_files(
             the default filename is determined by create_output_path.
         show_plot: Whether to display the plot.
         time_column: Zero-based column index to use for the x-axis. Defaults
-            to 2, which is the third column in the timestep table.
+            to 2, which is the scale-factor column in the timestep table.
+        match_runtimes: Whether to trim all plotted datasets to the shortest
+            x-axis extent found in the inputs.
 
     Raises:
         ValueError: If the number of files and labels do not match.
@@ -137,7 +217,7 @@ def analyse_timestep_files(
         raise ValueError("Number of files and labels must match.")
 
     if time_column is None:
-        time_column = 2 if plot_time in (None, True) else 1
+        time_column = 1 if plot_time is True else 2
 
     if time_column < 0:
         raise ValueError("time_column must be non-negative.")
@@ -154,15 +234,21 @@ def analyse_timestep_files(
         figure_height += 0.2 * legend_rows
 
     # Loop over the lines in the file and extract the relevant data
-    x = []
-    y = []
-    deadtime = []
+    x: list[np.ndarray[Any, Any]] = []
+    y: list[np.ndarray[Any, Any]] = []
+    deadtime: list[np.ndarray[Any, Any]] = []
+    column_labels: dict[int, str] = {}
     for file in files:
-        xi, yi, dti = [], [], []
+        xi_values: list[float] = []
+        yi_values: list[float] = []
+        dti_values: list[float] = []
+        header_line = ""
         with open(file, "r") as f:
             for line in f:
                 # Ensure we aren't reading a comment line
                 if line.startswith("#"):
+                    if "Step" in line:
+                        header_line = line
                     continue
 
                 # If the line doesn't start with an empty space, its not a
@@ -190,14 +276,29 @@ def analyse_timestep_files(
                     )
                     continue
 
-                xi.append(float(parts[x_index]))
-                yi.append(float(parts[wall_clock_index]))
-                dti.append(float(parts[deadtime_index]))
+                if not column_labels and header_line:
+                    column_labels = _infer_timestep_column_labels(
+                        header_line, line
+                    )
+
+                xi_values.append(float(parts[x_index]))
+                yi_values.append(float(parts[wall_clock_index]))
+                dti_values.append(float(parts[deadtime_index]))
 
         # Convert to numpy arrays and compute cumulative sums in hours
-        x.append(np.array(xi))
-        y.append(np.cumsum(np.array(yi)) / (1000 * 60 * 60))
-        deadtime.append(np.cumsum(np.array(dti)) / (1000 * 60 * 60))
+        x.append(np.array(xi_values))
+        y.append(np.cumsum(np.array(yi_values)) / (1000 * 60 * 60))
+        deadtime.append(np.cumsum(np.array(dti_values)) / (1000 * 60 * 60))
+
+    if match_runtimes:
+        max_x_values = [series[-1] for series in x if len(series) > 0]
+        if max_x_values:
+            runtime_limit = min(max_x_values)
+            for i, xi in enumerate(x):
+                mask = xi <= runtime_limit
+                x[i] = xi[mask]
+                y[i] = y[i][mask]
+                deadtime[i] = deadtime[i][mask]
 
     # Create the figure with two subplots
     fig, (ax1, ax2) = plt.subplots(
@@ -229,7 +330,7 @@ def analyse_timestep_files(
         ax1.plot(xi, dt, "--", color=color, alpha=0.6, linewidth=2)
 
     # Set labels and title for main plot
-    x_label = _get_x_axis_label(time_column)
+    x_label = column_labels.get(time_column, _get_x_axis_label(time_column))
     ax1.set_ylabel("Time [hrs]")
 
     # Create custom legend with black lines showing line styles
