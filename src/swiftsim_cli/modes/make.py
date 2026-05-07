@@ -50,6 +50,6 @@ def make_swift(swift_dir: Path | None = None, nr_threads: int = 1) -> None:
     if nr_threads < 1:
         raise ValueError("Number of threads must be at least 1.")
     elif nr_threads > 1:
-        _run_command_in_swift_dir(f"make -j {nr_threads}", swift_dir)
+        _run_command_in_swift_dir(["make", "-j", str(nr_threads)], swift_dir)
     else:
-        _run_command_in_swift_dir("make", swift_dir)
+        _run_command_in_swift_dir(["make"], swift_dir)

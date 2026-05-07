@@ -44,7 +44,7 @@ def switch_swift_branch(branch: str, swift_dir: Path | None = None) -> None:
     swift_dir = get_swiftsim_dir(swift_dir)
 
     # Run the command in the SWIFT directory
-    _run_command_in_swift_dir(f"git checkout {branch}", swift_dir)
+    _run_command_in_swift_dir(["git", "checkout", branch], swift_dir)
 
     # Update the current config
     update_current_profile_value("branch", branch)

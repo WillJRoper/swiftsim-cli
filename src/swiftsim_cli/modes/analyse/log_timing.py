@@ -2023,6 +2023,8 @@ def _print_hierarchical_analysis(
         "exclusive timings."
     )
 
+    total_runtime = sum(stats["total_time"] for stats in all_stats.values())
+
     # Calculate total time per function including only nested timers
     func_totals = {}
     for func_name in nesting_db.keys():
@@ -2118,9 +2120,15 @@ def _print_hierarchical_analysis(
         if function_timer_time == 0.0:
             continue  # Skip if no timer data found
 
+        total_runtime_pct = (
+            100 * function_timer_time / total_runtime
+            if total_runtime > 0
+            else 0.0
+        )
         print(
-            f"\n{func_name}: {function_timer_time:.1f} ms "
-            "(function execution time)"
+            f"\n{func_name}: {function_timer_time:.1f} ms / "
+            f"{total_runtime_pct:.1f}% "
+            "(function execution time / percentage of total run time)"
         )
         print("-" * (len(func_name) + 40))
 

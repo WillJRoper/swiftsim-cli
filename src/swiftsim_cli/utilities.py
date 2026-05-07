@@ -1,6 +1,7 @@
 """A module containing generic utility functions for SWIFTSim-CLI."""
 
 from pathlib import Path
+from typing import Sequence
 
 ascii_art = (
     r"    ______       _________________        _______   ____",
@@ -11,13 +12,13 @@ ascii_art = (
 )
 
 
-def run_command_in_dir(command: str, directory: Path) -> None:
+def run_command_in_dir(command: Sequence[str], directory: Path) -> None:
     """Run a command in a specified directory.
 
     This function runs the command in the specified directory using subprocess.
 
     Args:
-        command: The command to run.
+        command: The command to run as a sequence of arguments.
         directory: The directory in which to run the command.
 
     Raises:
@@ -26,8 +27,7 @@ def run_command_in_dir(command: str, directory: Path) -> None:
     """
     import subprocess
 
-    # Use subprocess.run with shell=True and cwd parameter
-    subprocess.run(command, shell=True, cwd=str(directory), check=True)
+    subprocess.run(command, cwd=str(directory), check=True)
 
 
 def make_directory(path: Path) -> None:

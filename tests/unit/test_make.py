@@ -65,7 +65,7 @@ class TestMakeSwift:
         mock_get_dir.assert_called_once_with(swift_dir)
 
         # Verify the make command was run without -j flag
-        mock_run_command.assert_called_once_with("make", swift_dir)
+        mock_run_command.assert_called_once_with(["make"], swift_dir)
 
     @patch("swiftsim_cli.modes.make._run_command_in_swift_dir")
     @patch("swiftsim_cli.modes.make.get_swiftsim_dir")
@@ -87,7 +87,9 @@ class TestMakeSwift:
         mock_get_dir.assert_called_once_with(swift_dir)
 
         # Verify the make command was run with -j flag
-        mock_run_command.assert_called_once_with("make -j 8", swift_dir)
+        mock_run_command.assert_called_once_with(
+            ["make", "-j", "8"], swift_dir
+        )
 
     @patch("swiftsim_cli.modes.make._run_command_in_swift_dir")
     @patch("swiftsim_cli.modes.make.get_swiftsim_dir")
@@ -109,7 +111,9 @@ class TestMakeSwift:
         mock_get_dir.assert_called_once_with(None)
 
         # Verify the make command was run with -j flag
-        mock_run_command.assert_called_once_with("make -j 4", swift_dir)
+        mock_run_command.assert_called_once_with(
+            ["make", "-j", "4"], swift_dir
+        )
 
     @patch("swiftsim_cli.modes.make._run_command_in_swift_dir")
     @patch("swiftsim_cli.modes.make.get_swiftsim_dir")

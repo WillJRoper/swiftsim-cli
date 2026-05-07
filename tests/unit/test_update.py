@@ -55,7 +55,7 @@ class TestUpdateSwift:
         mock_get_dir.assert_called_once_with(swift_dir)
 
         # Verify the git pull command was run
-        mock_run_command.assert_called_once_with("git pull", swift_dir)
+        mock_run_command.assert_called_once_with(["git", "pull"], swift_dir)
 
     @patch("swiftsim_cli.modes.update._run_command_in_swift_dir")
     @patch("swiftsim_cli.modes.update.get_swiftsim_dir")
@@ -77,7 +77,7 @@ class TestUpdateSwift:
         mock_get_dir.assert_called_once_with(None)
 
         # Verify the git pull command was run
-        mock_run_command.assert_called_once_with("git pull", swift_dir)
+        mock_run_command.assert_called_once_with(["git", "pull"], swift_dir)
 
     @patch("swiftsim_cli.modes.update._run_command_in_swift_dir")
     @patch("swiftsim_cli.modes.update.get_swiftsim_dir")

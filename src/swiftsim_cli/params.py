@@ -5,6 +5,8 @@ from pathlib import Path
 from ruamel.yaml import YAML
 
 PARAMS: dict | None = None
+PARAMS_SOURCE: Path | None | object = None
+PARAMS_VERSION = 0
 
 # Configure YAML for round-trip comment preservation and consistent formatting
 yaml = YAML()
@@ -73,16 +75,38 @@ def load_parameters(param_file: Path | None = None) -> dict:
         IOError:           If the file cannot be read.
         ValueError:        If parsing fails.
     """
-    global PARAMS
+    global PARAMS, PARAMS_SOURCE, PARAMS_VERSION
 
-    if PARAMS is not None:
+    requested_source: Path | None | object
+    if param_file is None:
+        requested_source = None
+    else:
+        requested_source = param_file.resolve()
+
+    if PARAMS is not None and PARAMS_SOURCE == requested_source:
         return PARAMS
 
     if param_file is None:
+        clear_parameter_cache()
         return {}
 
     if not param_file.exists():
         raise FileNotFoundError(f"Parameter file not found: {param_file}")
 
     PARAMS = _parse_parameters(param_file)
+    PARAMS_SOURCE = requested_source
+    PARAMS_VERSION += 1
     return PARAMS
+
+
+def clear_parameter_cache() -> None:
+    """Clear the cached parameter state."""
+    global PARAMS, PARAMS_SOURCE, PARAMS_VERSION
+    PARAMS = None
+    PARAMS_SOURCE = None
+    PARAMS_VERSION += 1
+
+
+def get_parameter_cache_version() -> int:
+    """Return a monotonically increasing parameter cache version."""
+    return PARAMS_VERSION

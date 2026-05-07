@@ -113,20 +113,21 @@ class TestUtilityFunctions:
         mock_run.return_value = Mock(returncode=0)
 
         # Should not raise exception
-        run_command_in_dir("ls -la", temp_dir)
+        run_command_in_dir(["ls", "-la"], temp_dir)
 
         mock_run.assert_called_once()
         args = mock_run.call_args
+        assert args[0][0] == ["ls", "-la"]
         assert args[1]["cwd"] == str(temp_dir)
         assert args[1]["check"] is True
 
     @patch("subprocess.run")
     def test_run_command_in_dir_failure(self, mock_run, temp_dir):
         """Test running command that fails."""
-        mock_run.side_effect = CalledProcessError(1, "fake_command")
+        mock_run.side_effect = CalledProcessError(1, ["fake_command"])
 
         with pytest.raises(CalledProcessError):
-            run_command_in_dir("fake_command", temp_dir)
+            run_command_in_dir(["fake_command"], temp_dir)
 
     def test_create_output_path_basic(self, temp_dir):
         """Test basic output path creation."""
@@ -249,7 +250,7 @@ class TestUtilityEdgeCases:
         mock_run.side_effect = TimeoutExpired("sleep", 10)
 
         with pytest.raises(TimeoutExpired):
-            run_command_in_dir("sleep 10", temp_dir)
+            run_command_in_dir(["sleep", "10"], temp_dir)
 
     def test_make_directory_file_exists(self, temp_dir):
         """Test make_directory when path exists as a file."""

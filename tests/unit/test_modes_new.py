@@ -1,6 +1,7 @@
 """Tests for the new mode module."""
 
 import argparse
+from unittest.mock import Mock, patch
 
 import pytest
 
@@ -154,3 +155,45 @@ class TestApplyOverrides:
             ValueError, match="Key 'nonexistent' not found in parent"
         ):
             apply_overrides(params, overrides)
+
+
+class TestDeriveParamsFromICs:
+    """Regression tests for parameter derivation from IC files."""
+
+    @patch("swiftsim_cli.modes.new.h5py.File")
+    @patch("swiftsim_cli.modes.new.load_swift_profile")
+    def test_redshift_only_header_does_not_require_time(
+        self, mock_load_profile, mock_h5_file, tmp_path
+    ):
+        """IC files with Redshift but no Time should not crash."""
+        inicond_file = tmp_path / "ics.hdf5"
+        inicond_file.touch()
+
+        mock_load_profile.return_value = Mock(
+            softening_coeff=0.04,
+            softening_pivot_z=2.7,
+        )
+
+        header_attrs = {
+            "BoxSize": 100.0,
+            "NumPart_Total": [64, 64, 0, 0, 0, 0],
+            "Redshift": 9.0,
+        }
+        mock_hdf = {
+            "Header": Mock(attrs=header_attrs),
+        }
+        mock_h5_file.return_value.__enter__.return_value = mock_hdf
+
+        params = {
+            "Gravity": {},
+            "Cosmology": {},
+            "TimeIntegration": {},
+            "InternalUnitSystem": {},
+        }
+
+        from swiftsim_cli.modes.new import derive_params_from_ics
+
+        result = derive_params_from_ics(inicond_file, params)
+
+        assert result["Cosmology"]["a_begin"] == "0.1"
+        assert "time_begin" not in result["TimeIntegration"]

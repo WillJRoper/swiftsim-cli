@@ -60,7 +60,7 @@ class TestSwitchSwiftBranch:
 
         # Verify the git checkout command was run
         mock_run_command.assert_called_once_with(
-            "git checkout develop", swift_dir
+            ["git", "checkout", "develop"], swift_dir
         )
 
         # Verify the profile was updated
@@ -88,7 +88,7 @@ class TestSwitchSwiftBranch:
 
         # Verify the git checkout command was run
         mock_run_command.assert_called_once_with(
-            "git checkout master", swift_dir
+            ["git", "checkout", "master"], swift_dir
         )
 
         # Verify the profile was updated

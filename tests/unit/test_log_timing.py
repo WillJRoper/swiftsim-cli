@@ -1022,6 +1022,10 @@ class TestHierarchicalAnalysisDefaults:
 
         output = capsys.readouterr().out
         assert "engine_prepare:" in output
+        assert (
+            "% (function execution time / percentage of total run time)"
+            in output
+        )
 
     def test_hierarchical_analysis_prints_context_note(self, capsys):
         """Hierarchical output should document whole-run attribution."""
@@ -1050,3 +1054,45 @@ class TestHierarchicalAnalysisDefaults:
 
         output = capsys.readouterr().out
         assert "whole-run timer totals" in output
+
+    def test_hierarchical_analysis_title_includes_total_runtime_percentage(
+        self, capsys
+    ):
+        """Hierarchical titles should report percentage of total runtime."""
+        timer_db = {
+            "timer_parent": Mock(
+                function="space_rebuild",
+                timer_type="function",
+                label_text="took %.3f %s.",
+            ),
+            "timer_other": Mock(
+                function="other_function",
+                timer_type="function",
+                label_text="took %.3f %s.",
+            ),
+        }
+        all_stats = {
+            "timer_parent": {"total_time": 120.0, "call_count": 2},
+            "timer_other": {"total_time": 80.0, "call_count": 1},
+        }
+        nesting_db = {
+            "space_rebuild": {
+                "nested_functions": [],
+                "nested_operations": [],
+            }
+        }
+
+        _print_hierarchical_analysis(
+            all_stats=all_stats,
+            timer_db=timer_db,
+            nesting_db=nesting_db,
+            hierarchy_functions=["space_rebuild"],
+            top_n=10,
+        )
+
+        output = capsys.readouterr().out
+        assert (
+            "space_rebuild: 120.0 ms / 60.0% "
+            "(function execution time / percentage of total run time)"
+            in output
+        )

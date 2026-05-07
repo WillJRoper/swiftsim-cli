@@ -12,6 +12,7 @@ from swiftsim_cli.params import load_parameters
 def teardown_function():
     """Reset PARAMS cache after each test."""
     params.PARAMS = None
+    params.PARAMS_SOURCE = None
 
 
 def test_load_parameters_valid_file(tmp_path):
@@ -70,6 +71,20 @@ def test_load_parameters_caching(tmp_path):
 
     # Check that the parameters are the same object
     assert params1 is params2
+
+
+def test_load_parameters_reloads_for_different_files(tmp_path):
+    """Test that a different parameter file replaces the cached state."""
+    param_file_1 = tmp_path / "params_1.yml"
+    param_file_1.write_text("Cosmology:\n    h: 0.6774\n")
+    param_file_2 = tmp_path / "params_2.yml"
+    param_file_2.write_text("Cosmology:\n    h: 0.7010\n")
+
+    params1 = load_parameters(param_file_1)
+    params2 = load_parameters(param_file_2)
+
+    assert params1 is not params2
+    assert params2["Cosmology"]["h"] == 0.7010
 
 
 def test_load_parameters_no_file():

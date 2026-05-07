@@ -11,7 +11,7 @@ from astropy.cosmology import (  # type: ignore[import-untyped]
     z_at_value,
 )
 
-from swiftsim_cli.params import load_parameters
+from swiftsim_cli.params import get_parameter_cache_version, load_parameters
 
 
 def _get_cosmology() -> FlatLambdaCDM:
@@ -48,6 +48,11 @@ def _get_cosmology() -> FlatLambdaCDM:
 
 
 @lru_cache(maxsize=1)
+def _get_cached_cosmology(_params_version: int) -> FlatLambdaCDM | None:
+    """Get the cached cosmology object for a parameter cache version."""
+    return _get_cosmology()
+
+
 def get_cosmology() -> FlatLambdaCDM | None:
     """Get the cached cosmology object.
 
@@ -56,7 +61,15 @@ def get_cosmology() -> FlatLambdaCDM | None:
     Returns:
         FlatLambdaCDM: The cached cosmology object.
     """
-    return _get_cosmology()
+    return _get_cached_cosmology(get_parameter_cache_version())
+
+
+def clear_cosmology_cache() -> None:
+    """Clear the cached cosmology object."""
+    _get_cached_cosmology.cache_clear()
+
+
+setattr(get_cosmology, "cache_clear", clear_cosmology_cache)
 
 
 def convert_redshift_to_time(

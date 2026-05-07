@@ -117,10 +117,10 @@ def run(args: argparse.Namespace) -> None:
         args.options = unique_opts
 
         # Now run the configuration
-        config_swiftsim(opts=" ".join(unique_opts))
+        config_swiftsim(opts=unique_opts)
 
 
-def config_swiftsim(opts: str, swift_dir: Path | None = None) -> None:
+def config_swiftsim(opts: list[str], swift_dir: Path | None = None) -> None:
     """Configure SWIFT itself.
 
     This will navigate to the SWIFT directory (erroring if there is not one
@@ -139,7 +139,7 @@ def config_swiftsim(opts: str, swift_dir: Path | None = None) -> None:
     swift_dir = get_swiftsim_dir(swift_dir)
 
     # Run the command in the SWIFT directory
-    _run_command_in_swift_dir(f"./configure {opts}", swift_dir)
+    _run_command_in_swift_dir(["./configure", *opts], swift_dir)
 
 
 def show_config_options(swift_dir: Path | None = None) -> None:
@@ -160,4 +160,4 @@ def show_config_options(swift_dir: Path | None = None) -> None:
     swift_dir = get_swiftsim_dir(swift_dir)
 
     # Run the command in the SWIFT directory
-    _run_command_in_swift_dir("./configure --help", swift_dir)
+    _run_command_in_swift_dir(["./configure", "--help"], swift_dir)

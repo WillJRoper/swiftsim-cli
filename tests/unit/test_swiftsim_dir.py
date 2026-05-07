@@ -96,13 +96,13 @@ class TestRunCommandInSwiftDir:
         mock_get_dir.return_value = swift_dir
 
         # Call the function
-        _run_command_in_swift_dir("make", swift_dir)
+        _run_command_in_swift_dir(["make"], swift_dir)
 
         # Verify get_swiftsim_dir was called with the path
         mock_get_dir.assert_called_once_with(swift_dir)
 
         # Verify run_command_in_dir was called with command and path
-        mock_run_command.assert_called_once_with("make", swift_dir)
+        mock_run_command.assert_called_once_with(["make"], swift_dir)
 
     @patch("swiftsim_cli.swiftsim_dir.run_command_in_dir")
     @patch("swiftsim_cli.swiftsim_dir.get_swiftsim_dir")
@@ -115,7 +115,7 @@ class TestRunCommandInSwiftDir:
 
         # Should raise the same error
         with pytest.raises(ValueError, match="SWIFT directory not set"):
-            _run_command_in_swift_dir("make", None)
+            _run_command_in_swift_dir(["make"], None)
 
         # run_command_in_dir should not be called
         mock_run_command.assert_not_called()

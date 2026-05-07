@@ -102,6 +102,8 @@ def derive_params_from_ics(
         ngas = hdf["Header"].attrs["NumPart_Total"][:][0]
         ndm = hdf["Header"].attrs["NumPart_Total"][:][1]
 
+        time_begin = None
+
         # Get the redshift from the initial conditions
         if "Redshift" in hdf["Header"].attrs:
             redshift = hdf["Header"].attrs["Redshift"]

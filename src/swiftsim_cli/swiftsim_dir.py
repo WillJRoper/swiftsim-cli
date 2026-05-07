@@ -1,6 +1,7 @@
 """A module containing tools for managing the SWIFT simulation directory."""
 
 from pathlib import Path
+from typing import Sequence
 
 from swiftsim_cli.profile import load_swift_profile
 from swiftsim_cli.utilities import run_command_in_dir
@@ -42,7 +43,7 @@ def get_swiftsim_dir(swift_dir: Path | None = None) -> Path:
     return swift_dir
 
 
-def _run_command_in_swift_dir(command: str, swift_dir: Path) -> None:
+def _run_command_in_swift_dir(command: Sequence[str], swift_dir: Path) -> None:
     """Run a command in the SWIFT directory.
 
     This will navigate to the SWIFT directory and run the provided command.

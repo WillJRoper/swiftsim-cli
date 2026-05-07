@@ -985,14 +985,18 @@ def _generate_output_list_with_cosmo(args: dict, cosmo) -> None:
     if list_units is not None:
         if list_units == "redshift":
             if doing_time:
-                snapshot_times = convert_time_to_redshift(snapshot_times)
-                snipshot_times = convert_time_to_redshift(snipshot_times)
-            elif doing_scale_factor or doing_log_scale_factor:
-                snapshot_times = convert_scale_factor_to_redshift(
-                    snapshot_times
+                snapshot_times = np.asarray(
+                    convert_time_to_redshift(snapshot_times)
                 )
-                snipshot_times = convert_scale_factor_to_redshift(
-                    snipshot_times
+                snipshot_times = np.asarray(
+                    convert_time_to_redshift(snipshot_times)
+                )
+            elif doing_scale_factor or doing_log_scale_factor:
+                snapshot_times = np.asarray(
+                    convert_scale_factor_to_redshift(snapshot_times)
+                )
+                snipshot_times = np.asarray(
+                    convert_scale_factor_to_redshift(snipshot_times)
                 )
             doing_z = True
             doing_time = False
@@ -1001,15 +1005,23 @@ def _generate_output_list_with_cosmo(args: dict, cosmo) -> None:
 
         elif list_units == "time":
             if doing_z:
-                snapshot_times = convert_redshift_to_time(snapshot_times)
-                snipshot_times = convert_redshift_to_time(snipshot_times)
+                snapshot_times = np.asarray(
+                    convert_redshift_to_time(snapshot_times)
+                )
+                snipshot_times = np.asarray(
+                    convert_redshift_to_time(snipshot_times)
+                )
             elif doing_scale_factor or doing_log_scale_factor:
                 # scale factor -> redshift -> time
-                snapshot_times = convert_redshift_to_time(
-                    convert_scale_factor_to_redshift(snapshot_times)
+                snapshot_times = np.asarray(
+                    convert_redshift_to_time(
+                        convert_scale_factor_to_redshift(snapshot_times)
+                    )
                 )
-                snipshot_times = convert_redshift_to_time(
-                    convert_scale_factor_to_redshift(snipshot_times)
+                snipshot_times = np.asarray(
+                    convert_redshift_to_time(
+                        convert_scale_factor_to_redshift(snipshot_times)
+                    )
                 )
             doing_z = False
             doing_time = True
@@ -1018,19 +1030,23 @@ def _generate_output_list_with_cosmo(args: dict, cosmo) -> None:
 
         elif list_units == "scale-factor":
             if doing_z:
-                snapshot_times = convert_redshift_to_scale_factor(
-                    snapshot_times
+                snapshot_times = np.asarray(
+                    convert_redshift_to_scale_factor(snapshot_times)
                 )
-                snipshot_times = convert_redshift_to_scale_factor(
-                    snipshot_times
+                snipshot_times = np.asarray(
+                    convert_redshift_to_scale_factor(snipshot_times)
                 )
             elif doing_time:
                 # time -> redshift -> scale factor
-                snapshot_times = convert_redshift_to_scale_factor(
-                    convert_time_to_redshift(snapshot_times)
+                snapshot_times = np.asarray(
+                    convert_redshift_to_scale_factor(
+                        convert_time_to_redshift(snapshot_times)
+                    )
                 )
-                snipshot_times = convert_redshift_to_scale_factor(
-                    convert_time_to_redshift(snipshot_times)
+                snipshot_times = np.asarray(
+                    convert_redshift_to_scale_factor(
+                        convert_time_to_redshift(snipshot_times)
+                    )
                 )
             doing_z = False
             doing_time = False

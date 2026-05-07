@@ -216,10 +216,7 @@ class TestConfigMode:
         # Verify config_swiftsim was called
         mock_config.assert_called_once()
         call_args = mock_config.call_args
-        opts_str = call_args[1]["opts"]
-
-        # Split the options string to count individual options
-        opts_list = opts_str.split()
+        opts_list = call_args[1]["opts"]
 
         # Count occurrences of overlapping options
         assert opts_list.count("--enable-ipo") == 1
@@ -264,14 +261,14 @@ class TestConfigSwiftsim:
         mock_get_dir.return_value = swift_dir
 
         # Call config_swiftsim
-        config_swiftsim("--enable-debug", swift_dir)
+        config_swiftsim(["--enable-debug"], swift_dir)
 
         # Verify get_swiftsim_dir was called
         mock_get_dir.assert_called_once_with(swift_dir)
 
         # Verify the configure command was run
         mock_run_command.assert_called_once_with(
-            "./configure --enable-debug", swift_dir
+            ["./configure", "--enable-debug"], swift_dir
         )
 
     @patch("swiftsim_cli.modes.config._run_command_in_swift_dir")
@@ -288,14 +285,14 @@ class TestConfigSwiftsim:
         mock_get_dir.return_value = swift_dir
 
         # Call config_swiftsim without directory
-        config_swiftsim("--enable-ipo", None)
+        config_swiftsim(["--enable-ipo"], None)
 
         # Verify get_swiftsim_dir was called with None
         mock_get_dir.assert_called_once_with(None)
 
         # Verify the configure command was run
         mock_run_command.assert_called_once_with(
-            "./configure --enable-ipo", swift_dir
+            ["./configure", "--enable-ipo"], swift_dir
         )
 
 
@@ -323,7 +320,7 @@ class TestShowConfigOptions:
 
         # Verify the configure --help command was run
         mock_run_command.assert_called_once_with(
-            "./configure --help", swift_dir
+            ["./configure", "--help"], swift_dir
         )
 
     @patch("swiftsim_cli.modes.config._run_command_in_swift_dir")
@@ -347,5 +344,5 @@ class TestShowConfigOptions:
 
         # Verify the configure --help command was run
         mock_run_command.assert_called_once_with(
-            "./configure --help", swift_dir
+            ["./configure", "--help"], swift_dir
         )
