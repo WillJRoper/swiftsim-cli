@@ -95,8 +95,8 @@ def add_log_arguments(subparsers) -> None:
         "--hierarchy-functions",
         nargs="*",
         help="Functions to show hierarchical timing for. If not specified, "
-        "shows default important functions: engine_prepare, "
-        "engine_rebuild, space_rebuild, and "
+        "shows default important functions: engine_step, "
+        "engine_prepare, engine_rebuild, space_rebuild, and "
         "engine_maketasks. Use 'all' to show all functions with "
         "hierarchy data, or specify individual function names.",
         default=None,
@@ -2055,6 +2055,7 @@ def _print_hierarchical_analysis(
     if hierarchy_functions is None:
         # Default to showing a few key functions that are typically important
         default_functions = [
+            "engine_step",
             "engine_prepare",
             "engine_rebuild",
             "space_rebuild",
