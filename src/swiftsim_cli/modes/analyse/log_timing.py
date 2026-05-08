@@ -1394,6 +1394,18 @@ def _hierarchy_prefix(active_levels: list[bool]) -> str:
     return "".join(branch_parts)
 
 
+def _extract_step_wallclock_ms(line: str) -> float | None:
+    """Extract the step-table wallclock column from one SWIFT step row."""
+    parts = line.split()
+    if len(parts) < 13:
+        return None
+
+    try:
+        return float(parts[12])
+    except ValueError:
+        return None
+
+
 def add_hierarchical_rows(
     rows,
     hierarchy,
@@ -1732,7 +1744,6 @@ def analyse_swift_log_timings(
         r"\*\*\*\s+([^:]+):\s+([\d.]+)\s+ms\s+\(([\d.]+)\s%?\)"
     )
     counts_re = re.compile(r"task counts are \[(.*)\]")
-    last_float_re = re.compile(r"([-\d.]+)(?:\s*)$")
 
     # Read the log file and count lines for progress
     with open(log_file, "r", encoding="utf-8", errors="ignore") as f:
@@ -1760,13 +1771,10 @@ def analyse_swift_log_timings(
                         time_4=float(sm.group(5)),
                     )
                 )
-                # Also capture step total wall-clock ms as last float on
-                # the line
-                if wm := last_float_re.search(line):
-                    try:
-                        step_totals[step_num] = float(wm.group(1))
-                    except ValueError:
-                        pass
+                # Capture the explicit wall-clock column from the step table.
+                wallclock_ms = _extract_step_wallclock_ms(line)
+                if wallclock_ms is not None:
+                    step_totals[step_num] = wallclock_ms
             except ValueError:
                 # Skip malformed lines (keep behavior similar to your
                 # warning pattern)

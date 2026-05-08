@@ -7,6 +7,7 @@ import matplotlib.pyplot as plt
 import pytest
 
 from swiftsim_cli.modes.analyse.log_timing import (
+    _extract_step_wallclock_ms,
     _hierarchy_corrected_total,
     _hierarchy_direct_accounted_time,
     _print_hierarchical_analysis,
@@ -95,6 +96,21 @@ class TestBuildStats:
         assert stats["call_count"] == 4
         assert stats["mean_time"] == pytest.approx(0.75)
         assert stats["total_time"] == pytest.approx(3.0)
+
+
+class TestStepTableParsing:
+    """Tests for extracting totals from SWIFT step rows."""
+
+    def test_extract_step_wallclock_ms_uses_wallclock_column(self):
+        """Step totals should come from Wall-clock time, not dead time."""
+        line = (
+            "       0   1.448448e-04    0.0400000   24.0000000   "
+            "0.000000e+00    1   56            0    286773236            "
+            "0            0            0            263601.156    265   "
+            "       4652.056"
+        )
+
+        assert _extract_step_wallclock_ms(line) == pytest.approx(263601.156)
 
 
 class TestDisplayName:
