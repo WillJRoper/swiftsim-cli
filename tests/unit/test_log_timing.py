@@ -692,7 +692,19 @@ class TestAnalyseSwiftLogTimingsWithMocks:
         log_file.write_text("mock log content")
 
         # Mock output path
-        mock_create_path.return_value = tmp_path
+        def create_path_side_effect(
+            output_path=None,
+            prefix=None,
+            filename="output.png",
+            out_dir=None,
+        ):
+            base_path = tmp_path
+            if out_dir is not None:
+                base_path = base_path / out_dir
+                base_path.mkdir(parents=True, exist_ok=True)
+            return base_path / f"{prefix + '_' if prefix else ''}{filename}"
+
+        mock_create_path.side_effect = create_path_side_effect
 
         # Mock timer database
         mock_timer_def = Mock()
@@ -735,6 +747,11 @@ class TestAnalyseSwiftLogTimingsWithMocks:
         mock_load_nesting.assert_called_once()
         mock_scan_log.assert_called_once()
         mock_classify.assert_called_once()
+        report_path = (
+            tmp_path / "test_runtime_analysis" / "test_analysis_tables.txt"
+        )
+        assert report_path.exists()
+        assert "TOP FUNCTION TIMERS" in report_path.read_text(encoding="utf-8")
 
     @patch("swiftsim_cli.modes.analyse.log_timing.create_output_path")
     @patch("swiftsim_cli.modes.analyse.log_timing.plt")
@@ -760,7 +777,19 @@ class TestAnalyseSwiftLogTimingsWithMocks:
         log_file.write_text("")
 
         # Mock output path
-        mock_create_path.return_value = tmp_path
+        def create_path_side_effect(
+            output_path=None,
+            prefix=None,
+            filename="output.png",
+            out_dir=None,
+        ):
+            base_path = tmp_path
+            if out_dir is not None:
+                base_path = base_path / out_dir
+                base_path.mkdir(parents=True, exist_ok=True)
+            return base_path / f"{prefix + '_' if prefix else ''}{filename}"
+
+        mock_create_path.side_effect = create_path_side_effect
 
         # Mock timer database (empty)
         mock_load_db.return_value = {}
@@ -859,7 +888,20 @@ class TestAnalyseSwiftLogTimingsWithMocks:
         """Analysis should refresh timer regex metadata alongside nesting."""
         log_file = tmp_path / "test.log"
         log_file.write_text("mock log content")
-        mock_create_path.return_value = tmp_path
+
+        def create_path_side_effect(
+            output_path=None,
+            prefix=None,
+            filename="output.png",
+            out_dir=None,
+        ):
+            base_path = tmp_path
+            if out_dir is not None:
+                base_path = base_path / out_dir
+                base_path.mkdir(parents=True, exist_ok=True)
+            return base_path / f"{prefix + '_' if prefix else ''}{filename}"
+
+        mock_create_path.side_effect = create_path_side_effect
 
         timer_db = {
             "timer1": Mock(function="space_split", timer_type="function")
@@ -1107,3 +1149,56 @@ class TestHierarchicalAnalysisDefaults:
             "(function execution time / percentage of total run time)"
             in output
         )
+
+    def test_hierarchical_analysis_prints_vertical_tree_guides(self, capsys):
+        """Nested hierarchy rows should keep faint vertical guide lines."""
+        timer_db = {
+            "parent_timer": Mock(
+                function="engine_prepare",
+                timer_type="function",
+                label_text="took %.3f %s.",
+            ),
+            "child_timer": Mock(
+                function="child_func",
+                timer_type="function",
+                label_text="took %.3f %s.",
+            ),
+            "child_op": Mock(
+                function="child_func",
+                timer_type="operation",
+                label_text="child op took %.3f %s.",
+            ),
+            "sibling_op": Mock(
+                function="engine_prepare",
+                timer_type="operation",
+                label_text="sibling op took %.3f %s.",
+            ),
+        }
+        all_stats = {
+            "parent_timer": {"total_time": 100.0, "call_count": 1},
+            "child_timer": {"total_time": 60.0, "call_count": 1},
+            "child_op": {"total_time": 25.0, "call_count": 1},
+            "sibling_op": {"total_time": 20.0, "call_count": 1},
+        }
+        nesting_db = {
+            "engine_prepare": {
+                "nested_functions": ["child_func"],
+                "nested_operations": ["sibling op took %.3f %s."],
+            },
+            "child_func": {
+                "nested_functions": [],
+                "nested_operations": ["child op took %.3f %s."],
+            },
+        }
+
+        _print_hierarchical_analysis(
+            all_stats=all_stats,
+            timer_db=timer_db,
+            nesting_db=nesting_db,
+            hierarchy_functions=["engine_prepare"],
+            top_n=10,
+        )
+
+        output = capsys.readouterr().out
+        assert "├─ child_func (nested function)" in output
+        assert "│  └─ child op" in output

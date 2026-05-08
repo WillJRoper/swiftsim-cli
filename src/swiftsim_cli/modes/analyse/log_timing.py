@@ -17,8 +17,10 @@ Author: SWIFT Development Team
 """
 
 import argparse
+import io
 import re
 from collections import Counter, defaultdict
+from contextlib import redirect_stdout
 from pathlib import Path
 from typing import Any, Callable, Dict, List
 
@@ -1380,12 +1382,24 @@ def _hierarchy_direct_accounted_time(hierarchy: dict) -> float:
     return direct_operations + direct_nested_functions
 
 
+def _hierarchy_prefix(active_levels: list[bool]) -> str:
+    """Build a tree prefix with vertical guide lines for active levels."""
+    if not active_levels:
+        return ""
+
+    branch_parts = [
+        "│  " if is_active else "   " for is_active in active_levels[:-1]
+    ]
+    branch_parts.append("├─ " if active_levels[-1] else "└─ ")
+    return "".join(branch_parts)
+
+
 def add_hierarchical_rows(
     rows,
     hierarchy,
     function_timer_time,
     timer_db_dict,
-    indent,
+    active_levels,
     all_stats_dict,
 ):
     """Add rows to the table in hierarchical order.
@@ -1395,7 +1409,7 @@ def add_hierarchical_rows(
         hierarchy: Hierarchical structure for the function
         function_timer_time: Total function execution time
         timer_db_dict: Dictionary of timer definitions
-        indent: Current indentation level
+        active_levels: Whether each ancestor level still has later siblings
         all_stats_dict: Dictionary of all timer statistics
     """
     # Combine operations and nested functions, then sort by time
@@ -1414,10 +1428,9 @@ def add_hierarchical_rows(
         description = timer_db_dict[tid].label_text
         if " took " in description:
             description = description.split(" took ")[0]
-        description = f"{indent}└─ {description}"
 
         row = [
-            description[:60] + ("..." if len(description) > 60 else ""),
+            description,
             f"{total_time:.1f}",
             f"{pct_of_func:.1f}%",
             f"{calls}",
@@ -1440,10 +1453,10 @@ def add_hierarchical_rows(
                 else 0.0
             )
 
-            description = f"{indent}└─ {nested_func_name} (nested function)"
+            description = f"{nested_func_name} (nested function)"
 
             row = [
-                description[:60] + ("..." if len(description) > 60 else ""),
+                description,
                 f"{total_time:.1f}",
                 f"{pct_of_func:.1f}%",
                 f"{calls}",
@@ -1475,13 +1488,10 @@ def add_hierarchical_rows(
                     else 0.0
                 )
 
-                description = (
-                    f"{indent}└─ {nested_func_name} (nested function)"
-                )
+                description = f"{nested_func_name} (nested function)"
 
                 row = [
-                    description[:60]
-                    + ("..." if len(description) > 60 else ""),
+                    description,
                     f"{corrected_total:.1f}",
                     f"{pct_of_func:.1f}%",
                     f"{calls}",
@@ -1501,7 +1511,7 @@ def add_hierarchical_rows(
                 continue
 
     # Calculate unaccounted time (only for top level, when indent is "")
-    if indent == "":
+    if not active_levels:
         accounted_time = _hierarchy_direct_accounted_time(hierarchy)
 
         # Calculate unaccounted time as the difference between total
@@ -1514,7 +1524,7 @@ def add_hierarchical_rows(
                 else 0.0
             )
             unaccounted_row = [
-                f"{indent}└─ UNACCOUNTED TIME",
+                "UNACCOUNTED TIME",
                 f"{unaccounted_time:.1f}",
                 f"{pct_unaccounted:.1f}%",
                 "-",
@@ -1535,14 +1545,20 @@ def add_hierarchical_rows(
     all_items.sort(key=lambda x: x[0], reverse=True)
 
     # Add items to rows in sorted order
-    for (
+    for item_index, (
         total_time,
         item_type,
         row,
         nested_func_name,
         nested_hierarchy,
-    ) in all_items:
+    ) in enumerate(all_items):
         if row is not None:
+            branch_prefix = _hierarchy_prefix(
+                active_levels + [item_index < len(all_items) - 1]
+            )
+            row[0] = branch_prefix + row[0]
+            if len(row[0]) > 60:
+                row[0] = row[0][:60] + "..."
             rows.append(row)
 
         # If this is a nested function, recursively add its content
@@ -1552,7 +1568,7 @@ def add_hierarchical_rows(
                 nested_hierarchy,
                 function_timer_time,
                 timer_db_dict,
-                indent + "   ",
+                active_levels + [item_index < len(all_items) - 1],
                 all_stats_dict,
             )
 
@@ -1878,21 +1894,36 @@ def analyse_swift_log_timings(
     for p in plots_created:
         print(f"  - {p}")
 
-    # Print detailed analysis tables and summaries
-    _print_analysis_tables(
-        sorted_functions,
-        sorted_all,
-        sorted_by_calls,
-        all_stats,
-        function_stats,
-        operation_stats,
-        timer_db,
-        nesting_db,
-        task_category_times,
-        task_counts,
-        top_n,
-        hierarchy_functions,
+    report_buffer = io.StringIO()
+    with redirect_stdout(report_buffer):
+        # Print detailed analysis tables and summaries
+        _print_analysis_tables(
+            sorted_functions,
+            sorted_all,
+            sorted_by_calls,
+            all_stats,
+            function_stats,
+            operation_stats,
+            timer_db,
+            nesting_db,
+            task_category_times,
+            task_counts,
+            top_n,
+            hierarchy_functions,
+        )
+
+    report_text = report_buffer.getvalue()
+    if report_text:
+        print(report_text, end="")
+
+    report_path = create_output_path(
+        output_path,
+        prefix,
+        "analysis_tables.txt",
+        out_dir,
     )
+    report_path.write_text(report_text, encoding="utf-8")
+    print(f"Saved analysis tables to {report_path}")
 
 
 def _print_analysis_tables(
@@ -2166,7 +2197,7 @@ def _print_hierarchical_analysis(
 
         # Add hierarchical rows with proper ordering
         add_hierarchical_rows(
-            rows, hierarchy, function_timer_time, timer_db, "", all_stats
+            rows, hierarchy, function_timer_time, timer_db, [], all_stats
         )
 
         if len(rows) > 1:  # Only show if there are nested items
