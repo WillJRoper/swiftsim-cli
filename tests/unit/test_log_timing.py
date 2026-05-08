@@ -1241,6 +1241,8 @@ class TestOverallSummary:
                 ("op", {"total_time": 20.0}),
             ],
             step_totals={0: 60.0, 1: 40.0},
+            ranks_seen_in_log=set(),
+            rank0_function_total=70.0,
         )
 
         output = capsys.readouterr().out
@@ -1248,4 +1250,34 @@ class TestOverallSummary:
         assert "Function timer coverage of steps:      70.0%" in output
         assert (
             "Time outside function timers:          30.0 ms (30.0%)" in output
+        )
+
+    def test_overall_summary_uses_rank0_total_for_mpi_logs(self, capsys):
+        """MPI logs should compare step totals against rank-0 timers only."""
+        _print_overall_summary(
+            total_function=560.0,
+            total_operation=80.0,
+            total_all=640.0,
+            function_stats={"func": {"call_count": 8}},
+            operation_stats={"op": {"call_count": 8}},
+            all_stats={
+                "func": {"call_count": 8, "total_time": 560.0},
+                "op": {"call_count": 8, "total_time": 80.0},
+            },
+            sorted_all=[
+                ("func", {"total_time": 560.0}),
+                ("op", {"total_time": 80.0}),
+            ],
+            step_totals={0: 100.0, 1: 100.0},
+            ranks_seen_in_log={0, 1, 2, 3, 4, 5, 6, 7},
+            rank0_function_total=70.0,
+        )
+
+        output = capsys.readouterr().out
+        assert "MPI ranks seen in log:                 8" in output
+        assert "Rank-0 function timer time:            70.0 ms" in output
+        assert "All-rank function timer sum:           560.0 ms" in output
+        assert "Rank-0 timer coverage of steps:        35.0%" in output
+        assert (
+            "Rank-0 time outside timers:            130.0 ms (65.0%)" in output
         )
