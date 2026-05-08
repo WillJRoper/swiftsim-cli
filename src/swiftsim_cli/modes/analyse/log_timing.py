@@ -1908,6 +1908,7 @@ def analyse_swift_log_timings(
             nesting_db,
             task_category_times,
             task_counts,
+            step_totals,
             top_n,
             hierarchy_functions,
         )
@@ -1937,6 +1938,7 @@ def _print_analysis_tables(
     nesting_db,
     task_category_times,
     task_counts,
+    step_totals,
     top_n,
     hierarchy_functions,
 ):
@@ -2041,6 +2043,7 @@ def _print_analysis_tables(
         operation_stats,
         all_stats,
         sorted_all,
+        step_totals,
     )
 
 
@@ -2278,6 +2281,7 @@ def _print_overall_summary(
     operation_stats,
     all_stats,
     sorted_all,
+    step_totals,
 ):
     """Print overall performance summary."""
     print("\nPERFORMANCE SUMMARY")
@@ -2292,6 +2296,29 @@ def _print_overall_summary(
         "Total timer call instances:             "
         f"{sum(s['call_count'] for s in all_stats.values())}"
     )
+
+    if step_totals:
+        total_step_wallclock = sum(step_totals.values())
+        missing_time = total_step_wallclock - total_function
+        coverage_pct = (
+            100 * total_function / total_step_wallclock
+            if total_step_wallclock > 0
+            else 0.0
+        )
+        missing_pct = (
+            100 * missing_time / total_step_wallclock
+            if total_step_wallclock > 0
+            else 0.0
+        )
+        print(
+            "Step-table wallclock total:            "
+            f"{total_step_wallclock:.1f} ms"
+        )
+        print(f"Function timer coverage of steps:      {coverage_pct:.1f}%")
+        print(
+            "Time outside function timers:          "
+            f"{missing_time:.1f} ms ({missing_pct:.1f}%)"
+        )
 
     # Top-k coverage
     if len(sorted_all) >= 5:

@@ -10,6 +10,7 @@ from swiftsim_cli.modes.analyse.log_timing import (
     _hierarchy_corrected_total,
     _hierarchy_direct_accounted_time,
     _print_hierarchical_analysis,
+    _print_overall_summary,
     add_log_arguments,
     analyse_swift_log_timings,
     build_function_hierarchy,
@@ -1202,3 +1203,33 @@ class TestHierarchicalAnalysisDefaults:
         output = capsys.readouterr().out
         assert "├─ child_func (nested function)" in output
         assert "│  └─ child op" in output
+
+
+class TestOverallSummary:
+    """Tests for the bottom-of-report performance summary."""
+
+    def test_overall_summary_includes_step_table_sanity_check(self, capsys):
+        """Summary should compare function timers against step totals."""
+        _print_overall_summary(
+            total_function=70.0,
+            total_operation=20.0,
+            total_all=90.0,
+            function_stats={"func": {"call_count": 2}},
+            operation_stats={"op": {"call_count": 3}},
+            all_stats={
+                "func": {"call_count": 2, "total_time": 70.0},
+                "op": {"call_count": 3, "total_time": 20.0},
+            },
+            sorted_all=[
+                ("func", {"total_time": 70.0}),
+                ("op", {"total_time": 20.0}),
+            ],
+            step_totals={0: 60.0, 1: 40.0},
+        )
+
+        output = capsys.readouterr().out
+        assert "Step-table wallclock total:            100.0 ms" in output
+        assert "Function timer coverage of steps:      70.0%" in output
+        assert (
+            "Time outside function timers:          30.0 ms (30.0%)" in output
+        )
