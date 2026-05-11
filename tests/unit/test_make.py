@@ -12,13 +12,14 @@ class TestMakeMode:
     """Tests for make mode."""
 
     def test_add_arguments(self):
-        """Test that add_arguments adds the nr-threads argument."""
+        """Test that add_arguments adds the make arguments."""
         parser = argparse.ArgumentParser()
         add_arguments(parser)
 
         # Test default value
         args = parser.parse_args([])
         assert args.nr_threads == 1
+        assert args.clean is False
 
         # Test with explicit value
         args = parser.parse_args(["-j", "8"])
@@ -28,18 +29,22 @@ class TestMakeMode:
         args = parser.parse_args(["--nr-threads", "16"])
         assert args.nr_threads == 16
 
+        args = parser.parse_args(["--clean"])
+        assert args.clean is True
+
     @patch("swiftsim_cli.modes.make.make_swift")
     def test_run(self, mock_make_swift, tmp_path):
         """Test the run function calls make_swift with correct arguments."""
         # Create mock args
         args = Mock()
         args.nr_threads = 8
+        args.clean = True
 
         # Call run
         run(args)
 
         # Verify make_swift was called with correct arguments
-        mock_make_swift.assert_called_once_with(nr_threads=8)
+        mock_make_swift.assert_called_once_with(nr_threads=8, clean=True)
 
 
 class TestMakeSwift:
@@ -89,6 +94,30 @@ class TestMakeSwift:
         # Verify the make command was run with -j flag
         mock_run_command.assert_called_once_with(
             ["make", "-j", "8"], swift_dir
+        )
+
+    @patch("swiftsim_cli.modes.make._run_command_in_swift_dir")
+    @patch("swiftsim_cli.modes.make.get_swiftsim_dir")
+    def test_make_swift_clean_then_build(
+        self, mock_get_dir, mock_run_command, tmp_path
+    ):
+        """Test compiling SWIFT after running make clean."""
+        swift_dir = tmp_path / "swift"
+        swift_dir.mkdir()
+
+        mock_get_dir.return_value = swift_dir
+
+        make_swift(swift_dir, nr_threads=4, clean=True)
+
+        mock_get_dir.assert_called_once_with(swift_dir)
+        assert mock_run_command.call_count == 2
+        assert mock_run_command.call_args_list[0].args == (
+            ["make", "clean"],
+            swift_dir,
+        )
+        assert mock_run_command.call_args_list[1].args == (
+            ["make", "-j", "4"],
+            swift_dir,
         )
 
     @patch("swiftsim_cli.modes.make._run_command_in_swift_dir")

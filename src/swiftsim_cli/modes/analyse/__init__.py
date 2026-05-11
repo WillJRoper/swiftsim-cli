@@ -22,6 +22,7 @@ from .log_task_counts import run_swift_task_counts
 from .log_timing import run_swift_log_timing
 from .mpiuse import run_swift_mpiuse
 from .scaling import run_swift_scaling
+from .task_plots import run_swift_task_plots
 from .timesteps import run_timestep
 
 
@@ -41,6 +42,7 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     from .log_timing import add_log_arguments
     from .mpiuse import add_mpiuse_arguments
     from .scaling import add_scaling_arguments
+    from .task_plots import add_task_plots_arguments
     from .timesteps import add_timestep_arguments
 
     add_timestep_arguments(subparsers)
@@ -50,6 +52,7 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     add_task_counts_arguments(subparsers)
     add_mpiuse_arguments(subparsers)
     add_scaling_arguments(subparsers)
+    add_task_plots_arguments(subparsers)
 
 
 def run(args: argparse.Namespace) -> None:
@@ -68,6 +71,8 @@ def run(args: argparse.Namespace) -> None:
         run_swift_mpiuse(args)
     elif args.analysis_type == "scaling":
         run_swift_scaling(args)
+    elif args.analysis_type == "task-plots":
+        run_swift_task_plots(args)
     else:
         raise ValueError(f"Unknown analysis type: {args.analysis_type}")
 
@@ -77,6 +82,7 @@ from .log_task_counts import analyse_swift_task_counts
 from .log_timing import analyse_swift_log_timings
 from .mpiuse import analyse_swift_mpiuse
 from .scaling import analyse_swift_scaling
+from .task_plots import analyse_swift_task_plots
 from .timer_classification import classify_timers_by_max_time
 from .timesteps import analyse_timestep_files
 
@@ -88,6 +94,7 @@ __all__ = [
     "run_swift_task_counts",
     "run_swift_mpiuse",
     "run_swift_scaling",
+    "run_swift_task_plots",
     "run_gravity_checks",
     "run_gravity_error_maps",
     "analyse_timestep_files",
@@ -95,5 +102,6 @@ __all__ = [
     "analyse_swift_task_counts",
     "analyse_swift_mpiuse",
     "analyse_swift_scaling",
+    "analyse_swift_task_plots",
     "classify_timers_by_max_time",
 ]

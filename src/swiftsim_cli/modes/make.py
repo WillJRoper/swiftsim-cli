@@ -19,14 +19,24 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         default=1,
         help="Number of threads to use for compilation (default: 1).",
     )
+    parser.add_argument(
+        "--clean",
+        action="store_true",
+        default=False,
+        help="Run 'make clean' before compiling.",
+    )
 
 
 def run(args: argparse.Namespace) -> None:
     """Execute the make mode."""
-    make_swift(nr_threads=args.nr_threads)
+    make_swift(nr_threads=args.nr_threads, clean=args.clean)
 
 
-def make_swift(swift_dir: Path | None = None, nr_threads: int = 1) -> None:
+def make_swift(
+    swift_dir: Path | None = None,
+    nr_threads: int = 1,
+    clean: bool = False,
+) -> None:
     """Compile the SWIFT simulation code.
 
     This will navigate to the SWIFT directory (erroring if there is not one
@@ -37,6 +47,7 @@ def make_swift(swift_dir: Path | None = None, nr_threads: int = 1) -> None:
             directory from the SWIFT-utils config.
         nr_threads: The number of threads to use for compilation. Defaults
             to 1.
+        clean: Whether to run ``make clean`` before compiling.
 
     Raises:
         FileNotFoundError: If the SWIFT directory does not exist.
@@ -46,10 +57,14 @@ def make_swift(swift_dir: Path | None = None, nr_threads: int = 1) -> None:
     # Get the SWIFT directory
     swift_dir = get_swiftsim_dir(swift_dir)
 
-    # Run the command in the SWIFT directory with optional threading
     if nr_threads < 1:
         raise ValueError("Number of threads must be at least 1.")
-    elif nr_threads > 1:
+
+    if clean:
+        _run_command_in_swift_dir(["make", "clean"], swift_dir)
+
+    # Run the command in the SWIFT directory with optional threading
+    if nr_threads > 1:
         _run_command_in_swift_dir(["make", "-j", str(nr_threads)], swift_dir)
     else:
         _run_command_in_swift_dir(["make"], swift_dir)
