@@ -113,6 +113,17 @@ def add_timestep_arguments(subparsers) -> None:
         default=False,
     )
 
+    timestep_parser.add_argument(
+        "--nthreads",
+        nargs="+",
+        help=(
+            "Number of threads used by each run, in the same order as files. "
+            "When provided, the time axis is converted to CPU time."
+        ),
+        type=int,
+        default=None,
+    )
+
 
 def run_timestep(args: argparse.Namespace) -> None:
     """Run timestep analysis."""
@@ -124,6 +135,7 @@ def run_timestep(args: argparse.Namespace) -> None:
         show_plot=args.show_plot,
         time_column=args.time_column,
         match_runtimes=args.match_runtimes,
+        nthreads=args.nthreads,
     )
 
 
@@ -191,6 +203,7 @@ def analyse_timestep_files(
     show_plot: bool = True,
     time_column: int | None = None,
     match_runtimes: bool = False,
+    nthreads: list[int] | None = None,
 ) -> None:
     """Plot the timestep files of one or more SWIFT runs.
 
@@ -208,6 +221,9 @@ def analyse_timestep_files(
             to 2, which is the scale-factor column in the timestep table.
         match_runtimes: Whether to trim all plotted datasets to the shortest
             x-axis extent found in the inputs.
+        nthreads: Optional number of threads used by each run. If provided,
+            cumulative wall-clock and dead time are multiplied by these values
+            to show CPU time.
 
     Raises:
         ValueError: If the number of files and labels do not match.
@@ -215,6 +231,14 @@ def analyse_timestep_files(
     # Make sure the number of files and labels match
     if len(files) != len(labels):
         raise ValueError("Number of files and labels must match.")
+
+    if nthreads is not None:
+        if len(files) != len(nthreads):
+            raise ValueError(
+                "Number of files and nthreads entries must match."
+            )
+        if any(nthread <= 0 for nthread in nthreads):
+            raise ValueError("nthreads entries must be positive integers.")
 
     if time_column is None:
         time_column = 1 if plot_time is True else 2
@@ -238,7 +262,7 @@ def analyse_timestep_files(
     y: list[np.ndarray[Any, Any]] = []
     deadtime: list[np.ndarray[Any, Any]] = []
     column_labels: dict[int, str] = {}
-    for file in files:
+    for file_index, file in enumerate(files):
         xi_values: list[float] = []
         yi_values: list[float] = []
         dti_values: list[float] = []
@@ -285,10 +309,16 @@ def analyse_timestep_files(
                 yi_values.append(float(parts[wall_clock_index]))
                 dti_values.append(float(parts[deadtime_index]))
 
-        # Convert to numpy arrays and compute cumulative sums in hours
+        time_scale = nthreads[file_index] if nthreads is not None else 1
+
+        # Convert to numpy arrays and compute cumulative sums in hours.
         x.append(np.array(xi_values))
-        y.append(np.cumsum(np.array(yi_values)) / (1000 * 60 * 60))
-        deadtime.append(np.cumsum(np.array(dti_values)) / (1000 * 60 * 60))
+        y.append(
+            np.cumsum(np.array(yi_values)) * time_scale / (1000 * 60 * 60)
+        )
+        deadtime.append(
+            np.cumsum(np.array(dti_values)) * time_scale / (1000 * 60 * 60)
+        )
 
     if match_runtimes:
         max_x_values = [series[-1] for series in x if len(series) > 0]
@@ -331,7 +361,8 @@ def analyse_timestep_files(
 
     # Set labels and title for main plot
     x_label = column_labels.get(time_column, _get_x_axis_label(time_column))
-    ax1.set_ylabel("Time [hrs]")
+    y_label = "CPU hrs" if nthreads is not None else "Time [hrs]"
+    ax1.set_ylabel(y_label)
 
     # Create custom legend with black lines showing line styles
     legend_elements = [
