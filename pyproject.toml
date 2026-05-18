@@ -73,6 +73,7 @@ dependencies = [
   "tqdm >= 4.60",         # Added: used for progress bars in src_parser and analyse
   "tree-sitter",           # For C code parsing
   "tree-sitter-c",         # C language support for tree-sitter
+  "swiftsimio",            # Used for reading SWIFT initial conditions
 ]
 
 # Optional dependencies for specific use cases

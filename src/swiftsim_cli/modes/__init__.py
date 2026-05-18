@@ -12,6 +12,7 @@ from . import (
     show,
     switch,
     update,
+    utils,
 )
 
 # Available modes for swift-utils CLI
@@ -25,6 +26,7 @@ AVAILABLE_MODES = [
     "new",
     "analyse",
     "show",
+    "utils",
 ]
 
 # Type hint for mode names
@@ -38,6 +40,7 @@ Mode = Literal[
     "new",
     "analyse",
     "show",
+    "utils",
 ]
 
 # Mode module imports
@@ -53,4 +56,5 @@ MODE_MODULES = {
     "new": new,
     "analyse": analyse,
     "show": show,
+    "utils": utils,
 }
