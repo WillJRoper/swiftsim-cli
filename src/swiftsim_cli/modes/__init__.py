@@ -12,6 +12,7 @@ from . import (
     scaling,
     show,
     switch,
+    translate,
     update,
     utils,
 )
@@ -28,6 +29,7 @@ AVAILABLE_MODES = [
     "analyse",
     "scaling",
     "show",
+    "translate",
     "utils",
 ]
 
@@ -43,6 +45,7 @@ Mode = Literal[
     "analyse",
     "scaling",
     "show",
+    "translate",
     "utils",
 ]
 
@@ -60,5 +63,6 @@ MODE_MODULES = {
     "analyse": analyse,
     "scaling": scaling,
     "show": show,
+    "translate": translate,
     "utils": utils,
 }
