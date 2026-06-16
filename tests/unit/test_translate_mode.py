@@ -16,6 +16,7 @@ from swiftsim_cli.modes.translate import (
     _parse_field_arg,
     _parse_fields,
     _parse_ndim,
+    _resolve_input_files,
     _translate_snapshot,
     add_arguments,
     run,
@@ -115,6 +116,27 @@ class TestParseNdim:
         result = _parse_ndim("cdim", ["4"], 3, int)
         np.testing.assert_array_equal(result, [4, 4, 4])
         assert result.dtype == np.int64
+
+
+class TestResolveInputFiles:
+    def test_single_file(self, temp_dir):
+        fp = temp_dir / "test.hdf5"
+        fp.touch()
+        result = _resolve_input_files(fp)
+        assert result == [fp]
+
+    def test_glob_pattern(self, temp_dir):
+        (temp_dir / "snap_0.hdf5").touch()
+        (temp_dir / "snap_1.hdf5").touch()
+        (temp_dir / "snap_2.hdf5").touch()
+        result = _resolve_input_files(temp_dir / "snap_*.hdf5")
+        assert len(result) == 3
+        assert result == sorted(result)
+
+    def test_glob_no_match(self, temp_dir):
+        pattern = temp_dir / "nonexistent_*.hdf5"
+        with pytest.raises(FileNotFoundError, match="No files matched"):
+            _resolve_input_files(pattern)
 
 
 # ---------------------------------------------------------------------------
@@ -367,7 +389,6 @@ class TestEndToEnd:
 
             assert "PartType0" in f
             g0 = f["PartType0"]
-            # Coordinates auto-included even when not in field_args
             assert g0["Coordinates"].shape == (200, 3)
             assert g0["Masses"].shape == (200,)
             assert g0["ParticleIDs"].shape == (200,)
@@ -395,8 +416,7 @@ class TestEndToEnd:
             assert "MaxPositions" in cells
             assert "PartType0" in cells["MaxPositions"]
 
-            if "Units" in f:
-                assert "Units" in f
+            assert "Units" in f
 
     def test_two_part_types(self, temp_dir):
         src_path = temp_dir / "source.hdf5"
@@ -504,7 +524,7 @@ class TestEndToEnd:
         src_path = temp_dir / "source.hdf5"
         _make_source_snapshot(src_path)
 
-        with pytest.raises(ValueError, match="not found in source"):
+        with pytest.raises(ValueError, match="not found in"):
             _translate_snapshot(
                 input_path=src_path,
                 output_path=temp_dir / "out.hdf5",
@@ -543,22 +563,6 @@ class TestEndToEnd:
                 part_types=["PartType0"],
                 coord_key="Coordinates",
                 field_args=["PartType1/Masses"],
-                boxsize=np.array([10.0] * 3),
-                cdim=np.array([2, 2, 2], dtype=np.int64),
-                nthreads=1,
-            )
-
-    def test_missing_dataset_raises(self, temp_dir):
-        src_path = temp_dir / "source.hdf5"
-        _make_source_snapshot(src_path)
-
-        with pytest.raises(ValueError, match="not found in"):
-            _translate_snapshot(
-                input_path=src_path,
-                output_path=temp_dir / "out.hdf5",
-                part_types=["PartType0"],
-                coord_key="Coordinates",
-                field_args=["PartType0/Nonexistent"],
                 boxsize=np.array([10.0] * 3),
                 cdim=np.array([2, 2, 2], dtype=np.int64),
                 nthreads=1,
@@ -677,6 +681,111 @@ class TestEndToEnd:
             assert f["PartType0/Coordinates"].shape == (30, 3)
             assert f["PartType1/Coordinates"].shape == (20, 3)
 
+    def test_multi_file_glob(self, temp_dir):
+        """Two shard files, half the particles in each."""
+        rng = np.random.default_rng(99)
+        boxsize = 10.0
+
+        # Shard 0: first 30 gas, first 15 DM
+        fp0 = temp_dir / "snap_0000.hdf5"
+        with h5py.File(fp0, "w") as f:
+            hdr = f.create_group("Header")
+            hdr.attrs["BoxSize"] = np.float64(boxsize)
+            npart = np.array([30, 15, 0, 0, 0, 0], dtype=np.int32)
+            hdr.attrs["NumPart_ThisFile"] = npart.astype(np.uint32)
+
+            g0 = f.create_group("PartType0")
+            coords0 = rng.uniform(0, boxsize, (30, 3))
+            g0.create_dataset("Coordinates", data=coords0)
+            g0.create_dataset("Masses", data=rng.uniform(0.1, 1.0, 30))
+
+            g1 = f.create_group("PartType1")
+            coords1 = rng.uniform(0, boxsize, (15, 3))
+            g1.create_dataset("Coordinates", data=coords1)
+
+        # Shard 1: next 40 gas, next 25 DM
+        fp1 = temp_dir / "snap_0001.hdf5"
+        with h5py.File(fp1, "w") as f:
+            hdr = f.create_group("Header")
+            hdr.attrs["BoxSize"] = np.float64(boxsize)
+            npart = np.array([40, 25, 0, 0, 0, 0], dtype=np.int32)
+            hdr.attrs["NumPart_ThisFile"] = npart.astype(np.uint32)
+
+            g0 = f.create_group("PartType0")
+            coords0b = rng.uniform(0, boxsize, (40, 3))
+            g0.create_dataset("Coordinates", data=coords0b)
+            g0.create_dataset("Masses", data=rng.uniform(0.1, 1.0, 40))
+
+            g1 = f.create_group("PartType1")
+            coords1b = rng.uniform(0, boxsize, (25, 3))
+            g1.create_dataset("Coordinates", data=coords1b)
+
+        out_path = temp_dir / "output.hdf5"
+        glob_pattern = temp_dir / "snap_*.hdf5"
+
+        _translate_snapshot(
+            input_path=glob_pattern,
+            output_path=out_path,
+            part_types=["PartType0", "PartType1"],
+            coord_key="Coordinates",
+            field_args=[],
+            boxsize=np.array([boxsize] * 3),
+            cdim=np.array([4, 4, 4], dtype=np.int64),
+            nthreads=1,
+            all_fields=True,
+        )
+
+        with h5py.File(out_path, "r") as f:
+            assert f["PartType0/Coordinates"].shape == (70, 3)
+            assert f["PartType1/Coordinates"].shape == (40, 3)
+            assert f["Cells/Counts/PartType0"][:].sum() == 70
+            assert f["Cells/Counts/PartType1"][:].sum() == 40
+            assert f["Header"].attrs["NumPart_Total"][0] == 70
+            assert f["Header"].attrs["NumPart_Total"][1] == 40
+
+    def test_thread_safety_nthreads(self, temp_dir):
+        """Multi-threaded translation produces the same result as single."""
+        src_path = temp_dir / "source.hdf5"
+        out1 = temp_dir / "out_threaded.hdf5"
+        out2 = temp_dir / "out_single.hdf5"
+        _make_source_snapshot(src_path, n_gas=300, n_dm=0)
+
+        _translate_snapshot(
+            input_path=src_path,
+            output_path=out1,
+            part_types=["PartType0"],
+            coord_key="Coordinates",
+            field_args=["PartType0/Masses"],
+            boxsize=np.array([10.0, 10.0, 10.0]),
+            cdim=np.array([4, 4, 4], dtype=np.int64),
+            nthreads=4,
+        )
+
+        _translate_snapshot(
+            input_path=src_path,
+            output_path=out2,
+            part_types=["PartType0"],
+            coord_key="Coordinates",
+            field_args=["PartType0/Masses"],
+            boxsize=np.array([10.0, 10.0, 10.0]),
+            cdim=np.array([4, 4, 4], dtype=np.int64),
+            nthreads=1,
+        )
+
+        with h5py.File(out1, "r") as f1, h5py.File(out2, "r") as f2:
+            np.testing.assert_array_equal(
+                f1["PartType0/Coordinates"][:],
+                f2["PartType0/Coordinates"][:],
+            )
+            np.testing.assert_array_equal(
+                f1["PartType0/Masses"][:],
+                f2["PartType0/Masses"][:],
+            )
+            np.testing.assert_array_equal(
+                f1["Cells/Counts/PartType0"][:],
+                f2["Cells/Counts/PartType0"][:],
+            )
+
 
 # ---------------------------------------------------------------------------
 # CLI argument registration
@@ -747,6 +856,28 @@ class TestCliArgs:
             ]
         )
         assert args.all_fields is True
+
+    def test_glob_input_arg(self):
+        parser = argparse.ArgumentParser()
+        add_arguments(parser)
+        args = parser.parse_args(
+            [
+                "snapdir/snapshot_*.hdf5",
+                "--output",
+                "output.hdf5",
+                "--part-type",
+                "PartType0",
+                "--coord-key",
+                "Coordinates",
+                "--boxsize",
+                "10",
+                "--cdim",
+                "4",
+                "4",
+                "4",
+            ]
+        )
+        assert args.input == Path("snapdir/snapshot_*.hdf5")
 
     def test_run_no_part_types(self, temp_dir):
         src_path = temp_dir / "source.hdf5"

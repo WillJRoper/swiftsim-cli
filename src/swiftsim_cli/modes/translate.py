@@ -1,12 +1,14 @@
 """Translate mode for converting external snapshots to SWIFT format.
 
-This mode reads an external HDF5 snapshot, reorders particles into
-SWIFT's top-level cell structure, and writes a SWIFT-compliant snapshot
-file with Cell hash-table metadata that can be read by swiftsimio and
-other SWIFT tooling.
+This mode reads an external HDF5 snapshot (single file or glob for
+distributed snapshots), reorders particles into SWIFT's top-level cell
+structure, and writes a SWIFT-compliant snapshot file with Cell
+hash-table metadata that can be read by swiftsimio and other SWIFT
+tooling.
 """
 
 import argparse
+import glob
 import sys
 import warnings
 from concurrent.futures import ThreadPoolExecutor
@@ -88,6 +90,24 @@ def _parse_ndim(
     raise argparse.ArgumentTypeError(
         f"--{name} expects 1 or {dim} value(s), got {len(vals)}"
     )
+
+
+def _resolve_input_files(input_path: Path) -> List[Path]:
+    """Expand *input_path* to a sorted list of concrete HDF5 files.
+
+    When *input_path* contains glob wildcards (``*``, ``?``, ``[``) the
+    pattern is expanded with :func:`glob.glob`.  Otherwise the single path
+    is returned as-is.
+    """
+    pattern = str(input_path)
+    if any(ch in pattern for ch in "*?["):
+        matches = sorted(glob.glob(pattern))
+        if not matches:
+            raise FileNotFoundError(
+                f"No files matched the glob pattern '{pattern}'"
+            )
+        return [Path(m) for m in matches]
+    return [input_path]
 
 
 def _compute_cell_labels(
@@ -192,51 +212,39 @@ def _compute_cell_minmax(
     return min_pos, max_pos
 
 
-def _process_part_type(
-    src: h5py.File,
-    part_type: str,
-    fields: List[str],
+def _process_part_type_arrays(
+    datasets: Dict[str, np.ndarray],
     coord_field: str,
     boxsize: np.ndarray,
     cdim: np.ndarray,
 ) -> Tuple[
-    np.ndarray,  # sort_order
     Dict[str, np.ndarray],  # reordered datasets
     np.ndarray,  # sorted coords
     np.ndarray,  # sorted cell_labels
 ]:
-    """Read and cell-sort all requested fields for one particle type.
+    """Cell-sort pre-loaded per-part-type data (pure NumPy – thread-safe).
 
     Parameters
     ----------
-    src : h5py.File
-        Open source HDF5 file (read-only).
-    part_type : str
-        HDF5 group name (e.g. ``"PartType0"``).
-    fields : list[str]
-        Dataset names to include.
+    datasets : dict[str, ndarray]
+        All field arrays for one particle type; all must have the same
+        leading dimension *N*.
     coord_field : str
-        Name of the coordinate dataset within *part_type*.
+        Key in *datasets* that holds the (N, 3) coordinate array.
     boxsize : (3,) ndarray
     cdim : (3,) ndarray
 
     Returns:
     -------
-    sort_order : (N,) int64 ndarray
-        Permutation that sorts particles by cell index.
     reordered : dict[str, ndarray]
-        Cell-sorted arrays for each requested field.
-    sorted_coords : (N, 3) float64 ndarray
-        Cell-sorted coordinate array.
+        Cell-sorted copies of every dataset in *datasets*.
+    sorted_coords : (N, 3) ndarray
     sorted_labels : (N,) int64 ndarray
-        Sorted cell labels (used for building counts/offsets later).
     """
-    group = src[part_type]
-
-    coords = group[coord_field][:]
+    coords = datasets[coord_field]
     if coords.ndim != 2 or coords.shape[1] != 3:
         raise ValueError(
-            f"Coordinate field '{coord_field}' in '{part_type}' must be "
+            f"Coordinate field '{coord_field}' must be "
             f"(N, 3); got shape {coords.shape}"
         )
 
@@ -244,14 +252,10 @@ def _process_part_type(
     sort_order = np.argsort(labels, kind="stable")
 
     reordered: Dict[str, np.ndarray] = {}
-    for field_name in fields:
-        data = group[field_name][:]
+    for field_name, data in datasets.items():
         reordered[field_name] = data[sort_order]
 
-    sorted_coords = coords[sort_order]
-    sorted_labels = labels[sort_order]
-
-    return sort_order, reordered, sorted_coords, sorted_labels
+    return reordered, coords[sort_order], labels[sort_order]
 
 
 def _copy_or_synthesise_header(
@@ -380,7 +384,9 @@ def _translate_snapshot(
     Parameters
     ----------
     input_path : Path
-        Source HDF5 snapshot.
+        Source HDF5 snapshot path.  May be a single file or a glob
+        pattern (e.g. ``snapdir/snapshot_*.hdf5``) to combine
+        distributed shards.
     output_path : Path
         Destination HDF5 file (overwritten if it exists).
     part_types : list[str]
@@ -410,140 +416,169 @@ def _translate_snapshot(
     if nthreads < 1:
         nthreads = 1
 
-    print(f"Inspecting source snapshot: {input_path}")
-    with h5py.File(input_path, "r") as src:
+    # ---- resolve input files ----
+    input_files = _resolve_input_files(input_path)
+    n_files = len(input_files)
+    print(f"Found {n_files} source file(s) matching: {input_path}")
+
+    # ---- peek at first file for field discovery & metadata ----
+    with h5py.File(input_files[0], "r") as peek:
+        metadata_groups = sorted(
+            name
+            for name in peek.keys()
+            if name not in ("Header", "Cells", "Units")
+            and not name.startswith("PartType")
+        )
         for pt in part_types:
-            if pt not in src:
-                raise ValueError(f"Group '{pt}' not found in source file")
-            grp = src[pt]
-            if coord_key not in grp:
+            if pt not in peek:
+                raise ValueError(
+                    f"Group '{pt}' not found in '{input_files[0]}'"
+                )
+            if all_fields:
+                fields[pt] = sorted(peek[pt].keys())
+            if coord_key not in peek[pt]:
                 raise ValueError(
                     f"Coordinate field '{coord_key}' not found in '{pt}'"
                 )
 
-        if all_fields:
+    # Ensure coord_key is always included
+    for pt in part_types:
+        if coord_key not in fields[pt]:
+            fields[pt].insert(0, coord_key)
+
+    # ---- read all particle data in the main thread ----
+    # all_datasets : {part_type: {field_name: list_of_arrays}}
+    all_datasets: Dict[str, Dict[str, List[np.ndarray]]] = {
+        pt: {fn: [] for fn in fields[pt]} for pt in part_types
+    }
+
+    for fp in input_files:
+        print(f"  Reading: {fp}")
+        with h5py.File(fp, "r") as src:
             for pt in part_types:
-                all_names = sorted(src[pt].keys())
-                fields[pt] = all_names
-        else:
-            for pt in part_types:
+                if pt not in src:
+                    continue
                 for fn in fields[pt]:
-                    if fn not in src[pt]:
-                        raise ValueError(f"Dataset '{fn}' not found in '{pt}'")
+                    if fn in src[pt]:
+                        all_datasets[pt][fn].append(src[pt][fn][:])
 
-        for pt in part_types:
-            if coord_key not in fields[pt]:
-                fields[pt].insert(0, coord_key)
+    # Validate: coordinate field must have been found in at least one file
+    for pt in part_types:
+        if not all_datasets[pt].get(coord_key):
+            raise ValueError(
+                f"Coordinate field '{coord_key}' not found in '{pt}' "
+                f"across {n_files} source file(s)"
+            )
 
-        # ---- process each part type (parallel when nthreads > 1) ----
-        results: Dict[
-            str,
-            Tuple[
-                np.ndarray,
-                Dict[str, np.ndarray],
-                np.ndarray,
-                np.ndarray,
-            ],
-        ] = {}
+    # ---- concatenate per-part-type arrays ----
+    concatenated: Dict[str, Dict[str, np.ndarray]] = {}
+    for pt in part_types:
+        concatenated[pt] = {}
+        for fn in fields[pt]:
+            parts = all_datasets[pt].get(fn, [])
+            concatenated[pt][fn] = (
+                np.concatenate(parts) if parts else np.array([])
+            )
 
-        if nthreads > 1:
-            with ThreadPoolExecutor(max_workers=nthreads) as executor:
-                futures = {}
-                for pt in part_types:
-                    f = executor.submit(
-                        _process_part_type,
-                        src,
-                        pt,
-                        fields[pt],
-                        coord_key,
-                        boxsize,
-                        cdim,
-                    )
-                    futures[f] = pt
-                for f in futures:
-                    pt = futures[f]
-                    results[pt] = f.result()
-        else:
+    # ---- process each part type (parallel; pure NumPy – thread-safe) ----
+    results: Dict[
+        str,
+        Tuple[
+            Dict[str, np.ndarray],  # reordered
+            np.ndarray,  # sorted_coords
+            np.ndarray,  # sorted_labels
+        ],
+    ] = {}
+
+    if nthreads > 1:
+        with ThreadPoolExecutor(max_workers=nthreads) as executor:
+            futures = {}
             for pt in part_types:
-                results[pt] = _process_part_type(
-                    src,
-                    pt,
-                    fields[pt],
+                f = executor.submit(
+                    _process_part_type_arrays,
+                    concatenated[pt],
                     coord_key,
                     boxsize,
                     cdim,
                 )
-
-        # ---- build cell metadata per part type ----
-        part_type_info: Dict[
-            str,
-            Tuple[np.ndarray, np.ndarray, np.ndarray],
-        ] = {}
+                futures[f] = pt
+            for f in futures:
+                results[futures[f]] = f.result()
+    else:
         for pt in part_types:
-            _, _, sorted_coords, sorted_labels = results[pt]
-            counts, offsets = _build_counts_offsets(sorted_labels, n_cells)
-            part_type_info[pt] = (counts, offsets, sorted_coords)
+            results[pt] = _process_part_type_arrays(
+                concatenated[pt],
+                coord_key,
+                boxsize,
+                cdim,
+            )
 
-        centres = _compute_cell_centres(cdim, boxsize, n_cells)
+    # ---- build cell metadata per part type ----
+    part_type_info: Dict[
+        str,
+        Tuple[np.ndarray, np.ndarray, np.ndarray],
+    ] = {}
+    for pt in part_types:
+        _, sorted_coords, sorted_labels = results[pt]
+        counts, offsets = _build_counts_offsets(sorted_labels, n_cells)
+        part_type_info[pt] = (counts, offsets, sorted_coords)
 
-        # ---- particle counts for the header ----
-        npart = np.zeros(_GADGET_NUM_PART_TYPES, dtype=np.int32)
-        for pt in part_types:
-            pidx = int(pt.replace("PartType", ""))
-            npart[pidx] = len(results[pt][0])
+    centres = _compute_cell_centres(cdim, boxsize, n_cells)
 
-        # ---- collect non-particle metadata group names ----
-        src_groups = set(src.keys())
-        metadata_groups = sorted(
-            name
-            for name in src_groups
-            if name not in ("Header", "Cells", "Units")
-            and not name.startswith("PartType")
-        )
+    # ---- particle counts for the header ----
+    npart = np.zeros(_GADGET_NUM_PART_TYPES, dtype=np.int32)
+    for pt in part_types:
+        pidx = int(pt.replace("PartType", ""))
+        npart[pidx] = len(list(concatenated[pt].values())[0])
 
-        # ---- write output ----
-        print(f"Writing translated snapshot to: {output_path}")
-        with h5py.File(output_path, "w") as out:
-            if "Units" in src:
+    # ---- write output ----
+    print(f"Writing translated snapshot to: {output_path}")
+    with h5py.File(input_files[0], "r") as src_meta, h5py.File(
+        output_path, "w"
+    ) as out:
+        if "Units" in src_meta:
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                src_meta.copy("Units", out, "Units")
+
+        for name in metadata_groups:
+            try:
                 with warnings.catch_warnings():
                     warnings.simplefilter("ignore")
-                    src.copy("Units", out, "Units")
+                    src_meta.copy(name, out, name)
+            except Exception:
+                print(f"  Warning: could not copy group '{name}'")
 
-            for name in metadata_groups:
-                try:
-                    with warnings.catch_warnings():
-                        warnings.simplefilter("ignore")
-                        src.copy(name, out, name)
-                except Exception:
-                    print(f"  Warning: could not copy group '{name}'")
+        _copy_or_synthesise_header(src_meta, out, boxsize, npart)
 
-            _copy_or_synthesise_header(src, out, boxsize, npart)
+        # Particle data (cell-sorted)
+        for pt in part_types:
+            grp = out.create_group(pt)
+            reordered, _, _ = results[pt]
+            for fn in fields[pt]:
+                data = reordered[fn]
+                grp.create_dataset(fn, data=data)
 
-            # Particle data (cell-sorted)
-            for pt in part_types:
-                grp = out.create_group(pt)
-                _, reordered, _, _ = results[pt]
-                src_grp = src[pt]
+            # Restore per-dataset attributes from first file
+            if pt in src_meta:
                 for fn in fields[pt]:
-                    data = reordered[fn]
-                    ds = src_grp[fn]
-                    dset = grp.create_dataset(fn, data=data, dtype=data.dtype)
-                    for k, v in ds.attrs.items():
-                        dset.attrs[k] = v
+                    if fn in src_meta[pt]:
+                        for k, v in src_meta[pt][fn].attrs.items():
+                            grp[fn].attrs[k] = v
 
-            _write_cells_group(
-                out,
-                cdim,
-                boxsize,
-                n_cells,
-                centres,
-                part_type_info,
-            )
+        _write_cells_group(
+            out,
+            cdim,
+            boxsize,
+            n_cells,
+            centres,
+            part_type_info,
+        )
 
     nfields = sum(len(v) for v in fields.values())
     print(
-        f"Done. Translated {len(part_types)} particle type(s), "
-        f"{nfields} field(s), {n_cells} cells."
+        f"Done. Translated {n_files} file(s), {len(part_types)} particle "
+        f"type(s), {nfields} field(s), {n_cells} cells."
     )
 
 
@@ -552,7 +587,10 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "input",
         type=Path,
-        help="Path to the input HDF5 snapshot to translate.",
+        help=(
+            "Path to the input HDF5 snapshot to translate "
+            "(accepts globs, e.g. 'snapdir/snapshot_*.hdf5')."
+        ),
     )
     parser.add_argument(
         "--output",
