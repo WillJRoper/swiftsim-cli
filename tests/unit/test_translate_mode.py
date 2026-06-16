@@ -647,6 +647,36 @@ class TestEndToEnd:
             assert "ParticleIDs" in f["PartType0"]
             assert f["PartType0/Coordinates"].shape == (60, 3)
 
+    def test_all_fields_flag(self, temp_dir):
+        src_path = temp_dir / "source.hdf5"
+        out_path = temp_dir / "output.hdf5"
+        _make_source_snapshot(src_path, n_gas=30, n_dm=20)
+
+        _translate_snapshot(
+            input_path=src_path,
+            output_path=out_path,
+            part_types=["PartType0", "PartType1"],
+            coord_key="Coordinates",
+            field_args=[],
+            boxsize=np.array([10.0, 10.0, 10.0]),
+            cdim=np.array([2, 2, 2], dtype=np.int64),
+            nthreads=1,
+            all_fields=True,
+        )
+
+        with h5py.File(out_path, "r") as f:
+            assert set(f["PartType0"].keys()) == {
+                "Coordinates",
+                "Masses",
+                "ParticleIDs",
+            }
+            assert set(f["PartType1"].keys()) == {
+                "Coordinates",
+                "Masses",
+            }
+            assert f["PartType0/Coordinates"].shape == (30, 3)
+            assert f["PartType1/Coordinates"].shape == (20, 3)
+
 
 # ---------------------------------------------------------------------------
 # CLI argument registration
@@ -693,6 +723,30 @@ class TestCliArgs:
         assert args.boxsize == ["10"]
         assert args.cdim == ["4", "4", "4"]
         assert args.nthreads == 2
+        assert args.all_fields is False
+
+    def test_add_arguments_all_fields(self):
+        parser = argparse.ArgumentParser()
+        add_arguments(parser)
+        args = parser.parse_args(
+            [
+                "input.hdf5",
+                "--output",
+                "output.hdf5",
+                "--part-type",
+                "PartType0",
+                "--coord-key",
+                "Coordinates",
+                "--all-fields",
+                "--boxsize",
+                "10",
+                "--cdim",
+                "4",
+                "4",
+                "4",
+            ]
+        )
+        assert args.all_fields is True
 
     def test_run_no_part_types(self, temp_dir):
         src_path = temp_dir / "source.hdf5"
@@ -708,6 +762,7 @@ class TestCliArgs:
             boxsize=["10"],
             cdim=["2", "2", "2"],
             nthreads=1,
+            all_fields=False,
         )
         with pytest.raises(SystemExit):
             run(args)

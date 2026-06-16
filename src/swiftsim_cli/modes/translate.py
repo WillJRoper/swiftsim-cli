@@ -373,6 +373,7 @@ def _translate_snapshot(
     boxsize: np.ndarray,
     cdim: np.ndarray,
     nthreads: int,
+    all_fields: bool = False,
 ):
     """Orchestrate the full snapshot translation.
 
@@ -394,14 +395,15 @@ def _translate_snapshot(
         Top-level cell grid dimensions.
     nthreads : int
         Number of threads for per-part-type parallel processing.
+    all_fields : bool
+        When True, copy every dataset from each part type group
+        instead of only those listed in *field_args*.
     """
     fields = _parse_fields(field_args, part_types)
 
     for pt in part_types:
         if pt not in fields:
             fields[pt] = []
-        if coord_key not in fields[pt]:
-            fields[pt].insert(0, coord_key)
 
     n_cells = int(np.prod(cdim))
 
@@ -418,9 +420,20 @@ def _translate_snapshot(
                 raise ValueError(
                     f"Coordinate field '{coord_key}' not found in '{pt}'"
                 )
-            for fn in fields[pt]:
-                if fn not in grp:
-                    raise ValueError(f"Dataset '{fn}' not found in '{pt}'")
+
+        if all_fields:
+            for pt in part_types:
+                all_names = sorted(src[pt].keys())
+                fields[pt] = all_names
+        else:
+            for pt in part_types:
+                for fn in fields[pt]:
+                    if fn not in src[pt]:
+                        raise ValueError(f"Dataset '{fn}' not found in '{pt}'")
+
+        for pt in part_types:
+            if coord_key not in fields[pt]:
+                fields[pt].insert(0, coord_key)
 
         # ---- process each part type (parallel when nthreads > 1) ----
         results: Dict[
@@ -594,6 +607,12 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         default=1,
         help="Number of threads for parallel processing (default: 1).",
     )
+    parser.add_argument(
+        "--all-fields",
+        action="store_true",
+        default=False,
+        help="Copy every dataset from each --part-type group.",
+    )
 
 
 def run(args: argparse.Namespace) -> None:
@@ -618,4 +637,5 @@ def run(args: argparse.Namespace) -> None:
         boxsize=boxsize,
         cdim=cdim,
         nthreads=args.nthreads,
+        all_fields=args.all_fields,
     )
