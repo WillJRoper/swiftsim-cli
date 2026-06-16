@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from swiftsim_cli.modes.analyse.scaling import (
+from swiftsim_cli.modes.scaling import (
     ScalingLogData,
     _aggregate_timer_totals,
     _build_legend_labels,

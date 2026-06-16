@@ -9,6 +9,7 @@ from . import (
     new,
     output_times,
     profile,
+    scaling,
     show,
     switch,
     update,
@@ -25,6 +26,7 @@ AVAILABLE_MODES = [
     "make",
     "new",
     "analyse",
+    "scaling",
     "show",
     "utils",
 ]
@@ -39,6 +41,7 @@ Mode = Literal[
     "make",
     "new",
     "analyse",
+    "scaling",
     "show",
     "utils",
 ]
@@ -55,6 +58,7 @@ MODE_MODULES = {
     "make": make,
     "new": new,
     "analyse": analyse,
+    "scaling": scaling,
     "show": show,
     "utils": utils,
 }
