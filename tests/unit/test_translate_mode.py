@@ -122,21 +122,36 @@ class TestResolveInputFiles:
     def test_single_file(self, temp_dir):
         fp = temp_dir / "test.hdf5"
         fp.touch()
-        result = _resolve_input_files(fp)
+        result = _resolve_input_files([fp])
         assert result == [fp]
 
     def test_glob_pattern(self, temp_dir):
         (temp_dir / "snap_0.hdf5").touch()
         (temp_dir / "snap_1.hdf5").touch()
         (temp_dir / "snap_2.hdf5").touch()
-        result = _resolve_input_files(temp_dir / "snap_*.hdf5")
+        result = _resolve_input_files([temp_dir / "snap_*.hdf5"])
         assert len(result) == 3
         assert result == sorted(result)
 
     def test_glob_no_match(self, temp_dir):
         pattern = temp_dir / "nonexistent_*.hdf5"
         with pytest.raises(FileNotFoundError, match="No files matched"):
-            _resolve_input_files(pattern)
+            _resolve_input_files([pattern])
+
+    def test_multiple_explicit_paths(self, temp_dir):
+        fp0 = temp_dir / "a.hdf5"
+        fp1 = temp_dir / "b.hdf5"
+        fp0.touch()
+        fp1.touch()
+        result = _resolve_input_files([fp0, fp1])
+        assert set(result) == {fp0, fp1}
+
+    def test_mixed_glob_and_explicit(self, temp_dir):
+        fp = temp_dir / "explicit.hdf5"
+        fp.touch()
+        (temp_dir / "snap_0.hdf5").touch()
+        result = _resolve_input_files([fp, temp_dir / "snap_*.hdf5"])
+        assert len(result) >= 2
 
 
 # ---------------------------------------------------------------------------
@@ -366,7 +381,7 @@ class TestEndToEnd:
         _make_source_snapshot(src_path, n_gas=200, n_dm=0)
 
         _translate_snapshot(
-            input_path=src_path,
+            input_paths=[src_path],
             output_path=out_path,
             part_types=["PartType0"],
             coord_key="Coordinates",
@@ -424,7 +439,7 @@ class TestEndToEnd:
         _make_source_snapshot(src_path, n_gas=100, n_dm=50)
 
         _translate_snapshot(
-            input_path=src_path,
+            input_paths=[src_path],
             output_path=out_path,
             part_types=["PartType0", "PartType1"],
             coord_key="Coordinates",
@@ -451,7 +466,7 @@ class TestEndToEnd:
         _make_source_snapshot(src_path, n_gas=500, n_dm=0)
 
         _translate_snapshot(
-            input_path=src_path,
+            input_paths=[src_path],
             output_path=out_path,
             part_types=["PartType0"],
             coord_key="Coordinates",
@@ -487,7 +502,7 @@ class TestEndToEnd:
         _make_source_snapshot(src_path, n_gas=50, include_header=False)
 
         _translate_snapshot(
-            input_path=src_path,
+            input_paths=[src_path],
             output_path=out_path,
             part_types=["PartType0"],
             coord_key="Coordinates",
@@ -507,7 +522,7 @@ class TestEndToEnd:
         _make_source_snapshot(src_path, n_gas=50, include_units=False)
 
         _translate_snapshot(
-            input_path=src_path,
+            input_paths=[src_path],
             output_path=out_path,
             part_types=["PartType0"],
             coord_key="Coordinates",
@@ -526,7 +541,7 @@ class TestEndToEnd:
 
         with pytest.raises(ValueError, match="not found in"):
             _translate_snapshot(
-                input_path=src_path,
+                input_paths=[src_path],
                 output_path=temp_dir / "out.hdf5",
                 part_types=["PartType0", "PartType2"],
                 coord_key="Coordinates",
@@ -542,7 +557,7 @@ class TestEndToEnd:
 
         with pytest.raises(ValueError, match="Coordinate field"):
             _translate_snapshot(
-                input_path=src_path,
+                input_paths=[src_path],
                 output_path=temp_dir / "out.hdf5",
                 part_types=["PartType0"],
                 coord_key="Positions",
@@ -558,7 +573,7 @@ class TestEndToEnd:
 
         with pytest.raises(ValueError, match="not declared"):
             _translate_snapshot(
-                input_path=src_path,
+                input_paths=[src_path],
                 output_path=temp_dir / "out.hdf5",
                 part_types=["PartType0"],
                 coord_key="Coordinates",
@@ -577,7 +592,7 @@ class TestEndToEnd:
             f["PartType0/Masses"].attrs["units"] = "1e10 Msun"
 
         _translate_snapshot(
-            input_path=src_path,
+            input_paths=[src_path],
             output_path=out_path,
             part_types=["PartType0"],
             coord_key="Coordinates",
@@ -615,7 +630,7 @@ class TestEndToEnd:
             g0.create_dataset("Coordinates", data=coords)
 
         _translate_snapshot(
-            input_path=src_path,
+            input_paths=[src_path],
             output_path=out_path,
             part_types=["PartType0"],
             coord_key="Coordinates",
@@ -636,7 +651,7 @@ class TestEndToEnd:
         _make_source_snapshot(src_path, n_gas=60, n_dm=0)
 
         _translate_snapshot(
-            input_path=src_path,
+            input_paths=[src_path],
             output_path=out_path,
             part_types=["PartType0"],
             coord_key="Coordinates",
@@ -657,7 +672,7 @@ class TestEndToEnd:
         _make_source_snapshot(src_path, n_gas=30, n_dm=20)
 
         _translate_snapshot(
-            input_path=src_path,
+            input_paths=[src_path],
             output_path=out_path,
             part_types=["PartType0", "PartType1"],
             coord_key="Coordinates",
@@ -724,7 +739,7 @@ class TestEndToEnd:
         glob_pattern = temp_dir / "snap_*.hdf5"
 
         _translate_snapshot(
-            input_path=glob_pattern,
+            input_paths=[glob_pattern],
             output_path=out_path,
             part_types=["PartType0", "PartType1"],
             coord_key="Coordinates",
@@ -751,7 +766,7 @@ class TestEndToEnd:
         _make_source_snapshot(src_path, n_gas=300, n_dm=0)
 
         _translate_snapshot(
-            input_path=src_path,
+            input_paths=[src_path],
             output_path=out1,
             part_types=["PartType0"],
             coord_key="Coordinates",
@@ -762,7 +777,7 @@ class TestEndToEnd:
         )
 
         _translate_snapshot(
-            input_path=src_path,
+            input_paths=[src_path],
             output_path=out2,
             part_types=["PartType0"],
             coord_key="Coordinates",
@@ -821,7 +836,7 @@ class TestCliArgs:
                 "2",
             ]
         )
-        assert args.input == Path("input.hdf5")
+        assert args.input == [Path("input.hdf5")]
         assert args.output == Path("output.hdf5")
         assert args.part_type == ["PartType0", "PartType1"]
         assert args.coord_key == "Coordinates"
@@ -877,7 +892,7 @@ class TestCliArgs:
                 "4",
             ]
         )
-        assert args.input == Path("snapdir/snapshot_*.hdf5")
+        assert args.input == [Path("snapdir/snapshot_*.hdf5")]
 
     def test_run_no_part_types(self, temp_dir):
         src_path = temp_dir / "source.hdf5"
@@ -885,7 +900,7 @@ class TestCliArgs:
         out_path = temp_dir / "output.hdf5"
 
         args = argparse.Namespace(
-            input=src_path,
+            input=[src_path],
             output=out_path,
             part_type=[],
             coord_key="Coordinates",

@@ -92,22 +92,28 @@ def _parse_ndim(
     )
 
 
-def _resolve_input_files(input_path: Path) -> List[Path]:
-    """Expand *input_path* to a sorted list of concrete HDF5 files.
+def _resolve_input_files(paths: List[Path]) -> List[Path]:
+    """Expand *paths* to a sorted, deduplicated list of concrete files.
 
-    When *input_path* contains glob wildcards (``*``, ``?``, ``[``) the
-    pattern is expanded with :func:`glob.glob`.  Otherwise the single path
-    is returned as-is.
+    When a single *paths* entry contains glob wildcards (``*``, ``?``,
+    ``[``) the pattern is expanded with :func:`glob.glob`.  Multiple
+    explicit paths are passed through as-is.
     """
-    pattern = str(input_path)
-    if any(ch in pattern for ch in "*?["):
-        matches = sorted(glob.glob(pattern))
-        if not matches:
-            raise FileNotFoundError(
-                f"No files matched the glob pattern '{pattern}'"
-            )
-        return [Path(m) for m in matches]
-    return [input_path]
+    result: List[Path] = []
+    for p in paths:
+        pattern = str(p)
+        if any(ch in pattern for ch in "*?["):
+            matches = sorted(glob.glob(pattern))
+            if not matches:
+                raise FileNotFoundError(
+                    f"No files matched the glob pattern '{pattern}'"
+                )
+            result.extend(Path(m) for m in matches)
+        else:
+            result.append(p)
+    if not result:
+        raise FileNotFoundError("No input files resolved")
+    return sorted(set(result))
 
 
 def _compute_cell_labels(
@@ -369,7 +375,7 @@ def _write_cells_group(
 
 
 def _translate_snapshot(
-    input_path: Path,
+    input_paths: List[Path],
     output_path: Path,
     part_types: List[str],
     coord_key: str,
@@ -383,10 +389,9 @@ def _translate_snapshot(
 
     Parameters
     ----------
-    input_path : Path
-        Source HDF5 snapshot path.  May be a single file or a glob
-        pattern (e.g. ``snapdir/snapshot_*.hdf5``) to combine
-        distributed shards.
+    input_paths : list[Path]
+        Source HDF5 file paths.  May include glob patterns that get
+        expanded, or multiple explicit paths that are concatenated.
     output_path : Path
         Destination HDF5 file (overwritten if it exists).
     part_types : list[str]
@@ -417,9 +422,12 @@ def _translate_snapshot(
         nthreads = 1
 
     # ---- resolve input files ----
-    input_files = _resolve_input_files(input_path)
+    input_files = _resolve_input_files(input_paths)
     n_files = len(input_files)
-    print(f"Found {n_files} source file(s) matching: {input_path}")
+    print(
+        f"Found {n_files} source file(s) from: "
+        f"{' '.join(str(p) for p in input_paths)}"
+    )
 
     # ---- peek at first file for field discovery & metadata ----
     with h5py.File(input_files[0], "r") as peek:
@@ -586,10 +594,13 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     """Register CLI arguments for the ``translate`` mode."""
     parser.add_argument(
         "input",
+        nargs="+",
         type=Path,
         help=(
-            "Path to the input HDF5 snapshot to translate "
-            "(accepts globs, e.g. 'snapdir/snapshot_*.hdf5')."
+            "Path(s) to input HDF5 snapshot(s) to translate. "
+            "Multiple files are concatenated. "
+            "A single glob pattern may be quoted "
+            "(e.g. 'snapdir/snapshot_*.hdf5')."
         ),
     )
     parser.add_argument(
@@ -667,7 +678,7 @@ def run(args: argparse.Namespace) -> None:
         sys.exit(1)
 
     _translate_snapshot(
-        input_path=args.input,
+        input_paths=args.input,
         output_path=args.output,
         part_types=args.part_type,
         coord_key=args.coord_key,
