@@ -262,6 +262,7 @@ def analyse_timestep_files(
     y: list[np.ndarray[Any, Any]] = []
     deadtime: list[np.ndarray[Any, Any]] = []
     column_labels: dict[int, str] = {}
+    runtime_comparison = None
     for file_index, file in enumerate(files):
         xi_values: list[float] = []
         yi_values: list[float] = []
@@ -320,10 +321,21 @@ def analyse_timestep_files(
             np.cumsum(np.array(dti_values)) * time_scale / (1000 * 60 * 60)
         )
 
-    if match_runtimes:
-        max_x_values = [series[-1] for series in x if len(series) > 0]
-        if max_x_values:
-            runtime_limit = min(max_x_values)
+    max_x_values = [series[-1] for series in x if len(series) > 0]
+    if max_x_values:
+        runtime_limit = min(max_x_values)
+        matched_runtimes = [
+            (label, float(np.interp(runtime_limit, xi, yi)))
+            for label, xi, yi in zip(labels, x, y)
+            if len(xi) > 0
+        ]
+        if len(matched_runtimes) > 1:
+            fastest = min(matched_runtimes, key=lambda item: item[1])
+            slowest = max(matched_runtimes, key=lambda item: item[1])
+            if fastest[1] > 0:
+                runtime_comparison = (runtime_limit, fastest, slowest)
+
+        if match_runtimes:
             for i, xi in enumerate(x):
                 mask = xi <= runtime_limit
                 x[i] = xi[mask]
@@ -363,6 +375,16 @@ def analyse_timestep_files(
     x_label = column_labels.get(time_column, _get_x_axis_label(time_column))
     y_label = "CPU hrs" if nthreads is not None else "Time [hrs]"
     ax1.set_ylabel(y_label)
+
+    if runtime_comparison is not None:
+        runtime_limit, fastest, slowest = runtime_comparison
+        speedup = slowest[1] / fastest[1]
+        runtime_reduction = (slowest[1] - fastest[1]) / slowest[1] * 100
+        print(
+            f"At matched {x_label} {runtime_limit:g}, {fastest[0]} is "
+            f"{(speedup - 1) * 100:.1f}% faster than {slowest[0]} "
+            f"({speedup:.2f}x speedup; {runtime_reduction:.1f}% less runtime)."
+        )
 
     # Create custom legend with black lines showing line styles
     legend_elements = [

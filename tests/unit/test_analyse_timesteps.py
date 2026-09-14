@@ -138,6 +138,46 @@ def test_match_runtimes_trims_to_shortest_dataset(
 @patch("swiftsim_cli.modes.analyse.timesteps.plt.savefig")
 @patch("swiftsim_cli.modes.analyse.timesteps.plt.tight_layout")
 @patch("swiftsim_cli.modes.analyse.timesteps.plt.subplots")
+def test_shared_extent_reports_speedup_without_trimming(
+    mock_subplots,
+    mock_tight_layout,
+    mock_savefig,
+    mock_close,
+    mock_create_output_path,
+    tmp_path: Path,
+    capsys,
+):
+    """Runs report speedup at their shared extent without plot trimming."""
+    slow_file = tmp_path / "slow.txt"
+    fast_file = tmp_path / "fast.txt"
+    slow_file.write_text(
+        _make_timestep_line(1.0, 5000.0) + _make_timestep_line(2.0, 5000.0),
+        encoding="utf-8",
+    )
+    fast_file.write_text(
+        _make_timestep_line(1.0, 4000.0) + _make_timestep_line(2.0, 4000.0),
+        encoding="utf-8",
+    )
+    mock_subplots.return_value = (Mock(), (Mock(), Mock()))
+    mock_create_output_path.return_value = tmp_path / "plot.png"
+
+    analyse_timestep_files(
+        [str(slow_file), str(fast_file)],
+        ["slow", "fast"],
+        show_plot=False,
+    )
+
+    assert (
+        "fast is 25.0% faster than slow "
+        "(1.25x speedup; 20.0% less runtime)" in capsys.readouterr().out
+    )
+
+
+@patch("swiftsim_cli.modes.analyse.timesteps.create_output_path")
+@patch("swiftsim_cli.modes.analyse.timesteps.plt.close")
+@patch("swiftsim_cli.modes.analyse.timesteps.plt.savefig")
+@patch("swiftsim_cli.modes.analyse.timesteps.plt.tight_layout")
+@patch("swiftsim_cli.modes.analyse.timesteps.plt.subplots")
 def test_timestep_axis_label_is_inferred_from_header(
     mock_subplots,
     mock_tight_layout,
