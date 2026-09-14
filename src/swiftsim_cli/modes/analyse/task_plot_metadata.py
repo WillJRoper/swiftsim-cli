@@ -121,8 +121,8 @@ SUBTYPES = [
     "rt_transport",
 ]
 
-CELL_TYPES = ["Regular", "Zoom", "Buff", "Bkg"]
-CELL_SUBTYPES = ["Regular", "Neighbour", "Void", None]
+CELL_TYPES = ["Regular", "Zoom", "Background"]
+CELL_SUBTYPES = ["Regular", "Neighbour", "Void"]
 
 FULLTYPES = [
     "self/limiter",

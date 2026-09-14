@@ -7,6 +7,7 @@ from pathlib import Path
 
 import numpy as np
 from numpy.typing import NDArray
+from tqdm.auto import tqdm  # type: ignore[import-untyped]
 
 from .task_plot_metadata import SUBTYPES, TASKTYPES, task_colour, task_label
 
@@ -36,8 +37,10 @@ class TaskFilter:
     """Filter options for selecting task-debug intervals."""
 
     task: str | None = None
+    c_type: int | None = None
     ci_type: int | None = None
     cj_type: int | None = None
+    c_subtype: int | None = None
     ci_subtype: int | None = None
     cj_subtype: int | None = None
     depth: int | None = None
@@ -49,6 +52,7 @@ class TaskDebugData:
     def __init__(self, file_path: str | Path):
         """Read and parse a SWIFT task-debug file."""
         self.file_path = Path(file_path)
+        print(f"Loading task-debug data from {self.file_path}...", flush=True)
         self.data = np.loadtxt(self.file_path)
         if self.data.ndim != 2:
             raise ValueError(
@@ -126,7 +130,13 @@ class TaskDebugData:
                 for mapped_id, thread_id in enumerate(unique_threads)
             }
 
-            for row, raw_thread in zip(rank_rows, raw_threads):
+            rank_records = zip(rank_rows, raw_threads)
+            for row, raw_thread in tqdm(
+                rank_records,
+                total=len(rank_rows),
+                desc=f"Parsing task records (rank {rank})",
+                unit="task",
+            ):
                 task_type_index = int(row[self._columns["task"]])
                 subtype_index = int(row[self._columns["subtask"]])
                 task_type = TASKTYPES[task_type_index]
@@ -193,7 +203,11 @@ class TaskDebugData:
 
         return [
             record
-            for record in self.records
+            for record in tqdm(
+                self.records,
+                desc=f"Filtering task records (rank {rank})",
+                unit="task",
+            )
             if record.rank == rank and _matches_filter(record, task_filter)
         ]
 
@@ -203,19 +217,30 @@ def _matches_filter(record: TaskRecord, task_filter: TaskFilter) -> bool:
     if task_filter.task is not None and record.label != task_filter.task:
         return False
 
-    if not _matches_symmetric_pair(
-        record.ci_type,
-        record.cj_type,
-        task_filter.ci_type,
-        task_filter.cj_type,
+    if task_filter.ci_type is not None and (
+        record.ci_type != task_filter.ci_type
     ):
         return False
-
-    if not _matches_symmetric_pair(
+    if task_filter.cj_type is not None and (
+        record.cj_type != task_filter.cj_type
+    ):
+        return False
+    if task_filter.c_type is not None and task_filter.c_type not in (
+        record.ci_type,
+        record.cj_type,
+    ):
+        return False
+    if task_filter.ci_subtype is not None and (
+        record.ci_subtype != task_filter.ci_subtype
+    ):
+        return False
+    if task_filter.cj_subtype is not None and (
+        record.cj_subtype != task_filter.cj_subtype
+    ):
+        return False
+    if task_filter.c_subtype is not None and task_filter.c_subtype not in (
         record.ci_subtype,
         record.cj_subtype,
-        task_filter.ci_subtype,
-        task_filter.cj_subtype,
     ):
         return False
 
@@ -226,25 +251,6 @@ def _matches_filter(record: TaskRecord, task_filter: TaskFilter) -> bool:
         return False
 
     return True
-
-
-def _matches_symmetric_pair(
-    left_value: int,
-    right_value: int,
-    left_filter: int | None,
-    right_filter: int | None,
-) -> bool:
-    """Apply the same symmetric cell-pair logic as the zoom task tools."""
-    if left_filter is None and right_filter is None:
-        return True
-
-    if left_filter is None or right_filter is None:
-        target = left_filter if left_filter is not None else right_filter
-        return target in (left_value, right_value)
-
-    return (left_value == left_filter and right_value == right_filter) or (
-        left_value == right_filter and right_value == left_filter
-    )
 
 
 def discover_task_ranks(file_path: str | Path) -> NDArray[np.int32]:

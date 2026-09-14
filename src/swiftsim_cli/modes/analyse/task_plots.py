@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import argparse
+import re
 from collections import Counter, defaultdict
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Sequence, TypeVar
+from typing import Callable, Mapping, Sequence, TypeVar
 
 import matplotlib
 
@@ -14,10 +15,12 @@ matplotlib.use("Agg")
 import matplotlib.patches as mpatches
 import matplotlib.pyplot as plt
 import numpy as np
+from tqdm.auto import tqdm  # type: ignore[import-untyped]
 
-from swiftsim_cli.utilities import create_output_path
+from swiftsim_cli.utilities import create_ascii_table, create_output_path
 
 from .task_debug_data import TaskDebugData, TaskFilter, TaskRecord
+from .task_plot_metadata import CELL_SUBTYPES, CELL_TYPES
 from .threadpool_data import ThreadpoolData, ThreadpoolRecord
 
 __all__ = [
@@ -129,10 +132,42 @@ def add_task_plots_arguments(subparsers) -> None:
         default=None,
         help="Specific task label to include, e.g. 'pair/force'.",
     )
-    parser.add_argument("--ci-type", type=int, default=None)
-    parser.add_argument("--cj-type", type=int, default=None)
-    parser.add_argument("--ci-subtype", type=int, default=None)
-    parser.add_argument("--cj-subtype", type=int, default=None)
+    parser.add_argument(
+        "--c-type",
+        type=_parse_cell_type,
+        default=None,
+        help="Include tasks where either cell has this type.",
+    )
+    parser.add_argument(
+        "--ci-type",
+        type=_parse_cell_type,
+        default=None,
+        help="Include tasks whose ci cell has this type.",
+    )
+    parser.add_argument(
+        "--cj-type",
+        type=_parse_cell_type,
+        default=None,
+        help="Include tasks whose cj cell has this type.",
+    )
+    parser.add_argument(
+        "--c-subtype",
+        type=_parse_cell_subtype,
+        default=None,
+        help="Include tasks where either cell has this subtype.",
+    )
+    parser.add_argument(
+        "--ci-subtype",
+        type=_parse_cell_subtype,
+        default=None,
+        help="Include tasks whose ci cell has this subtype.",
+    )
+    parser.add_argument(
+        "--cj-subtype",
+        type=_parse_cell_subtype,
+        default=None,
+        help="Include tasks whose cj cell has this subtype.",
+    )
     parser.add_argument("--depth", type=int, default=None)
     parser.add_argument(
         "--activity-plot",
@@ -165,8 +200,10 @@ def run_swift_task_plots(args: argparse.Namespace) -> None:
         show_legend=not args.no_legend,
         task_filter=TaskFilter(
             task=args.task,
+            c_type=args.c_type,
             ci_type=args.ci_type,
             cj_type=args.cj_type,
+            c_subtype=args.c_subtype,
             ci_subtype=args.ci_subtype,
             cj_subtype=args.cj_subtype,
             depth=args.depth,
@@ -198,11 +235,17 @@ def analyse_swift_task_plots(
         raise ValueError("Thread expansion factor must be at least 1.")
 
     task_data = TaskDebugData(task_file)
+    print(f"Loading threadpool data from {threadpool_file}...", flush=True)
     threadpool_data = ThreadpoolData(threadpool_file)
     ranks = _select_ranks(task_data, rank)
-    out_dir = "task_plots_analysis"
     filter_suffix = _task_filter_suffix(task_filter)
     output_root = str(output_path) if output_path is not None else None
+    output_prefix = prefix or _step_prefix(task_file, threadpool_file)
+    out_dir = (
+        f"{output_prefix}_task_plots_analysis"
+        if output_prefix
+        else "task_plots_analysis"
+    )
 
     for current_rank in ranks:
         task_records = task_data.get_rank_records(current_rank, task_filter)
@@ -220,6 +263,10 @@ def analyse_swift_task_plots(
             mintic=mintic,
         )
 
+        print(
+            f"Rendering combined timeline for rank {current_rank}...",
+            flush=True,
+        )
         figure = _plot_combined_timeline(
             task_records=task_records,
             threadpool_records=threadpool_data.worker_records,
@@ -234,11 +281,25 @@ def analyse_swift_task_plots(
             show_legend=show_legend,
         )
         filename = f"task_plots_rank{current_rank}{filter_suffix}.png"
-        output = create_output_path(output_root, prefix, filename, out_dir)
+        output = create_output_path(
+            output_root, output_prefix, filename, out_dir
+        )
+        print(f"Saving combined timeline to {output}...", flush=True)
         figure.savefig(output, dpi=300, bbox_inches="tight")
         if show_plot:
             plt.show()
         plt.close(figure)
+
+        report = _task_timing_report(task_records, current_rank)
+        print("\n" + report)
+        report_name = (
+            f"task_timing_tables_rank{current_rank}{filter_suffix}.txt"
+        )
+        report_output = create_output_path(
+            output_root, output_prefix, report_name, out_dir
+        )
+        report_output.write_text(report + "\n", encoding="utf-8")
+        print(f"Saved task timing tables to {report_output}")
 
         if activity_plot:
             activity_figure = _plot_task_activity(
@@ -255,7 +316,7 @@ def analyse_swift_task_plots(
             )
             activity_output = create_output_path(
                 output_root,
-                prefix,
+                output_prefix,
                 activity_name,
                 out_dir,
             )
@@ -274,6 +335,24 @@ def _select_ranks(task_data: TaskDebugData, rank: int | None) -> list[int]:
     if rank not in task_data.ranks:
         raise ValueError(f"Rank {rank} not present in {task_data.file_path}")
     return [rank]
+
+
+def _step_prefix(
+    task_file: str | Path, threadpool_file: str | Path
+) -> str | None:
+    """Infer a shared ``stepN`` output prefix from input filenames."""
+    steps = [
+        match.group(1)
+        for path in (task_file, threadpool_file)
+        if (
+            match := re.search(r"(?:^|[-_])step(\d+)(?:\D|$)", Path(path).stem)
+        )
+    ]
+    if len(set(steps)) > 1:
+        raise ValueError(
+            "Task and threadpool files have different step numbers."
+        )
+    return f"step{steps[0]}" if steps else None
 
 
 def _time_window(
@@ -383,8 +462,8 @@ def _plot_combined_timeline(
     ax_bottom.set_xlabel("Wall clock time [ms]")
 
     if show_legend:
-        _add_legend(ax_top, top_intervals, ncol=4)
-        _add_legend(ax_bottom, bottom_intervals, ncol=8)
+        _add_legend(ax_top, top_intervals, ncol=4, above=True)
+        _add_legend(ax_bottom, bottom_intervals, ncol=8, above=False)
 
     return fig
 
@@ -559,7 +638,10 @@ def _format_timeline_axis(
 
 
 def _add_legend(
-    axis: plt.Axes, intervals: Sequence[PlotInterval], ncol: int
+    axis: plt.Axes,
+    intervals: Sequence[PlotInterval],
+    ncol: int,
+    above: bool,
 ) -> None:
     """Add a legend sorted by label frequency for one panel."""
     labels_by_count = [
@@ -578,10 +660,115 @@ def _add_legend(
     if handles:
         axis.legend(
             handles=handles,
-            loc="upper left",
-            bbox_to_anchor=(0.0, 1.02),
+            loc="lower center" if above else "upper center",
+            bbox_to_anchor=(0.5, 1.02 if above else -0.16),
             ncol=ncol,
         )
+
+
+def _task_timing_report(records: Sequence[TaskRecord], rank: int) -> str:
+    """Build task and cell timing tables for one rank."""
+    task_times: defaultdict[str, float] = defaultdict(float)
+    cell_times: defaultdict[tuple[str, str], float] = defaultdict(float)
+    combination_times: defaultdict[str, float] = defaultdict(float)
+    task_combination_times: defaultdict[tuple[str, str], float] = defaultdict(
+        float
+    )
+
+    for record in tqdm(
+        records,
+        desc=f"Aggregating task timings (rank {rank})",
+        unit="task",
+    ):
+        duration = record.end_ms - record.start_ms
+        task_times[record.label] += duration
+
+        cell_pair = _cell_pair_label(record, include_subtype=False)
+        combination = _cell_pair_label(record, include_subtype=True)
+        if cell_pair is not None:
+            cell_times[(record.label, cell_pair)] += duration
+        if combination is not None:
+            combination_times[combination] += duration
+            task_combination_times[(record.label, combination)] += duration
+
+    total = sum(task_times.values())
+    sections = [
+        f"TASK TIMING SUMMARY: RANK {rank}",
+        f"Total task worker time: {total:.3f} ms",
+        create_ascii_table(
+            ["Task Type", "Time (ms)", "Fraction"],
+            _timing_rows(task_times, total),
+            "TASK TYPE TIMING",
+        ),
+    ]
+
+    if cell_times:
+        sections.extend(
+            [
+                create_ascii_table(
+                    ["Task Type", "Cell Type Pair", "Time (ms)", "Fraction"],
+                    _timing_rows(cell_times, total),
+                    "CELL TYPE TIMING BY TASK TYPE",
+                ),
+                create_ascii_table(
+                    ["Cell Type/Subtype Pair", "Time (ms)", "Fraction"],
+                    _timing_rows(combination_times, total),
+                    "CELL TYPE/SUBTYPE TIMING (ALL TASK TYPES)",
+                ),
+                create_ascii_table(
+                    [
+                        "Task Type",
+                        "Cell Type/Subtype Pair",
+                        "Time (ms)",
+                        "Fraction",
+                    ],
+                    _timing_rows(task_combination_times, total),
+                    "CELL TYPE/SUBTYPE TIMING BY TASK TYPE",
+                ),
+            ]
+        )
+
+    return "\n\n".join(sections)
+
+
+K = TypeVar("K")
+
+
+def _timing_rows(timings: Mapping[K, float], total: float) -> list[list[str]]:
+    """Format timing mappings as descending ASCII-table rows."""
+    rows: list[list[str]] = []
+    for key, duration in sorted(
+        timings.items(), key=lambda item: item[1], reverse=True
+    ):
+        labels = (
+            [str(label) for label in key]
+            if isinstance(key, tuple)
+            else [str(key)]
+        )
+        fraction = 100.0 * duration / total if total else 0.0
+        rows.append([*labels, f"{duration:.3f}", f"{fraction:.2f}%"])
+    return rows
+
+
+def _cell_pair_label(record: TaskRecord, include_subtype: bool) -> str | None:
+    """Return an order-independent label for available task cell metadata."""
+    cells = []
+    for cell_type, subtype in (
+        (record.ci_type, record.ci_subtype),
+        (record.cj_type, record.cj_subtype),
+    ):
+        if not 0 <= cell_type < len(CELL_TYPES):
+            continue
+        label = CELL_TYPES[cell_type]
+        if include_subtype and 0 <= subtype < len(CELL_SUBTYPES):
+            subtype_label = CELL_SUBTYPES[subtype]
+            if subtype_label is not None:
+                label = f"{label}/{subtype_label}"
+        cells.append(label)
+
+    if not cells:
+        return None
+    return " + ".join(sorted(cells))
 
 
 def _clip_interval(
@@ -606,10 +793,14 @@ def _task_filter_suffix(task_filter: TaskFilter | None) -> str:
     suffixes: list[str] = []
     if task_filter.task is not None:
         suffixes.append(task_filter.task.replace("/", "-"))
+    if task_filter.c_type is not None:
+        suffixes.append(f"c{CELL_TYPES[task_filter.c_type].lower()}")
     if task_filter.ci_type is not None:
         suffixes.append(f"ci{task_filter.ci_type}")
     if task_filter.cj_type is not None:
         suffixes.append(f"cj{task_filter.cj_type}")
+    if task_filter.c_subtype is not None:
+        suffixes.append(f"csub{CELL_SUBTYPES[task_filter.c_subtype].lower()}")
     if task_filter.ci_subtype is not None:
         suffixes.append(f"cisub{task_filter.ci_subtype}")
     if task_filter.cj_subtype is not None:
@@ -620,3 +811,37 @@ def _task_filter_suffix(task_filter: TaskFilter | None) -> str:
     if not suffixes:
         return ""
     return "_" + "_".join(suffixes)
+
+
+def _parse_cell_type(value: str) -> int:
+    """Parse a SWIFT cell type name or its integer value."""
+    return _parse_cell_metadata(value, CELL_TYPES, {"bkg": "background"})
+
+
+def _parse_cell_subtype(value: str) -> int:
+    """Parse a SWIFT cell subtype name or its integer value."""
+    return _parse_cell_metadata(value, CELL_SUBTYPES)
+
+
+def _parse_cell_metadata(
+    value: str, labels: Sequence[str], aliases: dict[str, str] | None = None
+) -> int:
+    """Parse named metadata while retaining numeric CLI compatibility."""
+    normalised = value.lower()
+    if aliases is not None:
+        normalised = aliases.get(normalised, normalised)
+    names = {label.lower(): index for index, label in enumerate(labels)}
+    if normalised in names:
+        return names[normalised]
+    try:
+        index = int(value)
+    except ValueError as error:
+        choices = ", ".join(names)
+        raise argparse.ArgumentTypeError(
+            f"Expected one of {choices}, or its integer value."
+        ) from error
+    if not 0 <= index < len(labels):
+        raise argparse.ArgumentTypeError(
+            f"Cell metadata value must be between 0 and {len(labels) - 1}."
+        )
+    return index

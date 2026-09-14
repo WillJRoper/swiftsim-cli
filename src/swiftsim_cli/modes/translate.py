@@ -30,6 +30,13 @@ _GADGET_PARTTYPE_NAMES: Dict[int, str] = {
     6: "Neutrino Dark Matter",
 }
 _GADGET_NUM_PART_TYPES = 6
+_REQUIRED_UNIT_ATTRS = {
+    "Unit mass in cgs (U_M)": 1.0,
+    "Unit length in cgs (U_L)": 1.0,
+    "Unit time in cgs (U_t)": 1.0,
+    "Unit current in cgs (U_I)": 1.0,
+    "Unit temperature in cgs (U_T)": 1.0,
+}
 
 
 def _parse_field_arg(arg: str) -> Tuple[str, str]:
@@ -254,6 +261,14 @@ def _process_part_type_arrays(
             f"(N, 3); got shape {coords.shape}"
         )
 
+    n_particles = coords.shape[0]
+    for field_name, data in datasets.items():
+        if data.shape[0] != n_particles:
+            raise ValueError(
+                f"Field '{field_name}' has inconsistent leading dimension "
+                f"{data.shape[0]} (expected {n_particles})"
+            )
+
     labels = _compute_cell_labels(coords, boxsize, cdim)
     sort_order = np.argsort(labels, kind="stable")
 
@@ -262,6 +277,57 @@ def _process_part_type_arrays(
         reordered[field_name] = data[sort_order]
 
     return reordered, coords[sort_order], labels[sort_order]
+
+
+def _validate_cell_lookup(
+    part_type: str,
+    sorted_labels: np.ndarray,
+    counts: np.ndarray,
+    offsets: np.ndarray,
+    n_cells: int,
+) -> None:
+    """Validate that counts/offsets match the sorted cell-labelled arrays."""
+    if counts.shape != (n_cells,):
+        raise ValueError(
+            f"Cell counts for '{part_type}' have shape {counts.shape}; "
+            f"expected ({n_cells},)"
+        )
+
+    if offsets.shape != (n_cells,):
+        raise ValueError(
+            f"Cell offsets for '{part_type}' have shape {offsets.shape}; "
+            f"expected ({n_cells},)"
+        )
+
+    if len(sorted_labels) != int(counts.sum()):
+        raise ValueError(
+            f"Cell counts for '{part_type}' sum to {counts.sum()} but "
+            f"the sorted arrays contain {len(sorted_labels)} particles"
+        )
+
+    expected_counts = np.bincount(sorted_labels, minlength=n_cells)
+    if not np.array_equal(counts, expected_counts):
+        raise ValueError(
+            f"Cell counts for '{part_type}' do not match the sorted "
+            f"particle cell labels"
+        )
+
+    expected_offsets = np.zeros(n_cells, dtype=np.int64)
+    np.cumsum(counts[:-1], out=expected_offsets[1:])
+    if not np.array_equal(offsets, expected_offsets):
+        raise ValueError(
+            f"Cell offsets for '{part_type}' do not match the cell counts"
+        )
+
+    non_zero = np.flatnonzero(counts)
+    for cell_id in non_zero:
+        start = offsets[cell_id]
+        end = start + counts[cell_id]
+        if not np.all(sorted_labels[start:end] == cell_id):
+            raise ValueError(
+                f"Sorted particle block for '{part_type}' does not match "
+                f"cell {cell_id}"
+            )
 
 
 def _copy_or_synthesise_header(
@@ -284,6 +350,7 @@ def _copy_or_synthesise_header(
 
     hdr.attrs["Code"] = "SWIFT"
     hdr.attrs["BoxSize"] = boxsize
+    hdr.attrs["OutputType"] = "FullVolume"
     hdr.attrs["NumFilesPerSnapshot"] = 1
     hdr.attrs["ThisFile"] = 0
 
@@ -297,6 +364,7 @@ def _copy_or_synthesise_header(
 
     hdr.attrs["NumPart_Total"] = npart.astype(np.uint32)
     hdr.attrs["NumPart_ThisFile"] = npart.astype(np.uint32)
+    hdr.attrs["CanHaveTypes"] = (npart > 0).astype(np.int32)
 
     for attr in ("NumPart_HighWord",):
         if attr not in hdr.attrs or len(hdr.attrs[attr]) < 6:
@@ -329,6 +397,39 @@ def _copy_or_synthesise_header(
         hdr.attrs["SnapshotDate"] = datetime.now().isoformat()
     if "System" not in hdr.attrs:
         hdr.attrs["System"] = gethostname()
+
+
+def _copy_or_synthesise_code_group(src: h5py.File, out: h5py.File) -> None:
+    """Copy the SWIFT root ``/Code`` group or synthesise a minimal one."""
+    if "Code" in src:
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            src.copy("Code", out, "Code")
+        code = out["Code"]
+    else:
+        code = out.create_group("Code")
+
+    code.attrs["Code"] = np.bytes_("SWIFT")
+    if "Git Branch" not in code.attrs:
+        code.attrs["Git Branch"] = np.bytes_("translated")
+    if "Git Revision" not in code.attrs:
+        code.attrs["Git Revision"] = np.bytes_("unknown")
+    if "Git Date" not in code.attrs:
+        code.attrs["Git Date"] = np.bytes_("unknown")
+
+
+def _normalise_unit_group_attrs(group: h5py.Group) -> None:
+    """Convert scalar unit attributes to the length-1 arrays SWIFT uses."""
+    for key, default in _REQUIRED_UNIT_ATTRS.items():
+        if key not in group.attrs:
+            group.attrs[key] = np.array([default])
+
+    for key in list(group.attrs.keys()):
+        value = group.attrs[key]
+        arr = np.asarray(value)
+        if arr.ndim == 0:
+            del group.attrs[key]
+            group.attrs[key] = arr.reshape(1)
 
 
 def _write_cells_group(
@@ -529,6 +630,13 @@ def _translate_snapshot(
     for pt in part_types:
         _, sorted_coords, sorted_labels = results[pt]
         counts, offsets = _build_counts_offsets(sorted_labels, n_cells)
+        _validate_cell_lookup(
+            part_type=pt,
+            sorted_labels=sorted_labels,
+            counts=counts,
+            offsets=offsets,
+            n_cells=n_cells,
+        )
         part_type_info[pt] = (counts, offsets, sorted_coords)
 
     centres = _compute_cell_centres(cdim, boxsize, n_cells)
@@ -544,10 +652,23 @@ def _translate_snapshot(
     with h5py.File(input_files[0], "r") as src_meta, h5py.File(
         output_path, "w"
     ) as out:
+        _copy_or_synthesise_code_group(src_meta, out)
+
         if "Units" in src_meta:
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore")
                 src_meta.copy("Units", out, "Units")
+            _normalise_unit_group_attrs(out["Units"])
+            if "InternalCodeUnits" not in src_meta:
+                with warnings.catch_warnings():
+                    warnings.simplefilter("ignore")
+                    src_meta.copy("Units", out, "InternalCodeUnits")
+                _normalise_unit_group_attrs(out["InternalCodeUnits"])
+        elif "InternalCodeUnits" in src_meta:
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                src_meta.copy("InternalCodeUnits", out, "InternalCodeUnits")
+            _normalise_unit_group_attrs(out["InternalCodeUnits"])
 
         for name in metadata_groups:
             try:

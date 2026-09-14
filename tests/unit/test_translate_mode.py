@@ -7,6 +7,7 @@ from pathlib import Path
 import h5py
 import numpy as np
 import pytest
+import swiftsimio
 
 from swiftsim_cli.modes.translate import (
     _build_counts_offsets,
@@ -16,8 +17,10 @@ from swiftsim_cli.modes.translate import (
     _parse_field_arg,
     _parse_fields,
     _parse_ndim,
+    _process_part_type_arrays,
     _resolve_input_files,
     _translate_snapshot,
+    _validate_cell_lookup,
     add_arguments,
     run,
 )
@@ -249,6 +252,61 @@ class TestBuildCountsOffsets:
         counts, offsets = _build_counts_offsets(labels, n_cells=5)
         np.testing.assert_array_equal(counts, [0, 0, 0, 0, 0])
         np.testing.assert_array_equal(offsets, [0, 0, 0, 0, 0])
+
+
+class TestValidateCellLookup:
+    def test_valid_lookup(self):
+        labels = np.array([0, 0, 2, 2, 2, 5], dtype=np.int64)
+        counts = np.array([2, 0, 3, 0, 0, 1], dtype=np.int64)
+        offsets = np.array([0, 2, 2, 5, 5, 5], dtype=np.int64)
+        _validate_cell_lookup(
+            part_type="PartType0",
+            sorted_labels=labels,
+            counts=counts,
+            offsets=offsets,
+            n_cells=6,
+        )
+
+    def test_bad_count_sum_raises(self):
+        labels = np.array([0, 0, 1], dtype=np.int64)
+        counts = np.array([1, 1], dtype=np.int64)
+        offsets = np.array([0, 1], dtype=np.int64)
+        with pytest.raises(ValueError, match="sum to"):
+            _validate_cell_lookup(
+                part_type="PartType0",
+                sorted_labels=labels,
+                counts=counts,
+                offsets=offsets,
+                n_cells=2,
+            )
+
+
+class TestProcessPartTypeArrays:
+    def test_inconsistent_field_length_raises(self):
+        datasets = {
+            "Coordinates": np.zeros((4, 3), dtype=np.float32),
+            "Masses": np.ones(3, dtype=np.float32),
+        }
+        with pytest.raises(ValueError, match="inconsistent leading dimension"):
+            _process_part_type_arrays(
+                datasets=datasets,
+                coord_field="Coordinates",
+                boxsize=np.array([1.0, 1.0, 1.0]),
+                cdim=np.array([2, 2, 2], dtype=np.int64),
+            )
+
+    def test_bad_offsets_raises(self):
+        labels = np.array([0, 0, 1], dtype=np.int64)
+        counts = np.array([2, 1], dtype=np.int64)
+        offsets = np.array([0, 0], dtype=np.int64)
+        with pytest.raises(ValueError, match="offsets"):
+            _validate_cell_lookup(
+                part_type="PartType0",
+                sorted_labels=labels,
+                counts=counts,
+                offsets=offsets,
+                n_cells=2,
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -800,6 +858,28 @@ class TestEndToEnd:
                 f1["Cells/Counts/PartType0"][:],
                 f2["Cells/Counts/PartType0"][:],
             )
+
+    def test_swiftsimio_can_validate_and_mask(self, temp_dir):
+        src_path = temp_dir / "source.hdf5"
+        out_path = temp_dir / "output.hdf5"
+        _make_source_snapshot(src_path, n_gas=120, n_dm=40)
+
+        _translate_snapshot(
+            input_paths=[src_path],
+            output_path=out_path,
+            part_types=["PartType0", "PartType1"],
+            coord_key="Coordinates",
+            field_args=[],
+            boxsize=np.array([10.0, 10.0, 10.0]),
+            cdim=np.array([4, 4, 4], dtype=np.int64),
+            nthreads=1,
+            all_fields=True,
+        )
+
+        assert swiftsimio.validate_file(out_path)
+        mask = swiftsimio.mask(out_path)
+        assert mask.counts["gas"].sum() == 120
+        assert mask.counts["dark_matter"].sum() == 40
 
 
 # ---------------------------------------------------------------------------
