@@ -26,7 +26,7 @@ except (AttributeError, ValueError):
     # Fallback if tab10 is not available
     tab10 = cm.get_cmap("Set1")
 
-from swiftsim_cli.utilities import create_output_path
+from swiftsim_cli.utilities import create_ascii_table, create_output_path
 
 _TIMESTEP_HEADER_LABELS = [
     "Step",
@@ -330,10 +330,9 @@ def analyse_timestep_files(
             if len(xi) > 0
         ]
         if len(matched_runtimes) > 1:
-            fastest = min(matched_runtimes, key=lambda item: item[1])
-            slowest = max(matched_runtimes, key=lambda item: item[1])
-            if fastest[1] > 0:
-                runtime_comparison = (runtime_limit, fastest, slowest)
+            matched_runtimes.sort(key=lambda item: item[1])
+            if matched_runtimes[0][1] > 0:
+                runtime_comparison = (runtime_limit, matched_runtimes)
 
         if match_runtimes:
             for i, xi in enumerate(x):
@@ -377,13 +376,41 @@ def analyse_timestep_files(
     ax1.set_ylabel(y_label)
 
     if runtime_comparison is not None:
-        runtime_limit, fastest, slowest = runtime_comparison
-        speedup = slowest[1] / fastest[1]
-        runtime_reduction = (slowest[1] - fastest[1]) / slowest[1] * 100
+        runtime_limit, matched_runtimes = runtime_comparison
+        slowest_runtime = matched_runtimes[-1][1]
+        rows = []
+        for label, runtime in matched_runtimes:
+            speedup = slowest_runtime / runtime
+            runtime_reduction = (
+                (slowest_runtime - runtime) / slowest_runtime * 100
+            )
+            rows.append(
+                [
+                    label,
+                    f"{runtime:.3f}",
+                    f"{speedup:.2f}x",
+                    f"{(speedup - 1) * 100:.1f}",
+                    f"{runtime_reduction:.1f}",
+                ]
+            )
+        runtime_header = (
+            "CPU time [hrs]" if nthreads is not None else "Runtime [hrs]"
+        )
         print(
-            f"At matched {x_label} {runtime_limit:g}, {fastest[0]} is "
-            f"{(speedup - 1) * 100:.1f}% faster than {slowest[0]} "
-            f"({speedup:.2f}x speedup; {runtime_reduction:.1f}% less runtime)."
+            "\n"
+            + create_ascii_table(
+                [
+                    "Run",
+                    runtime_header,
+                    "Speedup vs slowest",
+                    "Faster [%]",
+                    "Less runtime [%]",
+                ],
+                rows,
+                title=(
+                    f"RUNTIME COMPARISON AT SHARED {x_label} {runtime_limit:g}"
+                ),
+            )
         )
 
     # Create custom legend with black lines showing line styles

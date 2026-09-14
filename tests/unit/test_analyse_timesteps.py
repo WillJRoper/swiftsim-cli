@@ -167,10 +167,14 @@ def test_shared_extent_reports_speedup_without_trimming(
         show_plot=False,
     )
 
-    assert (
-        "fast is 25.0% faster than slow "
-        "(1.25x speedup; 20.0% less runtime)" in capsys.readouterr().out
-    )
+    output = capsys.readouterr().out
+    assert "RUNTIME COMPARISON AT SHARED Scale factor 2" in output
+    assert "Speedup vs slowest" in output
+    assert "fast" in output
+    assert "1.25x" in output
+    assert "25.0" in output
+    assert "20.0" in output
+    assert output.index("| fast |") < output.index("| slow |")
 
 
 @patch("swiftsim_cli.modes.analyse.timesteps.create_output_path")
