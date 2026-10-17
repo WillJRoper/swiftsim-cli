@@ -265,6 +265,11 @@ class TestRemove:
         assert "b" in load_store().profiles
         assert (gitsetup.root / "b").exists()
 
+        _confirm(monkeypatch, True, False)
+        pm.run(_args(remove="b", force=True))
+        assert "b" not in load_store().profiles
+        assert not (gitsetup.root / "b").exists()
+
     def test_remove_missing_worktree(self, gitsetup, monkeypatch):
         """A worktree deleted by hand is pruned."""
         import shutil
@@ -331,16 +336,30 @@ class TestUpdate:
         assert not (wt / "swift").exists()
         assert _configure_runs(wt) == []
 
-    def test_dirty_tree_surfaces_git_error(self, gitsetup):
+    def test_dirty_tree_is_autostashed(self, gitsetup, capsys):
+        """Uncommitted changes are stashed, rebased over and re-applied."""
+        gitsetup.store()
+        pm.new_profile("dev")
+        wt = gitsetup.root / "dev"
+        (wt / "feature.c").write_text("tracked\n")
+        run_git("add", "feature.c", cwd=wt)
+        run_git("commit", "-qm", "local work", cwd=wt)
+        (wt / "feature.c").write_text("dirty\n")
+        gitsetup.push("master", "src.c", "int x = 5;\n")
+        update_profile(get_profile("dev"))
+        assert "will be stashed" in capsys.readouterr().out
+        assert (wt / "src.c").read_text() == "int x = 5;\n"
+        assert (wt / "feature.c").read_text() == "dirty\n"
+
+    def test_pull_failure_surfaces_git_error(self, gitsetup):
         """Non-conflict pull failures surface git's message as is."""
         gitsetup.store()
         pm.new_profile("dev")
         wt = gitsetup.root / "dev"
-        (wt / "src.c").write_text("dirty\n")
+        run_git("branch", "--unset-upstream", cwd=wt)
         with pytest.raises(ProfileError) as e:
             update_profile(get_profile("dev"))
         assert "rebase --continue" not in str(e.value)
-        assert "pull" in str(e.value)
 
     def test_update_all_summary(self, gitsetup, capsys):
         """--update-all continues past failures and summarises."""

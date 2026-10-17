@@ -86,8 +86,9 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         nargs="?",
         const="",
         metavar="NAME",
-        help="Pull (rebase onto upstream), reconfigure if needed and build "
-        "a profile (default: the current one).",
+        help="Pull (rebase onto upstream, stashing uncommitted changes), "
+        "reconfigure if needed and build a profile (default: the current "
+        "one).",
     )
     action.add_argument(
         "--update-all",
@@ -123,6 +124,12 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         '--configure-flags="--enable-debug --with-hydro=sphenix".',
     )
     parser.add_argument(
+        "--force",
+        action="store_true",
+        help="With --remove, delete the worktree even if it has untracked "
+        "or modified files.",
+    )
+    parser.add_argument(
         "--build",
         action="store_true",
         help="Also configure and build the profile created with --new.",
@@ -153,7 +160,7 @@ def run(args: argparse.Namespace) -> None:
     elif args.edit is not None:
         edit_profile(args.edit)
     elif args.remove is not None:
-        remove_profile(args.remove)
+        remove_profile(args.remove, force=args.force)
     elif args.show is not None:
         display_profile(name=args.show or None)
     elif args.update is not None:
@@ -378,8 +385,14 @@ def edit_profile(name: str) -> None:
     print(f"\nProfile '{name}' updated.")
 
 
-def remove_profile(name: str) -> None:
-    """Remove a profile, its worktree and (optionally) its branch."""
+def remove_profile(name: str, force: bool = False) -> None:
+    """Remove a profile, its worktree and (optionally) its branch.
+
+    Args:
+        name: The profile to remove.
+        force: Remove the worktree even if it has untracked or modified
+            files (``git worktree remove --force``).
+    """
     store = load_store()
     p = store.get(name)
     if name == store.current:
@@ -392,7 +405,8 @@ def remove_profile(name: str) -> None:
         return
 
     if p.worktree is not None and p.worktree.exists():
-        git("worktree", "remove", str(p.worktree), cwd=store.repo)
+        force_args = ["--force"] if force else []
+        git("worktree", "remove", *force_args, str(p.worktree), cwd=store.repo)
     else:
         git("worktree", "prune", cwd=store.repo)
     del store.profiles[name]

@@ -237,8 +237,13 @@ def update_profile(profile: SWIFTCLIProfile, nr_threads: int = 1) -> None:
     """
     worktree = get_swiftsim_dir(profile.worktree)
     print(f"Updating profile '{profile.name}' from {profile.upstream}...")
+    if git("status", "--porcelain", "--untracked-files=no", cwd=worktree):
+        print(
+            f"Uncommitted changes in {worktree} will be stashed for the "
+            "rebase and re-applied afterwards."
+        )
     try:
-        git("pull", "--rebase", cwd=worktree)
+        git("pull", "--rebase", "--autostash", cwd=worktree)
     except ProfileError as e:
         if not _rebase_in_progress(worktree):
             raise

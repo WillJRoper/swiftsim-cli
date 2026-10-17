@@ -74,10 +74,11 @@ swift-cli profile --edit zoom         # change upstream, flags, paths, constants
 swift-cli profile --update [NAME] -j 16   # or: swift-cli update -j 16
 swift-cli profile --update-all -j 16  # update every profile, then print a summary
 swift-cli profile --remove zoom       # removes the worktree (and optionally the branch)
+swift-cli profile --remove zoom --force  # ...even if the worktree has untracked files
 swift-cli --profile zoom make -j 16   # build another profile without switching
 ```
 
-Updating a profile runs `git pull --rebase` in its worktree (your local commits are replayed on top of the upstream). If the rebase hits conflicts nothing is built and you're told how to resolve them. Otherwise `./autogen.sh` is run if `./configure` is missing, `./configure` is (re)run only if the profile has never been configured or its configure flags changed, and then `make` is run.
+Updating a profile runs `git pull --rebase --autostash` in its worktree (your local commits are replayed on top of the upstream, and any uncommitted changes are stashed and re-applied afterwards). If the rebase hits conflicts nothing is built and you're told how to resolve them. Otherwise `./autogen.sh` is run if `./configure` is missing, `./configure` is (re)run only if the profile has never been configured or its configure flags changed, and then `make` is run.
 
 `swift-cli config` sets the current profile's configure flags (from presets such as `--debug` and/or any `--<option>` flags) and reconfigures. Flags are validated against the options listed by `./configure --help` in that profile's worktree, with suggestions for typos.
 
