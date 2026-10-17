@@ -253,10 +253,13 @@ def new_env(tmp_path, monkeypatch, write_tiny_ics):
         softening_coeff=0.04,
         softening_pivot_z=2.7,
     )
-    for target in ("cli", "modes.new", "swiftsim_dir"):
-        monkeypatch.setattr(
-            f"swiftsim_cli.{target}.load_swift_profile", lambda: profile
-        )
+    monkeypatch.setattr(
+        "swiftsim_cli.modes.new.load_swift_profile", lambda: profile
+    )
+    monkeypatch.setattr(
+        "swiftsim_cli.modes.new.get_swiftsim_dir",
+        lambda swift_dir=None: swift_dir or profile.swiftsim_dir,
+    )
     write_tiny_ics(tmp_path / "ics.hdf5")
     monkeypatch.chdir(tmp_path)
     return tmp_path

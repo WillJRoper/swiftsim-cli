@@ -157,10 +157,9 @@ class TestSofteningsEndToEnd:
         from swiftsim_cli.cli import main
 
         profile = SimpleNamespace(softening_coeff=0.04, softening_pivot_z=2.7)
-        for target in ("cli", "modes.utils"):
-            monkeypatch.setattr(
-                f"swiftsim_cli.{target}.load_swift_profile", lambda: profile
-            )
+        monkeypatch.setattr(
+            "swiftsim_cli.modes.utils.load_swift_profile", lambda: profile
+        )
         ics = write_tiny_ics(tmp_path / "ics.hdf5")
         params = tmp_path / "params.yml"
         params.write_text("Cosmology:\n  a_begin: 0.1\n")

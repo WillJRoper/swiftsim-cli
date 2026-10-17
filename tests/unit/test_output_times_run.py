@@ -49,7 +49,6 @@ def _run_cli(tmp_path, mocker, extra_args):
     """
     from swiftsim_cli.cli import main
 
-    mocker.patch("swiftsim_cli.cli.load_swift_profile")
     params = tmp_path / "params.yml"
     params.write_text(COSMO_PARAMS_YML)
     out = tmp_path / "output_list.txt"
