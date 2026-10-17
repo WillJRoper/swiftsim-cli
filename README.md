@@ -15,7 +15,7 @@ The `swift-cli` command provides a unified interface for managing SWIFT simulati
 
 - **Multi-mode execution**: Run multiple commands in sequence (e.g., `swift-cli config --enable-debug make -j 32`).
 - **SWIFT repository management**: Configure, compile, and update SWIFT installations.
-- **Maintain multiple SWIFT configurations seamlessly**: Easily switch between different SWIFT "profiles" (i.e. different branches or configurations).
+- **Maintain multiple SWIFT configurations seamlessly**: Each SWIFT "profile" is its own git worktree on its own branch with its own configure flags and build, so switching never needs a rebuild.
 - **Output analysis**: Analyze simulation logs and diagnostics.
 - **Simulation setup**: Create new simulation directories containing everything needed to run a SWIFT simulation out of the box.
 - **Automate common calculations**: Provides a suite of common operations such as generating output time sequences, managing softening lengths, and more.
@@ -47,7 +47,7 @@ Once installed you'll need to initialise your first profile (you can have an arb
 swift-cli profile --init
 ```
 
-This will prompt you to set up paths to your SWIFT repository and data directories and set some constants.
+This will prompt you for your main SWIFT clone, where profile worktrees should live (default: a `swiftsim-profiles` directory next to the clone), the first profile's name, the upstream branch it follows, its configure flags, your data directory and some constants. It then creates the profile's worktree.
 
 To view the profile you just set up you can run:
 
@@ -55,13 +55,51 @@ To view the profile you just set up you can run:
 swift-cli profile --show
 ```
 
+### Profiles
+
+A profile is a fully independent SWIFT build. Every profile has:
+
+- its own **git worktree** of your main SWIFT clone (`<worktree_root>/<name>`),
+- its own **local branch** (`swift-cli/<name>`) tracking an **upstream** branch (e.g. `origin/master`),
+- its own **configure flags** and build products.
+
+Because builds never share a directory, switching profiles is instant and can never mix up builds. All modes (`config`, `make`, `update`, `new`, ...) act on the *current* profile; use the global `--profile NAME` option to target another profile without switching.
+
+```bash
+swift-cli profile --new zoom --upstream origin/zoom --configure-flags="--enable-debug" --build -j 16
+swift-cli profile --list              # all profiles (* marks the current one)
+swift-cli profile --show [NAME]       # details of one profile
+swift-cli profile --switch zoom       # or: swift-cli switch zoom
+swift-cli profile --edit zoom         # change upstream, flags, paths, constants
+swift-cli profile --update [NAME] -j 16   # or: swift-cli update -j 16
+swift-cli profile --update-all -j 16  # update every profile, then print a summary
+swift-cli profile --remove zoom       # removes the worktree (and optionally the branch)
+swift-cli --profile zoom make -j 16   # build another profile without switching
+```
+
+Updating a profile runs `git pull --rebase` in its worktree (your local commits are replayed on top of the upstream). If the rebase hits conflicts nothing is built and you're told how to resolve them. Otherwise `./autogen.sh` is run if `./configure` is missing, `./configure` is (re)run only if the profile has never been configured or its configure flags changed, and then `make` is run.
+
+`swift-cli config` sets the current profile's configure flags (from presets such as `--debug` and/or any `--<option>` flags) and reconfigures. Flags are validated against the options listed by `./configure --help` in that profile's worktree, with suggestions for typos.
+
+Already have worktrees made by hand? Register them with:
+
+```bash
+swift-cli profile --adopt ../swiftsim-my-feature --name my-feature
+```
+
+Profiles are stored in `~/.swiftsim-utils/profiles.yaml` and per-profile caches (e.g. the timer database used by `analyse log`) in `~/.swiftsim-utils/cache/<name>/`. If you have a profile file from an older version of `swift-cli`, convert it (after reviewing the plan it prints) with:
+
+```bash
+swift-cli profile --migrate
+```
+
 ## Core Modes
 
-- **`profile`**: Manage SWIFT profiles (different branches or configurations)
+- **`profile`**: Manage SWIFT profiles (one git worktree, branch and build each)
 - **`config`**: Configure SWIFT compilation options (including presets and arbitrary `--<option>` flags)
 - **`make`**: Compile SWIFT with specified number of processes
-- **`update`**: Update SWIFT repository from git
-- **`switch`**: Switch SWIFT git branches
+- **`update`**: Pull (rebase onto upstream) and rebuild the current profile
+- **`switch`**: Switch the current profile
 - **`new`**: Create new simulation run directory
 - **`analyse`**: Analyze SWIFT logs and diagnostic files
 - **`output-times`**: Generate output time sequences for simulations
@@ -198,8 +236,8 @@ pytest
 - `src/swiftsim_cli/cli.py`: Main CLI entry point
 - `src/swiftsim_cli/modes/`: Individual command mode implementations
 - `src/swiftsim_cli/multi_mode_args.py`: Multi-mode argument parsing
-- `src/swiftsim_cli/profile.py`: Configuration management
-- `src/swiftsim_cli/swiftsim_dir.py`: SWIFT repository utilities
+- `src/swiftsim_cli/profile.py`: Profile storage and git worktree management
+- `src/swiftsim_cli/swiftsim_dir.py`: Configure/build/update helpers for a profile's worktree
 
 ## Contributing
 

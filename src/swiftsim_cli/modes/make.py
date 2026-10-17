@@ -1,12 +1,9 @@
-"""Make mode for compiling SWIFT."""
+"""Make mode for compiling the active SWIFT profile."""
 
 import argparse
-from pathlib import Path
 
-from swiftsim_cli.swiftsim_dir import (
-    _run_command_in_swift_dir,
-    get_swiftsim_dir,
-)
+from swiftsim_cli.profile import get_profile
+from swiftsim_cli.swiftsim_dir import build_profile
 
 
 def add_arguments(parser: argparse.ArgumentParser) -> None:
@@ -32,39 +29,18 @@ def run(args: argparse.Namespace) -> None:
     make_swift(nr_threads=args.nr_threads, clean=args.clean)
 
 
-def make_swift(
-    swift_dir: Path | None = None,
-    nr_threads: int = 1,
-    clean: bool = False,
-) -> None:
-    """Compile the SWIFT simulation code.
+def make_swift(nr_threads: int = 1, clean: bool = False) -> None:
+    """Compile the active profile's SWIFT worktree.
 
-    This will navigate to the SWIFT directory (erroring if there is not one
-    set) and then run the make command to compile the SWIFT code.
+    The worktree is (re)configured first if it has never been configured or
+    its configure flags changed since the last configure.
 
     Args:
-        swift_dir: Optional path to the SWIFT directory. If None, uses the
-            directory from the SWIFT-utils config.
-        nr_threads: The number of threads to use for compilation. Defaults
-            to 1.
+        nr_threads: The number of threads to use for compilation.
         clean: Whether to run ``make clean`` before compiling.
 
     Raises:
-        FileNotFoundError: If the SWIFT directory does not exist.
-        ValueError: If the SWIFT directory is not set in the configuration or
-            if the number of threads is less than 1.
+        ValueError: If the number of threads is less than 1.
+        ProfileError: If configure or make fails.
     """
-    # Get the SWIFT directory
-    swift_dir = get_swiftsim_dir(swift_dir)
-
-    if nr_threads < 1:
-        raise ValueError("Number of threads must be at least 1.")
-
-    if clean:
-        _run_command_in_swift_dir(["make", "clean"], swift_dir)
-
-    # Run the command in the SWIFT directory with optional threading
-    if nr_threads > 1:
-        _run_command_in_swift_dir(["make", "-j", str(nr_threads)], swift_dir)
-    else:
-        _run_command_in_swift_dir(["make"], swift_dir)
+    build_profile(get_profile(), nr_threads=nr_threads, clean=clean)
