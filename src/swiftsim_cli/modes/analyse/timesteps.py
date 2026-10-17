@@ -19,9 +19,9 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.lines import Line2D
 
-tab10 = matplotlib.colormaps["tab10"]
-
 from swiftsim_cli.utilities import create_ascii_table, create_output_path
+
+tab10 = matplotlib.colormaps["tab10"]
 
 _TIMESTEP_HEADER_LABELS = [
     "Step",
@@ -317,7 +317,15 @@ def analyse_timestep_files(
         )
 
     max_x_values = [series[-1] for series in x if len(series) > 0]
-    if max_x_values:
+    # Interpolating/truncating at a common x only makes sense when x grows
+    # monotonically (e.g. not for redshift).
+    x_is_monotonic = all(np.all(np.diff(series) >= 0) for series in x)
+    if max_x_values and not x_is_monotonic:
+        print(
+            "Warning: x-axis column is not monotonically increasing; "
+            "skipping the runtime comparison and --match-runtimes."
+        )
+    elif max_x_values:
         runtime_limit = min(max_x_values)
         matched_runtimes = [
             (label, float(np.interp(runtime_limit, xi, yi)))

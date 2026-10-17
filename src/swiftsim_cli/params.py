@@ -65,7 +65,9 @@ def load_parameters(param_file: Path | None = None) -> dict:
     """Load and cache parameters from a YAML file.
 
     Args:
-        param_file: Optional Path to the parameter YAML file.
+        param_file: Optional Path to the parameter YAML file. If None, the
+            currently cached parameters are returned (or an empty dict if
+            nothing has been loaded).
 
     Returns:
         A dict of loaded parameters (cached after first load).
@@ -77,18 +79,14 @@ def load_parameters(param_file: Path | None = None) -> dict:
     """
     global PARAMS, PARAMS_SOURCE, PARAMS_VERSION
 
-    requested_source: Path | None | object
+    # With no file requested, hand back whatever is already cached (the CLI
+    # loads the user's file up-front, downstream callers just ask for it)
     if param_file is None:
-        requested_source = None
-    else:
-        requested_source = param_file.resolve()
+        return PARAMS if PARAMS is not None else {}
 
+    requested_source = param_file.resolve()
     if PARAMS is not None and PARAMS_SOURCE == requested_source:
         return PARAMS
-
-    if param_file is None:
-        clear_parameter_cache()
-        return {}
 
     if not param_file.exists():
         raise FileNotFoundError(f"Parameter file not found: {param_file}")

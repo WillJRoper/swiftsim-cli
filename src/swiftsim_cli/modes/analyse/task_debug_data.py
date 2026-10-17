@@ -6,10 +6,14 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
-from numpy.typing import NDArray
 from tqdm.auto import tqdm  # type: ignore[import-untyped]
 
-from .task_plot_metadata import SUBTYPES, TASKTYPES, task_colour, task_label
+from .task_plot_metadata import (
+    subtype_name,
+    task_colour,
+    task_label,
+    task_type_name,
+)
 
 
 @dataclass(frozen=True)
@@ -46,6 +50,11 @@ class TaskFilter:
     depth: int | None = None
 
 
+# Column counts written by SWIFT's task_dump_all (SWIFT_DEBUG_TASKS).
+NON_MPI_COLUMNS = 19
+MPI_COLUMNS = 21
+
+
 class TaskDebugData:
     """Parsed task-debug data for one ``thread_info`` file."""
 
@@ -60,14 +69,30 @@ class TaskDebugData:
                 f"{self.file_path} does not contain tabular data"
             )
 
-        self.is_mpi = bool(self.data.shape[1] == 21)
+        ncols = self.data.shape[1]
+        if ncols not in (NON_MPI_COLUMNS, MPI_COLUMNS):
+            raise ValueError(
+                f"Task-debug file {self.file_path} has {ncols} columns; "
+                f"expected {NON_MPI_COLUMNS} (non-MPI thread_info) or "
+                f"{MPI_COLUMNS} (thread_info_MPI)."
+            )
+        self.is_mpi = ncols == MPI_COLUMNS
         self._columns = self._define_columns()
         self.cpu_clock_khz = (
             float(self.data[0, self._columns["cpu_clock"]]) / 1000.0
         )
-        self.records = self._parse_records()
-        self.ranks = sorted({record.rank for record in self.records})
-        self.thread_counts = self._count_threads_by_rank()
+        self.cpu_clock_khz_by_rank: dict[int, float] = {}
+        self._records_by_rank = self._parse_records()
+        self.ranks = sorted(self._records_by_rank)
+        self.records = [
+            record
+            for rank in self.ranks
+            for record in self._rank_records(rank)
+        ]
+        self.thread_counts = {
+            rank: len({record.thread for record in self._rank_records(rank)})
+            for rank in self.ranks
+        }
 
     def _define_columns(self) -> dict[str, int]:
         """Return the relevant column offsets for this file format."""
@@ -103,55 +128,75 @@ class TaskDebugData:
             "cpu_clock": 10,
         }
 
-    def _parse_records(self) -> list[TaskRecord]:
-        """Convert rows into task records with contiguous thread IDs."""
-        rows = self.data[1:, :]
+    def _parse_records(self) -> dict[int, list[TaskRecord]]:
+        """Convert rows into per-rank task records with contiguous threads.
+
+        SWIFT writes one header row per rank (task type ``none`` in MPI
+        dumps, ``-1`` in non-MPI dumps) holding the step tic/toc and the
+        CPU frequency. Header rows are dropped and each rank's ticks are
+        converted with that rank's own CPU frequency.
+        """
+        rows = self.data
+        task_index = self._columns["task"]
         tic_index = self._columns["tic"]
         toc_index = self._columns["toc"]
-        rows = rows[(rows[:, tic_index] != 0) & (rows[:, toc_index] != 0)]
+        clock_index = self._columns["cpu_clock"]
 
-        rank_index = self._columns["rank"]
         if self.is_mpi:
-            raw_ranks = [int(value) for value in rows[:, rank_index]]
+            raw_ranks = rows[:, self._columns["rank"]].astype(int)
         else:
-            raw_ranks = [0 for _ in range(len(rows))]
+            raw_ranks = np.zeros(len(rows), dtype=int)
+
+        header_mask = rows[:, task_index] <= 0
+        for row, rank in zip(rows[header_mask], raw_ranks[header_mask]):
+            self.cpu_clock_khz_by_rank.setdefault(
+                int(rank), float(row[clock_index]) / 1000.0
+            )
+
+        keep = (
+            ~header_mask
+            & (rows[:, tic_index] != 0)
+            & (rows[:, toc_index] != 0)
+        )
+        rows = rows[keep]
+        raw_ranks = raw_ranks[keep]
 
         thread_index = self._columns["thread"]
-        thread_map_by_rank: dict[int, dict[int, int]] = {}
-        records: list[TaskRecord] = []
+        records_by_rank: dict[int, list[TaskRecord]] = {}
 
-        for rank in sorted(set(raw_ranks)):
-            rank_mask = np.asarray(raw_ranks) == rank
-            rank_rows = rows[rank_mask]
+        for rank in (int(value) for value in np.unique(raw_ranks)):
+            rank_rows = rows[raw_ranks == rank]
+            clock_khz = self.cpu_clock_khz_by_rank.setdefault(
+                rank, self.cpu_clock_khz
+            )
             raw_threads = [int(value) for value in rank_rows[:, thread_index]]
-            unique_threads = sorted(set(raw_threads))
-            thread_map_by_rank[rank] = {
+            thread_map = {
                 thread_id: mapped_id
-                for mapped_id, thread_id in enumerate(unique_threads)
+                for mapped_id, thread_id in enumerate(sorted(set(raw_threads)))
             }
 
-            rank_records = zip(rank_rows, raw_threads)
+            rank_records: list[TaskRecord] = []
             for row, raw_thread in tqdm(
-                rank_records,
+                zip(rank_rows, raw_threads),
                 total=len(rank_rows),
                 desc=f"Parsing task records (rank {rank})",
                 unit="task",
             ):
-                task_type_index = int(row[self._columns["task"]])
+                task_type_index = int(row[task_index])
                 subtype_index = int(row[self._columns["subtask"]])
-                task_type = TASKTYPES[task_type_index]
-                subtype = SUBTYPES[subtype_index]
+                task_type = task_type_name(task_type_index)
+                subtype = subtype_name(subtype_index)
 
-                records.append(
+                rank_records.append(
                     TaskRecord(
                         rank=rank,
-                        thread=thread_map_by_rank[rank][int(raw_thread)],
+                        thread=thread_map[raw_thread],
                         task_type=task_type,
                         subtype=subtype,
                         label=task_label(task_type_index, subtype_index),
                         colour=task_colour(task_type, subtype),
-                        start_ms=float(row[tic_index]) / self.cpu_clock_khz,
-                        end_ms=float(row[toc_index]) / self.cpu_clock_khz,
+                        start_ms=float(row[tic_index]) / clock_khz,
+                        end_ms=float(row[toc_index]) / clock_khz,
                         ci_type=int(row[self._columns["ci_type"]]),
                         cj_type=int(row[self._columns["cj_type"]]),
                         ci_subtype=int(row[self._columns["ci_subtype"]]),
@@ -160,30 +205,30 @@ class TaskDebugData:
                         cj_depth=int(row[self._columns["cj_depth"]]),
                     )
                 )
+            records_by_rank[rank] = rank_records
 
-        return records
+        return records_by_rank
 
-    def _count_threads_by_rank(self) -> dict[int, int]:
-        """Count the number of worker threads present for each rank."""
-        counts: dict[int, int] = {}
-        for rank in self.ranks:
-            threads = {
-                record.thread for record in self.records if record.rank == rank
-            }
-            counts[rank] = len(threads)
-        return counts
+    def _rank_records(self, rank: int) -> list[TaskRecord]:
+        """Return all (unfiltered) task records for one rank."""
+        if rank not in self._records_by_rank:
+            raise ValueError(f"Rank {rank} not present in {self.file_path}")
+        return self._records_by_rank[rank]
 
-    def mintic_to_ms(self, mintic: int) -> float:
-        """Convert an absolute tick to milliseconds."""
-        return float(mintic) / self.cpu_clock_khz
+    def mintic_to_ms(self, mintic: int, rank: int | None = None) -> float:
+        """Convert an absolute tick to milliseconds.
+
+        Args:
+            mintic: Absolute tick value.
+            rank: Rank whose CPU frequency to use (default: first header).
+        """
+        if rank is None:
+            return float(mintic) / self.cpu_clock_khz
+        return float(mintic) / self.cpu_clock_khz_by_rank[rank]
 
     def rank_bounds_ms(self, rank: int) -> tuple[float, float]:
         """Return the min/max absolute times for a rank."""
-        rank_records = [
-            record for record in self.records if record.rank == rank
-        ]
-        if not rank_records:
-            raise ValueError(f"Rank {rank} not present in {self.file_path}")
+        rank_records = self._rank_records(rank)
         return (
             min(record.start_ms for record in rank_records),
             max(record.end_ms for record in rank_records),
@@ -195,20 +240,14 @@ class TaskDebugData:
         task_filter: TaskFilter | None = None,
     ) -> list[TaskRecord]:
         """Return task records for one rank after applying filters."""
-        if rank not in self.ranks:
-            raise ValueError(f"Rank {rank} not present in {self.file_path}")
-
+        rank_records = self._rank_records(rank)
         if task_filter is None:
-            task_filter = TaskFilter()
+            return list(rank_records)
 
         return [
             record
-            for record in tqdm(
-                self.records,
-                desc=f"Filtering task records (rank {rank})",
-                unit="task",
-            )
-            if record.rank == rank and _matches_filter(record, task_filter)
+            for record in rank_records
+            if _matches_filter(record, task_filter)
         ]
 
 
@@ -251,9 +290,3 @@ def _matches_filter(record: TaskRecord, task_filter: TaskFilter) -> bool:
         return False
 
     return True
-
-
-def discover_task_ranks(file_path: str | Path) -> NDArray[np.int32]:
-    """Return the rank IDs present in a task-debug file."""
-    task_data = TaskDebugData(file_path)
-    return np.asarray(task_data.ranks, dtype=np.int32)

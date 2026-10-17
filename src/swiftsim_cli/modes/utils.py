@@ -137,7 +137,7 @@ def format_softening_report(
     rows: list[dict[str, object]],
 ) -> str:
     """Format a compact human-readable softening report."""
-    z_begin = None if a_begin in (None, 0) else (1 / a_begin) - 1
+    z_begin = None if not a_begin else (1 / a_begin) - 1
     length_unit = str(getattr(box_size, "units", "code_length"))
     box_value = float(
         box_size.value if hasattr(box_size, "value") else box_size

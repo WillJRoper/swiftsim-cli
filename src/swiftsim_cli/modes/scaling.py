@@ -300,7 +300,7 @@ def analyse_swift_scaling(
     plot_paths: list[Path] = []
     summary_sections: list[str] = []
 
-    for _plot_index, run_statistic in enumerate(run_statistics, start=1):
+    for run_statistic in run_statistics:
         used_log_scale = _plot_would_use_log_scale(
             scaling_data=scaling_data,
             timer_ids=selected_timers,
@@ -383,7 +383,7 @@ def analyse_swift_scaling(
 
     comparable_ranks = _collect_comparable_ranks(scaling_data)
     if comparable_ranks:
-        for _timer_index, timer_id in enumerate(selected_timers, start=1):
+        for timer_id in selected_timers:
             timer_rank_path = _create_timer_rank_scaling_plot(
                 scaling_data=scaling_data,
                 timer_id=timer_id,
@@ -487,7 +487,7 @@ def analyse_swift_runtime_scaling(
 
 
 def _extract_rank_count_from_log(log_file: str) -> int:
-    """Extract the MPI rank count from a SWIFT log file."""
+    """Extract the MPI rank count from a SWIFT log (1 for non-MPI runs)."""
     with open(log_file, "r", encoding="utf-8", errors="ignore") as handle:
         for _ in range(200):
             line = handle.readline()
@@ -496,9 +496,9 @@ def _extract_rank_count_from_log(log_file: str) -> int:
             match = MPI_RANKS_RE.search(line)
             if match is not None:
                 return int(match.group("ranks"))
-    raise ValueError(
-        f"Could not determine MPI rank count from log '{log_file}'"
-    )
+
+    # Non-MPI runs never print the MPI start-up line.
+    return 1
 
 
 def _extract_total_runtime_from_log(
@@ -740,7 +740,10 @@ def _create_scaling_plot(
         all_values.extend(perfect_y_values)
         plotted += 2
 
-    for timer_id in timer_ids:
+    # Timer labels follow the optional Total/Perfect pair; index them by
+    # timer position so skipped series don't shift later labels.
+    timer_label_offset = 2 if include_total_reference else 0
+    for timer_index, timer_id in enumerate(timer_ids):
         x_values: list[int] = []
         y_values: list[float] = []
 
@@ -767,7 +770,7 @@ def _create_scaling_plot(
             marker="o",
             linewidth=2,
             markersize=5,
-            label=legend_labels[plotted],
+            label=legend_labels[timer_label_offset + timer_index],
         )
         color = ax.lines[-1].get_color()
         speedup_ax.plot(

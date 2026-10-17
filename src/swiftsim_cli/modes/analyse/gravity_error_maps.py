@@ -16,7 +16,7 @@ from matplotlib.colors import LogNorm
 
 from swiftsim_cli.utilities import create_output_path
 
-from .gravity_checks import _find_counterpart_file
+from .gravity_checks import _find_counterpart_file, _load_force_pair
 
 
 def add_gravity_error_maps_arguments(
@@ -25,10 +25,10 @@ def add_gravity_error_maps_arguments(
     """Add CLI arguments for gravity error maps analysis.
 
     Args:
-        subparsers: The subparsers object to add the gravity-error-map parser.
+        subparsers: The subparsers object to add the gravity-error-maps parser.
     """
     error_map_parser = subparsers.add_parser(
-        "gravity-error-map",
+        "gravity-error-maps",
         help="Create hexbin error maps for gravity check files",
     )
 
@@ -173,6 +173,9 @@ def analyse_gravity_error_maps(
     for i, (input_file, label) in enumerate(zip(files, labels)):
         try:
             exact_file, swift_file = _find_counterpart_file(str(input_file))
+            exact_pos, exact_a, swift_a_grav, _, _ = _load_force_pair(
+                exact_file, swift_file
+            )
         except (ValueError, FileNotFoundError) as e:
             print(f"Error processing {input_file}: {e}")
             continue
@@ -181,37 +184,9 @@ def analyse_gravity_error_maps(
         print(f"  Exact file: {exact_file}")
         print(f"  SWIFT file: {swift_file}")
 
-        # Load and process exact data
-        exact_data = np.loadtxt(exact_file)
-        exact_ids = exact_data[:, 0]
-        exact_pos = exact_data[:, 1:4]
-        exact_a = exact_data[:, 4:7]
-
-        # Sort exact data by particle ID for consistent matching
-        sort_index = np.argsort(exact_ids)
-        exact_ids = exact_ids[sort_index]
-        exact_pos = exact_pos[sort_index, :]
-        exact_a = exact_a[sort_index, :]
         exact_a_norm = np.sqrt(
             exact_a[:, 0] ** 2 + exact_a[:, 1] ** 2 + exact_a[:, 2] ** 2
         )
-
-        # Load and process SWIFT data
-        swift_data = np.loadtxt(swift_file)
-        swift_ids = swift_data[:, 0]
-        swift_pos = swift_data[:, 1:4]
-        swift_a_grav = swift_data[:, 4:7]  # SWIFT acceleration columns
-
-        # Sort SWIFT data by particle ID for consistent matching
-        sort_index = np.argsort(swift_ids)
-        swift_ids = swift_ids[sort_index]
-        swift_pos = swift_pos[sort_index, :]
-        swift_a_grav = swift_a_grav[sort_index, :]
-
-        # Verify data consistency
-        if not np.array_equal(exact_ids, swift_ids):
-            print(f"Warning: Particle IDs don't match exactly for {label}")
-            print("Proceeding with analysis but results may be unreliable")
 
         # Compute relative errors
         diff = exact_a - swift_a_grav
@@ -325,9 +300,9 @@ def _create_continuous_error_map(
     cb3 = plt.colorbar(hb3, ax=ax3)
     cb3.set_label("|δa|/|a_exact|")
 
-    # Error vs distance from center
-    # Assuming simulation box center at [0.5, 0.5, 0.5]
-    center = np.array([0.5, 0.5, 0.5])
+    # Error vs distance from center. The check files carry no box size,
+    # so use the centre of the particles' bounding box.
+    center = 0.5 * (exact_pos.min(axis=0) + exact_pos.max(axis=0))
     distance_from_center = np.sqrt(np.sum((exact_pos - center) ** 2, axis=1))
 
     hb4 = ax4.hexbin(
@@ -335,7 +310,9 @@ def _create_continuous_error_map(
         norm_error,
         gridsize=resolution,
         cmap="viridis",
-        norm=LogNorm(vmin=vmin, vmax=vmax),
+        # Counts, not errors: autoscale rather than reuse the error range
+        norm=LogNorm(),
+        mincnt=1,
     )
     ax4.set_xlabel("Distance from Center")
     ax4.set_ylabel("|δa|/|a_exact|")

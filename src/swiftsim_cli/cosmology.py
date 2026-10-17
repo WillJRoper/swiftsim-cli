@@ -14,22 +14,21 @@ from astropy.cosmology import (  # type: ignore[import-untyped]
 from swiftsim_cli.params import get_parameter_cache_version, load_parameters
 
 
-def _get_cosmology() -> FlatLambdaCDM:
+def _get_cosmology() -> FlatLambdaCDM | None:
     """Get the cosmology parameters from the SWIFT configuration.
 
     Returns:
-        FlatLambdaCDM: An astropy cosmology object with the parameters
-        defined in the SWIFT configuration.
+        FlatLambdaCDM | None: An astropy cosmology object with the parameters
+        defined in the SWIFT configuration, or None if no parameters are
+        loaded or they have no Cosmology section.
     """
     # Get the parameters
     params = load_parameters()
 
-    # If we have no parameters we can't set up a cosmology
-    if len(params) == 0:
+    # Without a Cosmology section we can't set up a cosmology
+    cosmo_params = params.get("Cosmology")
+    if not cosmo_params:
         return None
-
-    # Extract cosmology parameters
-    cosmo_params = params["Cosmology"]
 
     # Calculate Omega_m if not provided (Omega_m = Omega_cdm + Omega_b)
     if "Omega_m" in cosmo_params:
@@ -56,10 +55,11 @@ def _get_cached_cosmology(_params_version: int) -> FlatLambdaCDM | None:
 def get_cosmology() -> FlatLambdaCDM | None:
     """Get the cached cosmology object.
 
-    If no parameters are defined, this will return None.
+    If no parameters (or no Cosmology section) are defined, this will return
+    None.
 
     Returns:
-        FlatLambdaCDM: The cached cosmology object.
+        FlatLambdaCDM | None: The cached cosmology object.
     """
     return _get_cached_cosmology(get_parameter_cache_version())
 
@@ -69,19 +69,19 @@ def clear_cosmology_cache() -> None:
     _get_cached_cosmology.cache_clear()
 
 
-setattr(get_cosmology, "cache_clear", clear_cosmology_cache)
-
-
 def convert_redshift_to_time(
     redshift: Union[float, np.ndarray],
 ) -> Union[float, np.ndarray]:
-    """Convert redshift to time in seconds.
+    """Convert redshift to the age of the Universe in Gyr.
 
     Args:
         redshift: The redshift value(s) to convert.
 
     Returns:
-        The time(s) in seconds corresponding to the given redshift(s).
+        The age(s) in Gyr corresponding to the given redshift(s).
+
+    Raises:
+        ValueError: If no cosmology is available.
     """
     cosmo = get_cosmology()
     if cosmo is None:
@@ -92,21 +92,34 @@ def convert_redshift_to_time(
 def convert_time_to_redshift(
     time: Union[float, np.ndarray],
 ) -> Union[float, np.ndarray]:
-    """Convert time in seconds to redshift.
+    """Convert the age of the Universe in Gyr to redshift.
+
+    Ages at or beyond the present-day age are clamped to z=0.
 
     Args:
-        time: The time(s) in seconds to convert.
+        time: The age(s) in Gyr to convert.
 
     Returns:
-        The redshift(s) corresponding to the given time(s).
+        The redshift(s) corresponding to the given age(s).
+
+    Raises:
+        ValueError: If no cosmology is available or an age cannot be
+            converted (e.g. it is earlier than the age at z=140).
     """
     cosmo = get_cosmology()
+    if cosmo is None:
+        raise ValueError("Cosmology not initialized")
+    age_now = cosmo.age(0).value
 
     def _convert_single_time(t):
+        if t >= age_now:
+            return 0.0
         try:
             return z_at_value(cosmo.age, t * u.Gyr, zmax=140, zmin=0.0).value
-        except CosmologyError:
-            return 0.0
+        except CosmologyError as e:
+            raise ValueError(
+                f"Cannot convert time {t} Gyr to a redshift: {e}"
+            ) from e
 
     if np.isscalar(time):
         return _convert_single_time(time)

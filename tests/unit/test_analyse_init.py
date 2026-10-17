@@ -87,3 +87,61 @@ class TestAnalyseMode:
 
         with pytest.raises(ValueError, match="Unknown analysis type"):
             run(args)
+
+
+# CLI argv and the heavy analysis function each subcommand must reach.
+_SUBCOMMAND_CASES = {
+    "timesteps": (
+        ["timesteps", "a.txt", "-l", "a"],
+        "swiftsim_cli.modes.analyse.timesteps.analyse_timestep_files",
+    ),
+    "gravity-checks": (
+        ["gravity-checks", "a.dat", "-l", "a"],
+        "swiftsim_cli.modes.analyse.gravity_checks.analyse_force_checks",
+    ),
+    "gravity-error-maps": (
+        ["gravity-error-maps", "a.dat", "-l", "a"],
+        "swiftsim_cli.modes.analyse.gravity_error_maps."
+        "analyse_gravity_error_maps",
+    ),
+    "log": (
+        ["log", "swift.log"],
+        "swiftsim_cli.modes.analyse.log_timing.analyse_swift_log_timings",
+    ),
+    "task-counts": (
+        ["task-counts", "swift.log"],
+        "swiftsim_cli.modes.analyse.log_task_counts.analyse_swift_task_counts",
+    ),
+    "mpiuse": (
+        ["mpiuse", "reports"],
+        "swiftsim_cli.modes.analyse.mpiuse.analyse_swift_mpiuse",
+    ),
+    "task-plots": (
+        ["task-plots", "tasks.dat", "threadpool.dat"],
+        "swiftsim_cli.modes.analyse.task_plots.analyse_swift_task_plots",
+    ),
+}
+
+
+def _analyse_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser()
+    add_arguments(parser)
+    return parser
+
+
+def test_every_registered_subcommand_has_a_dispatch_case():
+    """New subcommands must be added to the parse->dispatch test."""
+    subparsers = _analyse_parser()._subparsers._group_actions[0]
+    assert set(subparsers.choices) == set(_SUBCOMMAND_CASES)
+
+
+@pytest.mark.parametrize("name", sorted(_SUBCOMMAND_CASES))
+def test_parse_then_dispatch_reaches_analysis(name):
+    """Parsed subcommand names must match the real dispatch table."""
+    argv, target = _SUBCOMMAND_CASES[name]
+    args = _analyse_parser().parse_args(argv)
+
+    with patch(target) as mock_analysis:
+        run(args)
+
+    mock_analysis.assert_called_once()

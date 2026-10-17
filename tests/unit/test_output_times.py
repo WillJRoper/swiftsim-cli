@@ -329,8 +329,8 @@ def test_generate_output_list_no_cosmo_error_no_final_snap(tmp_path):
     out_file = tmp_path / "output.txt"
     args = {
         "out": out_file,
-        "first_snap_z": 10.0,
-        "delta_z": 1.0,
+        "first_snap_time": 1.0,
+        "delta_time": 1.0,
     }
     with pytest.raises(
         ValueError, match="You must specify the final snapshot"

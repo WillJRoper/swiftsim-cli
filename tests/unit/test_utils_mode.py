@@ -145,3 +145,29 @@ class TestRun:
         )
         mock_format_report.assert_called_once()
         assert capsys.readouterr().out == "report text\n"
+
+
+class TestSofteningsEndToEnd:
+    """Run utils softenings through the CLI with real params and ICs."""
+
+    def test_reads_a_begin_from_params_and_skips_missing_species(
+        self, tmp_path, monkeypatch, write_tiny_ics, capsys
+    ):
+        """a_begin comes from the -p file; absent species are not listed."""
+        from swiftsim_cli.cli import main
+
+        profile = SimpleNamespace(softening_coeff=0.04, softening_pivot_z=2.7)
+        for target in ("cli", "modes.utils"):
+            monkeypatch.setattr(
+                f"swiftsim_cli.{target}.load_swift_profile", lambda: profile
+            )
+        ics = write_tiny_ics(tmp_path / "ics.hdf5")
+        params = tmp_path / "params.yml"
+        params.write_text("Cosmology:\n  a_begin: 0.1\n")
+
+        main(["utils", "softenings", "--ics", str(ics), "-p", str(params)])
+
+        out = capsys.readouterr().out
+        assert "a_begin=0.1, z_begin=9" in out
+        assert "Gas" in out
+        assert "Dark matter" not in out

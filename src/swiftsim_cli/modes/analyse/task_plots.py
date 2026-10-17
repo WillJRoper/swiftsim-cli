@@ -9,9 +9,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Mapping, Sequence, TypeVar
 
-import matplotlib
-
-matplotlib.use("Agg")
 import matplotlib.patches as mpatches
 import matplotlib.pyplot as plt
 import numpy as np
@@ -59,7 +56,14 @@ def add_task_plots_arguments(subparsers) -> None:
     parser.add_argument(
         "threadpool_file",
         type=Path,
-        help="Threadpool dump produced by SWIFT's -Y output.",
+        help=(
+            "Threadpool dump produced by SWIFT's -Y output. Threadpool dumps "
+            "are per rank: for multi-rank task files the dump is only "
+            "overlaid on its own rank, taken from SWIFT's "
+            "'threadpool_info-rank<N>-step<M>.dat' name, or from --rank if "
+            "the name carries no rank. Other ranks are plotted without the "
+            "threadpool panel."
+        ),
     )
     parser.add_argument(
         "--rank",
@@ -238,6 +242,7 @@ def analyse_swift_task_plots(
     print(f"Loading threadpool data from {threadpool_file}...", flush=True)
     threadpool_data = ThreadpoolData(threadpool_file)
     ranks = _select_ranks(task_data, rank)
+    threadpool_rank = _threadpool_rank(threadpool_file, task_data, rank)
     filter_suffix = _task_filter_suffix(task_filter)
     output_root = str(output_path) if output_path is not None else None
     output_prefix = prefix or _step_prefix(task_file, threadpool_file)
@@ -255,9 +260,13 @@ def analyse_swift_task_plots(
                 f"for rank {current_rank}."
             )
 
+        # A threadpool dump only describes the rank that wrote it.
+        rank_pool = (
+            threadpool_data if current_rank == threadpool_rank else None
+        )
         start_ms, window_ms = _time_window(
             task_data=task_data,
-            threadpool_data=threadpool_data,
+            threadpool_data=rank_pool,
             rank=current_rank,
             limit=limit,
             mintic=mintic,
@@ -269,10 +278,16 @@ def analyse_swift_task_plots(
         )
         figure = _plot_combined_timeline(
             task_records=task_records,
-            threadpool_records=threadpool_data.worker_records,
-            background_records=threadpool_data.background_records,
+            threadpool_records=(
+                rank_pool.worker_records if rank_pool is not None else []
+            ),
+            background_records=(
+                rank_pool.background_records if rank_pool is not None else []
+            ),
             task_thread_count=task_data.thread_counts[current_rank],
-            threadpool_thread_count=threadpool_data.thread_count,
+            threadpool_thread_count=(
+                rank_pool.thread_count if rank_pool is not None else 0
+            ),
             start_ms=start_ms,
             window_ms=window_ms,
             expand=expand,
@@ -337,6 +352,39 @@ def _select_ranks(task_data: TaskDebugData, rank: int | None) -> list[int]:
     return [rank]
 
 
+def _threadpool_rank(
+    threadpool_file: str | Path,
+    task_data: TaskDebugData,
+    rank: int | None,
+) -> int:
+    """Return the rank a threadpool dump belongs to.
+
+    SWIFT names MPI dumps ``threadpool_info-rank<N>-step<M>.dat``. Without
+    a rank in the name, single-rank task files use their only rank and
+    multi-rank task files require an explicit ``--rank``.
+    """
+    match = re.search(
+        r"(?:^|[-_])rank(\d+)(?:\D|$)", Path(threadpool_file).stem
+    )
+    if match is not None:
+        file_rank = int(match.group(1))
+        if rank is not None and rank != file_rank:
+            raise ValueError(
+                f"Threadpool file {threadpool_file} is for rank {file_rank} "
+                f"but --rank {rank} was requested."
+            )
+        return file_rank
+    if rank is not None:
+        return rank
+    if len(task_data.ranks) > 1:
+        raise ValueError(
+            f"Task file {task_data.file_path} has {len(task_data.ranks)} "
+            f"ranks but threadpool file {threadpool_file} does not encode "
+            "one; pass --rank to choose the matching rank."
+        )
+    return task_data.ranks[0]
+
+
 def _step_prefix(
     task_file: str | Path, threadpool_file: str | Path
 ) -> str | None:
@@ -357,20 +405,23 @@ def _step_prefix(
 
 def _time_window(
     task_data: TaskDebugData,
-    threadpool_data: ThreadpoolData,
+    threadpool_data: ThreadpoolData | None,
     rank: int,
     limit: float,
     mintic: int | None,
 ) -> tuple[float, float]:
     """Compute the common time origin and x-axis span in ms."""
     task_start, task_end = task_data.rank_bounds_ms(rank)
-    pool_start, pool_end = threadpool_data.bounds_ms()
+    pool_start, pool_end = (
+        threadpool_data.bounds_ms()
+        if threadpool_data is not None
+        else (task_start, task_end)
+    )
 
     if mintic is not None:
-        start_ms = min(
-            task_data.mintic_to_ms(mintic),
-            threadpool_data.mintic_to_ms(mintic),
-        )
+        start_ms = task_data.mintic_to_ms(mintic, rank)
+        if threadpool_data is not None:
+            start_ms = min(start_ms, threadpool_data.mintic_to_ms(mintic))
     else:
         start_ms = min(task_start, pool_start)
 
@@ -457,7 +508,11 @@ def _plot_combined_timeline(
         axis.axvline(0.0, color="k", linestyle="--", linewidth=1)
         axis.axvline(window_ms, color="k", linestyle="--", linewidth=1)
 
-    ax_top.set_title("Threadpool")
+    ax_top.set_title(
+        "Threadpool"
+        if threadpool_records or background_records
+        else "Threadpool (no dump for this rank)"
+    )
     ax_bottom.set_title("Tasks")
     ax_bottom.set_xlabel("Wall clock time [ms]")
 

@@ -102,3 +102,14 @@ def test_load_parameters_permission_error(tmp_path):
 
     with pytest.raises(IOError):
         load_parameters(param_file)
+
+
+def test_load_parameters_no_arg_returns_cached(tmp_path):
+    """No-arg calls return what the CLI already loaded, not an empty dict."""
+    param_file = tmp_path / "params.yml"
+    param_file.write_text("Cosmology:\n  a_begin: 0.1\n")
+
+    loaded = load_parameters(param_file)
+
+    assert load_parameters() is loaded
+    assert load_parameters()["Cosmology"]["a_begin"] == 0.1

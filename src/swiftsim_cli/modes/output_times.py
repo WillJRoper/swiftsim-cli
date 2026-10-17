@@ -14,6 +14,13 @@ from swiftsim_cli.cosmology import (
 )
 from swiftsim_cli.params import load_parameters
 
+# Times are ages of the Universe in Gyr when a cosmology is available (the
+# conversions go through astropy), otherwise they are taken as given.
+TIME_UNITS_HELP = (
+    "in Gyr if the parameter file has a Cosmology section, otherwise in "
+    "internal units"
+)
+
 
 def add_arguments(parser: argparse.ArgumentParser) -> None:
     """Add arguments for the 'output-times' mode."""
@@ -49,7 +56,7 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         "-ft",
         type=float,
         default=None,
-        help="Time of the first snapshot in internal units.",
+        help=f"Time of the first snapshot ({TIME_UNITS_HELP}).",
     )
     parser.add_argument(
         "--first-snap-scale-factor",
@@ -73,7 +80,7 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         "-dt",
         type=float,
         default=None,
-        help="Time interval between snapshots in internal units.",
+        help=f"Time interval between snapshots ({TIME_UNITS_HELP}).",
     )
     parser.add_argument(
         "--delta-scale-factor",
@@ -105,7 +112,7 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         "-sdt",
         type=float,
         default=None,
-        help="Time interval between snipshots in internal units.",
+        help=f"Time interval between snipshots ({TIME_UNITS_HELP}).",
     )
     parser.add_argument(
         "--snipshot-delta-scale-factor",
@@ -122,28 +129,34 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         help="Logarithmic scale factor interval between snipshots.",
     )
 
-    # We will also need to the final snapshot, for redshift and scale factor
-    # this has a well defined default, for time it does not.
+    # We will also need to the final snapshot. These default to None so we
+    # can fall back to a_end from the parameter file (or z=0 / a=1).
     parser.add_argument(
         "--final-snap-z",
         "-fzf",
         type=float,
-        default=0.0,
-        help="Redshift of the final snapshot to include (default: 0.0).",
+        default=None,
+        help=(
+            "Redshift of the final snapshot to include (default: a_end from "
+            "the parameter file, otherwise 0.0)."
+        ),
     )
     parser.add_argument(
         "--final-snap-time",
         "-ftf",
         type=float,
         default=None,
-        help="Time of the final snapshot in internal units (default: None).",
+        help=f"Time of the final snapshot ({TIME_UNITS_HELP}).",
     )
     parser.add_argument(
         "--final-snap-scale-factor",
         "-faf",
         type=float,
-        default=1.0,
-        help="Scale factor of the final snapshot to include (default: 1.0).",
+        default=None,
+        help=(
+            "Scale factor of the final snapshot to include (default: a_end "
+            "from the parameter file, otherwise 1.0)."
+        ),
     )
     parser.add_argument(
         "--list-units",
@@ -393,15 +406,17 @@ def _generate_output_list_no_cosmo(args: dict) -> None:
         else snip_delta_log_scale_factor
     )
 
-    # Make sure we use the right final snapshot time, this has defaults so we
-    # need to be more careful
+    # Make sure we use the right final snapshot time, redshift and scale
+    # factor have well defined defaults (z=0, a=1), time does not
     final_snap = None
     if doing_z:
-        final_snap = final_snap_z
+        final_snap = 0.0 if final_snap_z is None else final_snap_z
     elif doing_time:
         final_snap = final_snap_time
     elif doing_scale_factor:
-        final_snap = final_snap_scale_factor
+        final_snap = (
+            1.0 if final_snap_scale_factor is None else final_snap_scale_factor
+        )
 
     # Ensure we have a meaningful final snapshot
     if final_snap is None:
@@ -562,10 +577,10 @@ def unify_snapshot_times(
 
     Args:
         first_snap_z: The redshift of the first snapshot.
-        first_snap_time: The time of the first snapshot in internal units.
+        first_snap_time: The time of the first snapshot in Gyr.
         first_snap_scale_factor: The scale factor of the first snapshot.
         final_snap_z: The redshift of the final snapshot.
-        final_snap_time: The time of the final snapshot in internal units.
+        final_snap_time: The time of the final snapshot in Gyr.
         final_snap_scale_factor: The scale factor of the final snapshot.
         doing_z: Whether we are working in redshift.
         doing_time: Whether we are working in time.
@@ -747,7 +762,7 @@ def _generate_output_list_with_cosmo(args: dict, cosmo) -> None:
         and final_snap_time is None
         and final_snap_scale_factor is None
     ):
-        final_snap_scale_factor = params["Cosmology"]["a_end"]
+        final_snap_scale_factor = float(params["Cosmology"].get("a_end", 1.0))
 
     # When we have a cosmology, the delta defines what quantity we work in
     doing_z = delta_z is not None
@@ -825,7 +840,7 @@ def _generate_output_list_with_cosmo(args: dict, cosmo) -> None:
         pass  # nothing to do, we are good
 
     # Check that this final snap is before a_end in the parameter file
-    a_end = params["Cosmology"]["a_end"]
+    a_end = float(params["Cosmology"].get("a_end", 1.0))
     if doing_z and convert_redshift_to_scale_factor(final_snap) > a_end:
         z_end = convert_scale_factor_to_redshift(a_end)
         raise ValueError(
@@ -890,6 +905,7 @@ def _generate_output_list_with_cosmo(args: dict, cosmo) -> None:
 
     # If we are getting them, get the snipshot times
     if has_snipshots:
+        assert snip_first_snap is not None and snip_final_snap is not None
         if snip_doing_z:
             assert snip_delta_z is not None, (
                 "snip_delta_z must be provided when snip_doing_z is True"

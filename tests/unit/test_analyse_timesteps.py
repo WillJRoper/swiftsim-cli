@@ -291,3 +291,38 @@ def test_nthreads_converts_main_axis_to_cpu_time(
     assert np.array_equal(wallclock_y, np.array([4.0 / 3600.0]))
     assert np.array_equal(deadtime_y, np.array([0.4 / 3600.0]))
     ax1.set_ylabel.assert_called_once_with("CPU hrs")
+
+
+@patch("swiftsim_cli.modes.analyse.timesteps.create_output_path")
+@patch("swiftsim_cli.modes.analyse.timesteps.plt.close")
+@patch("swiftsim_cli.modes.analyse.timesteps.plt.savefig")
+@patch("swiftsim_cli.modes.analyse.timesteps.plt.tight_layout")
+@patch("swiftsim_cli.modes.analyse.timesteps.plt.subplots")
+def test_non_monotonic_x_skips_runtime_comparison(
+    mock_subplots,
+    mock_tight_layout,
+    mock_savefig,
+    mock_close,
+    mock_create_output_path,
+    tmp_path: Path,
+    capsys,
+):
+    """A decreasing x column (e.g. redshift) must not be interpolated."""
+    files = []
+    for name, wallclock in (("slow.txt", 5000.0), ("fast.txt", 4000.0)):
+        path = tmp_path / name
+        path.write_text(
+            _make_timestep_line(3.0, wallclock)
+            + _make_timestep_line(2.0, wallclock)
+            + _make_timestep_line(1.0, wallclock),
+            encoding="utf-8",
+        )
+        files.append(str(path))
+    mock_subplots.return_value = (Mock(), (Mock(), Mock()))
+    mock_create_output_path.return_value = tmp_path / "plot.png"
+
+    analyse_timestep_files(files, ["slow", "fast"], show_plot=False)
+
+    output = capsys.readouterr().out
+    assert "not monotonically increasing" in output
+    assert "RUNTIME COMPARISON" not in output

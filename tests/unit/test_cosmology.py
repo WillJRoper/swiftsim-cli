@@ -4,6 +4,7 @@ import numpy as np
 import pytest
 
 from swiftsim_cli.cosmology import (
+    clear_cosmology_cache,
     convert_redshift_to_scale_factor,
     convert_redshift_to_time,
     convert_scale_factor_to_redshift,
@@ -74,7 +75,7 @@ def test_convert_redshift_to_time(mocker):
             }
         },
     )
-    get_cosmology.cache_clear()
+    clear_cosmology_cache()
 
     # Test scalar conversion
     time = convert_redshift_to_time(1.0)
@@ -99,7 +100,7 @@ def test_convert_time_to_redshift(mocker):
             }
         },
     )
-    get_cosmology.cache_clear()
+    clear_cosmology_cache()
 
     # Test scalar conversion
     redshift = convert_time_to_redshift(5.9)
@@ -120,7 +121,7 @@ def test_get_cosmology_no_parameters(mocker):
         "swiftsim_cli.cosmology.load_parameters",
         return_value={},
     )
-    get_cosmology.cache_clear()
+    clear_cosmology_cache()
 
     # Should return None when no parameters
     cosmo = get_cosmology()
@@ -134,7 +135,7 @@ def test_convert_redshift_to_time_no_cosmology(mocker):
         "swiftsim_cli.cosmology.load_parameters",
         return_value={},
     )
-    get_cosmology.cache_clear()
+    clear_cosmology_cache()
 
     # Should raise ValueError when cosmology not initialized
     with pytest.raises(ValueError, match="Cosmology not initialized"):
@@ -154,9 +155,49 @@ def test_convert_time_to_redshift_out_of_range(mocker):
             }
         },
     )
-    get_cosmology.cache_clear()
+    clear_cosmology_cache()
 
-    # Test with a time that's out of range (extremely large)
-    # This should trigger the CosmologyError exception and return 0.0
+    # Times at or beyond the present-day age are clamped to z=0
     redshift = convert_time_to_redshift(1000.0)
     assert redshift == 0.0
+
+
+PLANCK_PARAMS = {
+    "Cosmology": {
+        "h": 0.6774,
+        "Omega_m": 0.3089,
+        "Omega_b": 0.0486,
+    }
+}
+
+
+def test_get_cosmology_without_cosmology_section(mocker):
+    """A params file with no Cosmology section gives no cosmology."""
+    mocker.patch(
+        "swiftsim_cli.cosmology.load_parameters",
+        return_value={"TimeIntegration": {"time_begin": 0.0}},
+    )
+    clear_cosmology_cache()
+
+    assert get_cosmology() is None
+
+
+def test_convert_time_to_redshift_no_cosmology(mocker):
+    """convert_time_to_redshift raises clearly without a cosmology."""
+    mocker.patch("swiftsim_cli.cosmology.load_parameters", return_value={})
+    clear_cosmology_cache()
+
+    with pytest.raises(ValueError, match="Cosmology not initialized"):
+        convert_time_to_redshift(1.0)
+
+
+def test_convert_time_to_redshift_too_early_raises(mocker):
+    """Times before z=140 raise rather than silently becoming z=0."""
+    mocker.patch(
+        "swiftsim_cli.cosmology.load_parameters",
+        return_value=PLANCK_PARAMS,
+    )
+    clear_cosmology_cache()
+
+    with pytest.raises(ValueError, match="Cannot convert time"):
+        convert_time_to_redshift(1e-6)

@@ -249,10 +249,27 @@ SUB_COLOURS = {
 }
 
 
+def _name_or_unknown(names: list[str], index: int) -> str:
+    """Return ``names[index]``, or ``unknown_<index>`` if out of range."""
+    if 0 <= index < len(names):
+        return names[index]
+    return f"unknown_{index}"
+
+
+def task_type_name(task_type_index: int) -> str:
+    """Return the task type name for an integer task type ID."""
+    return _name_or_unknown(TASKTYPES, task_type_index)
+
+
+def subtype_name(subtype_index: int) -> str:
+    """Return the task subtype name for an integer subtype ID."""
+    return _name_or_unknown(SUBTYPES, subtype_index)
+
+
 def task_label(task_type_index: int, subtype_index: int) -> str:
     """Return the human-readable task label for integer task IDs."""
-    task_type = TASKTYPES[task_type_index]
-    subtype = SUBTYPES[subtype_index]
+    task_type = task_type_name(task_type_index)
+    subtype = subtype_name(subtype_index)
     if subtype == "none":
         return task_type
     return f"{task_type}/{subtype}"
@@ -260,13 +277,15 @@ def task_label(task_type_index: int, subtype_index: int) -> str:
 
 def task_colour(task_type: str, subtype: str) -> str:
     """Return the colour used by SWIFT's task plotting scripts."""
+    # Task types missing from TASKTYPES (newer SWIFT) get a neutral colour.
+    base_colour = TASK_COLOURS.get(task_type, "grey")
     if "fof" in task_type:
-        return TASK_COLOURS[task_type]
+        return base_colour
 
     if any(key in task_type for key in ("self", "pair", "recv", "send")):
         full_type = f"{task_type}/{subtype}"
         if full_type in SUB_COLOURS:
             return SUB_COLOURS[full_type]
-        return SUB_COLOURS.get(subtype, TASK_COLOURS[task_type])
+        return SUB_COLOURS.get(subtype, base_colour)
 
-    return TASK_COLOURS[task_type]
+    return base_colour

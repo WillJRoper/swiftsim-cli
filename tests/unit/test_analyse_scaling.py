@@ -1,6 +1,7 @@
 """Unit tests for scaling analysis helpers."""
 
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -506,3 +507,87 @@ def test_build_scaling_analysis_avoids_duplicate_weakest_entries():
 
     assert "- Strongest improving timers:" in analysis
     assert "- Weakest or regressing timers:" not in analysis
+
+
+def test_extract_rank_count_defaults_to_one_for_non_mpi(tmp_path: Path):
+    """Logs without the MPI start-up line are single-rank runs."""
+    log_file = tmp_path / "swift.log"
+    log_file.write_text("main: Running on 1 thread.\n", encoding="utf-8")
+
+    assert _extract_rank_count_from_log(str(log_file)) == 1
+
+
+def _timer_def(timer_id: str, function: str) -> TimerDef:
+    return TimerDef(
+        timer_id=timer_id,
+        function=function,
+        log_pattern="pattern",
+        start_line=1,
+        end_line=2,
+        label_text="took %.3f %s.",
+        timer_type="timer",
+    )
+
+
+def _skipped_series_data() -> list[ScalingLogData]:
+    """Two logs where timer_a only appears once (so its series is skipped)."""
+    data = []
+    for rank_count, totals in (
+        (2, {"timer_a": 5.0, "timer_b": 20.0}),
+        (4, {"timer_b": 10.0}),
+    ):
+        counts = {timer_id: 1 for timer_id in totals}
+        data.append(
+            ScalingLogData(
+                log_file=f"{rank_count}.log",
+                label=f"{rank_count}.log",
+                rank_count=rank_count,
+                timer_totals=totals,
+                timer_percentages={k: 50.0 for k in totals},
+                total_time=sum(totals.values()),
+                per_rank_totals={0: totals},
+                timer_call_counts=counts,
+                total_call_count=len(totals),
+                per_rank_call_counts={0: counts},
+                emitted_rank_count=1,
+            )
+        )
+    return data
+
+
+@pytest.mark.parametrize(
+    ("run_statistic", "expected"),
+    [
+        ("sum", ["Total", "Perfect scaling", "func_b"]),
+        ("mean", ["func_b"]),
+    ],
+)
+def test_scaling_plot_legend_survives_skipped_series(
+    tmp_path: Path, monkeypatch, run_statistic, expected
+):
+    """A skipped series must not shift the labels of later series."""
+    from swiftsim_cli.modes import scaling
+
+    figures: list[Any] = []
+    monkeypatch.setattr(scaling.plt, "close", figures.append)
+    timer_db = {
+        "timer_a": _timer_def("timer_a", "func_a"),
+        "timer_b": _timer_def("timer_b", "func_b"),
+    }
+
+    scaling._create_scaling_plot(
+        scaling_data=_skipped_series_data(),
+        timer_ids=["timer_a", "timer_b"],
+        timer_db=timer_db,
+        output_path=str(tmp_path),
+        prefix=None,
+        show_plot=False,
+        out_dir="out",
+        filename="plot.png",
+        title="t",
+        run_statistic=run_statistic,
+        rank_source="all",
+    )
+
+    legend = figures[0].axes[2].get_legend()
+    assert [text.get_text() for text in legend.get_texts()] == expected
