@@ -14,17 +14,12 @@ import math
 import re
 from typing import Any
 
-import matplotlib.cm as cm
+import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.lines import Line2D
 
-# Ensure matplotlib has the tab10 colormap
-try:
-    tab10 = cm.get_cmap("tab10")
-except (AttributeError, ValueError):
-    # Fallback if tab10 is not available
-    tab10 = cm.get_cmap("Set1")
+tab10 = matplotlib.colormaps["tab10"]
 
 from swiftsim_cli.utilities import create_ascii_table, create_output_path
 

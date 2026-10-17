@@ -23,6 +23,7 @@ import argparse
 from pathlib import Path
 from typing import List, TypedDict
 
+import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
 from numpy.typing import NDArray
@@ -453,7 +454,7 @@ def analyse_swift_task_counts(
         fig, ax = plt.subplots(figsize=(12, 8))
 
         # Use a colormap for different task types
-        colors = plt.cm.get_cmap("tab20")(
+        colors = matplotlib.colormaps["tab20"](
             np.linspace(0, 1, len(tasks_to_plot))
         )
 
