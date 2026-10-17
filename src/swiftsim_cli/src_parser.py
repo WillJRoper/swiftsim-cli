@@ -36,9 +36,16 @@ import tree_sitter_c
 from ruamel.yaml import YAML
 from tqdm.auto import tqdm  # type: ignore[import-untyped]
 
-from swiftsim_cli.profile import load_swift_profile
+from swiftsim_cli.profile import get_profile_cache_dir, load_swift_profile
 
-TIMER_FILE = Path.home() / ".swiftsim-utils" / "timers.yaml"
+# Timer database path; None means the active profile's cache directory.
+TIMER_FILE: Path | None = None
+
+
+def _timer_file() -> Path:
+    """Path of the timer database for the active profile."""
+    return TIMER_FILE or get_profile_cache_dir() / "timers.yaml"
+
 
 __all__ = [
     "CTimerParser",
@@ -424,7 +431,7 @@ class CTimerParser:
             src_dir: Root of the source tree (walked recursively).
         """
         self.src_dir = os.path.abspath(src_dir)
-        self.yaml_out = os.path.abspath(TIMER_FILE)
+        self.yaml_out = os.path.abspath(_timer_file())
         self.exts = {
             ".c",
             ".h",
@@ -740,9 +747,9 @@ def load_timer_db(force_regenerate: bool = False) -> Dict[str, TimerDef]:
         Mapping from `timer_id` to `TimerDef` for quick access in analysis.
     """
     # If file doesn't exist, or if requested explicitly, regenerate it.
-    if force_regenerate or not TIMER_FILE.exists():
+    if force_regenerate or not _timer_file().exists():
         config = load_swift_profile()
-        os.makedirs(os.path.dirname(TIMER_FILE) or ".", exist_ok=True)
+        os.makedirs(os.path.dirname(_timer_file()) or ".", exist_ok=True)
         if config.swiftsim_dir is None:
             raise ValueError(
                 "Cannot generate timer database: 'swiftsim_dir' not set in "
@@ -752,7 +759,7 @@ def load_timer_db(force_regenerate: bool = False) -> Dict[str, TimerDef]:
         parse_src_timers(str(config.swiftsim_dir))
 
     yaml_safe = YAML(typ="safe")
-    with open(TIMER_FILE, "r", encoding="utf-8") as f:
+    with open(_timer_file(), "r", encoding="utf-8") as f:
         y = yaml_safe.load(f) or {}
 
     db: Dict[str, TimerDef] = {}

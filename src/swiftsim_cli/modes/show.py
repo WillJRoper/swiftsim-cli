@@ -1,9 +1,6 @@
 """Show mode for displaying the current SWIFT profile.
 
 This is a shortcut for 'swift-cli profile --show'.
-
-Note: This command syncs the profile's git branch with the actual repository
-state before displaying, ensuring the shown information is always current.
 """
 
 import argparse

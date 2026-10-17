@@ -4,7 +4,6 @@ from swiftsim_cli.cosmology import clear_cosmology_cache
 from swiftsim_cli.modes import MODE_MODULES
 from swiftsim_cli.multi_mode_args import MultiModeCLIArgs
 from swiftsim_cli.params import clear_parameter_cache, load_parameters
-from swiftsim_cli.profile import load_swift_profile
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -13,10 +12,6 @@ def main(argv: list[str] | None = None) -> None:
     Args:
         argv: The command-line arguments to parse. If None, uses sys.argv.
     """
-    # Load the config first, we may need it later and this will cache it for
-    # future use.
-    _ = load_swift_profile()
-
     # Parse the multi-mode command-line arguments
     multi_args = MultiModeCLIArgs(argv)
 

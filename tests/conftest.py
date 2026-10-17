@@ -14,7 +14,23 @@ import h5py
 import numpy as np
 import pytest
 
+from swiftsim_cli import profile as profile_mod
 from swiftsim_cli.src_parser import TimerDef, TimerInstance
+
+
+@pytest.fixture(autouse=True)
+def isolated_profile_file(tmp_path, monkeypatch):
+    """Keep every test away from the real ~/.swiftsim-utils directory."""
+    monkeypatch.setattr(
+        profile_mod,
+        "PROFILE_FILE",
+        tmp_path / ".swiftsim-utils" / "profiles.yaml",
+    )
+    profile_mod.set_profile_override(None)
+    profile_mod._load_store_cached.cache_clear()
+    yield profile_mod.PROFILE_FILE
+    profile_mod.set_profile_override(None)
+    profile_mod._load_store_cached.cache_clear()
 
 
 @pytest.fixture

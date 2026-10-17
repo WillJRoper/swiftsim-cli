@@ -5,6 +5,7 @@ import sys
 from typing import List, Sequence, Tuple, cast
 
 from swiftsim_cli.modes import AVAILABLE_MODES, MODE_MODULES, Mode
+from swiftsim_cli.profile import set_profile_override
 
 
 class MultiModeCLIArgs:
@@ -50,9 +51,13 @@ class MultiModeCLIArgs:
         """
         parser = argparse.ArgumentParser(add_help=False)
         parser.add_argument("-v", "--verbose", action="store_true")
+        parser.add_argument("--profile", default=None)
 
         # Parse known global args and return the rest
         global_args, remaining = parser.parse_known_args(argv)
+
+        # Run every mode against --profile NAME instead of the current one
+        set_profile_override(global_args.profile)
         return global_args, remaining
 
     def _split_by_modes(self, argv: List[str]) -> List[Tuple[Mode, List[str]]]:

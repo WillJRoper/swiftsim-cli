@@ -11,11 +11,8 @@ class TestCLI:
     """Test CLI functionality."""
 
     @patch("swiftsim_cli.cli.MultiModeCLIArgs")
-    @patch("swiftsim_cli.cli.load_swift_profile")
     @patch("swiftsim_cli.cli.load_parameters")
-    def test_main_basic(
-        self, mock_load_params, mock_load_profile, mock_multi_args
-    ):
+    def test_main_basic(self, mock_load_params, mock_multi_args):
         """Test basic CLI main function."""
         # Mock the multi-mode args
         mock_args = Mock()
@@ -36,11 +33,8 @@ class TestCLI:
             mock_module.run.assert_called_once_with(mock_args)
 
     @patch("swiftsim_cli.cli.MultiModeCLIArgs")
-    @patch("swiftsim_cli.cli.load_swift_profile")
     @patch("swiftsim_cli.cli.load_parameters")
-    def test_main_no_args(
-        self, mock_load_params, mock_load_profile, mock_multi_args
-    ):
+    def test_main_no_args(self, mock_load_params, mock_multi_args):
         """Test CLI main function with no arguments."""
         mock_multi_args_instance = Mock()
         mock_multi_args_instance.modes = []
@@ -50,11 +44,8 @@ class TestCLI:
         mock_multi_args.assert_called_once_with(None)
 
     @patch("swiftsim_cli.cli.MultiModeCLIArgs")
-    @patch("swiftsim_cli.cli.load_swift_profile")
     @patch("swiftsim_cli.cli.load_parameters")
-    def test_main_with_args(
-        self, mock_load_params, mock_load_profile, mock_multi_args
-    ):
+    def test_main_with_args(self, mock_load_params, mock_multi_args):
         """Test CLI main function with specific arguments."""
         mock_multi_args_instance = Mock()
         mock_multi_args_instance.modes = []
@@ -65,11 +56,8 @@ class TestCLI:
         mock_multi_args.assert_called_once_with(test_args)
 
     @patch("swiftsim_cli.cli.MultiModeCLIArgs")
-    @patch("swiftsim_cli.cli.load_swift_profile")
     @patch("swiftsim_cli.cli.load_parameters")
-    def test_main_multiple_modes(
-        self, mock_load_params, mock_load_profile, mock_multi_args
-    ):
+    def test_main_multiple_modes(self, mock_load_params, mock_multi_args):
         """Test CLI with multiple modes."""
         # Mock args for multiple modes
         mock_config_args = Mock()
@@ -96,10 +84,9 @@ class TestCLI:
             mock_make_module.run.assert_called_once_with(mock_make_args)
 
     @patch("swiftsim_cli.cli.MultiModeCLIArgs")
-    @patch("swiftsim_cli.cli.load_swift_profile")
     @patch("swiftsim_cli.cli.load_parameters")
     def test_main_mode_execution_error(
-        self, mock_load_params, mock_load_profile, mock_multi_args
+        self, mock_load_params, mock_multi_args
     ):
         """Test CLI main function with mode execution error."""
         mock_args = Mock()
