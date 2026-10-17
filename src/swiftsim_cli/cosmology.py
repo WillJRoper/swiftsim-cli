@@ -3,10 +3,10 @@
 from functools import lru_cache
 from typing import Union
 
-import astropy.cosmology.core  # type: ignore[import-untyped]
 import astropy.units as u  # type: ignore[import-untyped]
 import numpy as np
 from astropy.cosmology import (  # type: ignore[import-untyped]
+    CosmologyError,
     FlatLambdaCDM,
     z_at_value,
 )
@@ -105,7 +105,7 @@ def convert_time_to_redshift(
     def _convert_single_time(t):
         try:
             return z_at_value(cosmo.age, t * u.Gyr, zmax=140, zmin=0.0).value
-        except astropy.cosmology.core.CosmologyError:
+        except CosmologyError:
             return 0.0
 
     if np.isscalar(time):

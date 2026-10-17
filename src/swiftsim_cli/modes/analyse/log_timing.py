@@ -1705,6 +1705,12 @@ def analyse_swift_log_timings(
     function_stats = {
         tid: build_stats(vals) for tid, vals in function_times_by_tid.items()
     }
+    rank0_function_total = sum(
+        inst.time_ms
+        for inst_list in instances_by_step.values()
+        for inst in inst_list
+        if inst.timer_type == "function" and inst.rank == 0
+    )
 
     # Note: No synthetic timers - only use actual function timers from the log
     operation_stats = {
@@ -1735,6 +1741,7 @@ def analyse_swift_log_timings(
         int, float
     ] = {}  # wall-clock ms per step (last float on step line)
     step_seen_order: List[int] = []
+    ranks_seen_in_log: set[int] = set()
 
     # Regex mirrors your original, plus helpers for categories & counts
     step_line_re = re.compile(
@@ -1744,6 +1751,7 @@ def analyse_swift_log_timings(
         r"\*\*\*\s+([^:]+):\s+([\d.]+)\s+ms\s+\(([\d.]+)\s%?\)"
     )
     counts_re = re.compile(r"task counts are \[(.*)\]")
+    rank_prefix_re = re.compile(r"^\[(\d+)\]\s+\[[0-9.]+\]")
 
     # Read the log file and count lines for progress
     with open(log_file, "r", encoding="utf-8", errors="ignore") as f:
@@ -1756,6 +1764,9 @@ def analyse_swift_log_timings(
 
     for raw in tqdm(lines, desc="Parsing log lines", unit="line"):
         line = raw.strip()
+
+        if rank_match := rank_prefix_re.match(line):
+            ranks_seen_in_log.add(int(rank_match.group(1)))
 
         # Step info rows (capture first 5 numeric columns as in your original)
         if sm := step_line_re.match(line):
@@ -1917,6 +1928,8 @@ def analyse_swift_log_timings(
             task_category_times,
             task_counts,
             step_totals,
+            ranks_seen_in_log,
+            rank0_function_total,
             top_n,
             hierarchy_functions,
         )
@@ -1947,6 +1960,8 @@ def _print_analysis_tables(
     task_category_times,
     task_counts,
     step_totals,
+    ranks_seen_in_log,
+    rank0_function_total,
     top_n,
     hierarchy_functions,
 ):
@@ -2052,6 +2067,8 @@ def _print_analysis_tables(
         all_stats,
         sorted_all,
         step_totals,
+        ranks_seen_in_log,
+        rank0_function_total,
     )
 
 
@@ -2290,6 +2307,8 @@ def _print_overall_summary(
     all_stats,
     sorted_all,
     step_totals,
+    ranks_seen_in_log,
+    rank0_function_total,
 ):
     """Print overall performance summary."""
     print("\nPERFORMANCE SUMMARY")
@@ -2305,11 +2324,16 @@ def _print_overall_summary(
         f"{sum(s['call_count'] for s in all_stats.values())}"
     )
 
+    is_mpi_log = len(ranks_seen_in_log) > 1
+
     if step_totals:
         total_step_wallclock = sum(step_totals.values())
-        missing_time = total_step_wallclock - total_function
+        comparable_function_total = (
+            rank0_function_total if is_mpi_log else total_function
+        )
+        missing_time = total_step_wallclock - comparable_function_total
         coverage_pct = (
-            100 * total_function / total_step_wallclock
+            100 * comparable_function_total / total_step_wallclock
             if total_step_wallclock > 0
             else 0.0
         )
@@ -2322,11 +2346,38 @@ def _print_overall_summary(
             "Step-table wallclock total:            "
             f"{total_step_wallclock:.1f} ms"
         )
-        print(f"Function timer coverage of steps:      {coverage_pct:.1f}%")
-        print(
-            "Time outside function timers:          "
-            f"{missing_time:.1f} ms ({missing_pct:.1f}%)"
-        )
+        if is_mpi_log:
+            print(
+                "MPI ranks seen in log:                 "
+                f"{len(ranks_seen_in_log)}"
+            )
+            print(
+                "Rank-0 function timer time:            "
+                f"{rank0_function_total:.1f} ms"
+            )
+            print(
+                "All-rank function timer sum:           "
+                f"{total_function:.1f} ms"
+            )
+            print(
+                f"Rank-0 timer coverage of steps:        {coverage_pct:.1f}%"
+            )
+            print(
+                "Rank-0 time outside timers:            "
+                f"{missing_time:.1f} ms ({missing_pct:.1f}%)"
+            )
+            print(
+                "Note: all-rank timer sums are not directly comparable "
+                "to per-step wallclock totals in MPI logs."
+            )
+        else:
+            print(
+                f"Function timer coverage of steps:      {coverage_pct:.1f}%"
+            )
+            print(
+                "Time outside function timers:          "
+                f"{missing_time:.1f} ms ({missing_pct:.1f}%)"
+            )
 
     # Top-k coverage
     if len(sorted_all) >= 5:

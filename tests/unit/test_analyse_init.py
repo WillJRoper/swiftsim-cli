@@ -70,15 +70,15 @@ class TestAnalyseMode:
 
         mock_run_swift_task_counts.assert_called_once_with(args)
 
-    @patch("swiftsim_cli.modes.analyse.run_swift_scaling")
-    def test_run_scaling(self, mock_run_swift_scaling):
-        """Test running scaling analysis."""
+    @patch("swiftsim_cli.modes.analyse.run_swift_task_plots")
+    def test_run_task_plots(self, mock_run_swift_task_plots):
+        """Test running combined task/threadpool plotting."""
         args = Mock()
-        args.analysis_type = "scaling"
+        args.analysis_type = "task-plots"
 
         run(args)
 
-        mock_run_swift_scaling.assert_called_once_with(args)
+        mock_run_swift_task_plots.assert_called_once_with(args)
 
     def test_run_unknown_type(self):
         """Test running with unknown analysis type."""

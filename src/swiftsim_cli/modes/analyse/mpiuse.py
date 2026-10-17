@@ -7,6 +7,7 @@ import re
 from pathlib import Path
 from typing import Any, TypedDict
 
+import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd  # type: ignore[import-untyped]
@@ -200,7 +201,7 @@ def analyse_swift_mpiuse(
         "mpiuse_analysis" if prefix is None else f"{prefix}_mpiuse_analysis"
     )
     markers = ["o", "s", "^", "D", "v", "<", ">", "p", "*", "h"]
-    cmap = plt.get_cmap("tab20")
+    cmap = matplotlib.colormaps["tab20"]
 
     all_data: list[MpiuseData] = []
     csv_rows: list[pd.DataFrame] = []
@@ -1029,7 +1030,7 @@ def _plot_per_rank_totals(
             for row in rank_detail.itertuples(index=False)
         )
     subtype_keys = sorted(subtype_keys_set)
-    colors = plt.get_cmap("tab20")(
+    colors = matplotlib.colormaps["tab20"](
         np.linspace(0, 1, max(1, len(subtype_keys)))
     )
 

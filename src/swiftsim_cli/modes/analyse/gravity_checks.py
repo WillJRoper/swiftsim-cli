@@ -133,25 +133,26 @@ def analyse_force_checks(
         raise ValueError("Number of files and labels must match.")
 
     # Set up parameters for plotting
-    params = {
-        "axes.labelsize": 14,
-        "axes.titlesize": 18,
-        "font.size": 11,
-        "legend.fontsize": 12,
-        "xtick.labelsize": 14,
-        "ytick.labelsize": 14,
-        "text.usetex": False,
-        "figure.figsize": (12, 9),
-        "figure.subplot.left": 0.06,
-        "figure.subplot.right": 0.99,
-        "figure.subplot.bottom": 0.06,
-        "figure.subplot.top": 0.99,
-        "figure.subplot.wspace": 0.14,
-        "figure.subplot.hspace": 0.14,
-        "lines.markersize": 6,
-        "lines.linewidth": 3.0,
-    }
-    plt.rcParams.update(params)
+    plt.rcParams.update(
+        {
+            "axes.labelsize": 14,
+            "axes.titlesize": 18,
+            "font.size": 11,
+            "legend.fontsize": 12,
+            "xtick.labelsize": 14,
+            "ytick.labelsize": 14,
+            "text.usetex": False,
+            "figure.figsize": (12, 9),
+            "figure.subplot.left": 0.06,
+            "figure.subplot.right": 0.99,
+            "figure.subplot.bottom": 0.06,
+            "figure.subplot.top": 0.99,
+            "figure.subplot.wspace": 0.14,
+            "figure.subplot.hspace": 0.14,
+            "lines.markersize": 6,
+            "lines.linewidth": 3.0,
+        }
+    )
 
     # Construct the bins for error histogram
     bin_edges = np.linspace(

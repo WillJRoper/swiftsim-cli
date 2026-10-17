@@ -9,9 +9,11 @@ from . import (
     new,
     output_times,
     profile,
+    scaling,
     show,
     switch,
     update,
+    utils,
 )
 
 # Available modes for swift-utils CLI
@@ -24,7 +26,9 @@ AVAILABLE_MODES = [
     "make",
     "new",
     "analyse",
+    "scaling",
     "show",
+    "utils",
 ]
 
 # Type hint for mode names
@@ -37,7 +41,9 @@ Mode = Literal[
     "make",
     "new",
     "analyse",
+    "scaling",
     "show",
+    "utils",
 ]
 
 # Mode module imports
@@ -52,5 +58,7 @@ MODE_MODULES = {
     "make": make,
     "new": new,
     "analyse": analyse,
+    "scaling": scaling,
     "show": show,
+    "utils": utils,
 }
