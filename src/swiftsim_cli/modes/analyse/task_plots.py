@@ -482,7 +482,7 @@ def _plot_task_activity(
     if thread_count < 1:
         raise ValueError("Task activity plots require at least one thread.")
 
-    grid = np.zeros((thread_count, xbins), dtype=float)
+    grid: np.ndarray = np.zeros((thread_count, xbins), dtype=float)
     for record in task_records:
         start_bin = int(
             np.clip(
