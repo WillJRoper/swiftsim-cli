@@ -36,7 +36,13 @@ from swiftsim_cli.src_parser import (
     load_timer_db,
     scan_log_instances_by_step,
 )
-from swiftsim_cli.utilities import create_ascii_table, create_output_path
+from swiftsim_cli.utilities.io import create_output_path
+from swiftsim_cli.utilities.plotting import save_figure
+from swiftsim_cli.utilities.step_table import (
+    StepTableReader,
+    step_wallclock_ms,
+)
+from swiftsim_cli.utilities.tables import create_ascii_table
 
 # ============================================================================
 # CLI ARGUMENT SETUP
@@ -277,6 +283,26 @@ def display_name(tid: str, timer_db: Dict) -> str:
     return f"{td.function} [{tid}]"
 
 
+def _plot_function_name(tid: str, timer_db: Dict) -> str:
+    """Return a title-cased function name for plot labels.
+
+    Args:
+        tid: Timer ID (possibly ``SYNTHETIC:<function>``).
+        timer_db: Dictionary of timer definitions.
+
+    Returns:
+        The timer's function name with underscores as spaces, title-cased,
+        or "Unknown" if the timer cannot be resolved.
+    """
+    if tid in timer_db:
+        func_name = timer_db[tid].function
+    elif tid.startswith("SYNTHETIC:"):
+        func_name = tid[len("SYNTHETIC:") :]
+    else:
+        func_name = "Unknown"
+    return func_name.replace("_", " ").title()
+
+
 def build_stats(values: List[float]) -> Dict[str, float | int]:
     """Build statistical summary for a list of timing values.
 
@@ -342,17 +368,7 @@ def create_function_timing_chart(
     times = []
 
     for tid, stats in top_funcs:
-        # Clean up function names for better display
-        if tid in timer_db:
-            func_name = timer_db[tid].function
-        elif tid.startswith("SYNTHETIC:"):
-            func_name = tid.replace("SYNTHETIC:", "")
-        else:
-            func_name = "Unknown"
-        # Remove SYNTHETIC prefix and cleanup
-        clean_name = (
-            func_name.replace("SYNTHETIC:", "").replace("_", " ").title()
-        )
+        clean_name = _plot_function_name(tid, timer_db)
         names.append(clean_name)
         times.append(stats["total_time"])
 
@@ -406,10 +422,7 @@ def create_function_timing_chart(
     p = create_output_path(
         output_path, prefix, "01_function_timing.png", out_dir
     )
-    plt.savefig(p, dpi=300, bbox_inches="tight")
-    if show_plot:
-        plt.show()
-    plt.close()
+    save_figure(fig, p, show=show_plot)
 
     return p
 
@@ -445,16 +458,7 @@ def create_function_distribution_chart(
     times = []
 
     for tid, stats in top_items:
-        # Handle both regular and synthetic timer IDs
-        if tid in timer_db:
-            func_name = timer_db[tid].function
-        elif tid.startswith("SYNTHETIC:"):
-            func_name = tid.replace("SYNTHETIC:", "")
-        else:
-            func_name = "Unknown"
-        clean_name = (
-            func_name.replace("SYNTHETIC:", "").replace("_", " ").title()
-        )
+        clean_name = _plot_function_name(tid, timer_db)
         names.append(clean_name[:20])  # Limit length
         times.append(stats["total_time"])
 
@@ -494,10 +498,7 @@ def create_function_distribution_chart(
     p = create_output_path(
         output_path, prefix, "02_function_distribution.png", out_dir
     )
-    plt.savefig(p, dpi=300, bbox_inches="tight")
-    if show_plot:
-        plt.show()
-    plt.close()
+    save_figure(fig, p, show=show_plot)
 
     return p
 
@@ -529,16 +530,7 @@ def create_function_efficiency_chart(
     efficiency_data = []
     for tid, stats in sorted_functions[:20]:
         if stats["call_count"] > 0:
-            # Handle both regular and synthetic timer IDs
-            if tid in timer_db:
-                func_name = timer_db[tid].function
-            elif tid.startswith("SYNTHETIC:"):
-                func_name = tid.replace("SYNTHETIC:", "")
-            else:
-                func_name = "Unknown"
-            clean_name = (
-                func_name.replace("SYNTHETIC:", "").replace("_", " ").title()
-            )
+            clean_name = _plot_function_name(tid, timer_db)
             efficiency = stats["total_time"] / stats["call_count"]
             efficiency_data.append(
                 (clean_name, efficiency, stats["call_count"])
@@ -598,10 +590,7 @@ def create_function_efficiency_chart(
     p = create_output_path(
         output_path, prefix, "03_function_efficiency.png", out_dir
     )
-    plt.savefig(p, dpi=300, bbox_inches="tight")
-    if show_plot:
-        plt.show()
-    plt.close()
+    save_figure(fig, p, show=show_plot)
 
     return p
 
@@ -684,10 +673,7 @@ def create_timer_distribution_histogram(
     p = create_output_path(
         output_path, prefix, "04_timer_distribution.png", out_dir
     )
-    plt.savefig(p, dpi=300, bbox_inches="tight")
-    if show_plot:
-        plt.show()
-    plt.close()
+    save_figure(fig, p, show=show_plot)
 
     return p
 
@@ -780,10 +766,7 @@ def create_task_category_overview(
     p = create_output_path(
         output_path, prefix, "05_task_categories.png", out_dir
     )
-    plt.savefig(p, dpi=300, bbox_inches="tight")
-    if show_plot:
-        plt.show()
-    plt.close()
+    save_figure(fig, p, show=show_plot)
 
     return p
 
@@ -817,19 +800,10 @@ def create_performance_summary_scatter(
         if (
             stats["call_count"] > 0 and stats["total_time"] > 1
         ):  # Filter very small timers
-            # Handle both regular and synthetic timer IDs
-            if tid in timer_db:
-                func_name = timer_db[tid].function
-            elif tid.startswith("SYNTHETIC:"):
-                func_name = tid.replace("SYNTHETIC:", "")
-            else:
-                func_name = "Unknown"
             avg_duration = stats["total_time"] / stats["call_count"]
             scatter_data.append(
                 {
-                    "name": func_name.replace("SYNTHETIC:", "")
-                    .replace("_", " ")
-                    .title(),
+                    "name": _plot_function_name(tid, timer_db),
                     "calls": stats["call_count"],
                     "avg_duration": avg_duration,
                     "total_time": stats["total_time"],
@@ -897,10 +871,7 @@ def create_performance_summary_scatter(
     p = create_output_path(
         output_path, prefix, "06_performance_summary.png", out_dir
     )
-    plt.savefig(p, dpi=300, bbox_inches="tight")
-    if show_plot:
-        plt.show()
-    plt.close()
+    save_figure(fig, p, show=show_plot)
 
     return p
 
@@ -1015,10 +986,7 @@ def create_time_series_plot(
 
     plt.tight_layout(rect=(0, 0, 1, 0.98))
     p = create_output_path(output_path, prefix, "07_time_series.png", out_dir)
-    plt.savefig(p, dpi=300, bbox_inches="tight")
-    if show_plot:
-        plt.show()
-    plt.close()
+    save_figure(fig, p, show=show_plot)
 
     return p
 
@@ -1135,10 +1103,7 @@ def create_timing_variability_chart(
     p = create_output_path(
         output_path, prefix, "08_timing_variability.png", out_dir
     )
-    plt.savefig(p, dpi=300, bbox_inches="tight")
-    if show_plot:
-        plt.show()
-    plt.close()
+    save_figure(fig, p, show=show_plot)
 
     return p
 
@@ -1392,18 +1357,6 @@ def _hierarchy_prefix(active_levels: list[bool]) -> str:
     ]
     branch_parts.append("├─ " if active_levels[-1] else "└─ ")
     return "".join(branch_parts)
-
-
-def _extract_step_wallclock_ms(line: str) -> float | None:
-    """Extract the step-table wallclock column from one SWIFT step row."""
-    parts = line.split()
-    if len(parts) < 13:
-        return None
-
-    try:
-        return float(parts[12])
-    except ValueError:
-        return None
 
 
 def add_hierarchical_rows(
@@ -1734,19 +1687,13 @@ def analyse_swift_log_timings(
     )
 
     print("Parsing task categories, step info, and additional log data...")
-    step_info: List[Dict[str, float | int]] = []
     task_category_times: Dict[str, List[float]] = defaultdict(list)
     task_counts: Dict[str, List[int]] = defaultdict(list)
-    step_totals: Dict[
-        int, float
-    ] = {}  # wall-clock ms per step (last float on step line)
-    step_seen_order: List[int] = []
+    step_totals: Dict[int, float] = {}  # wall-clock ms per step
     ranks_seen_in_log: set[int] = set()
+    step_table = StepTableReader()
 
-    # Regex mirrors your original, plus helpers for categories & counts
-    step_line_re = re.compile(
-        r"^\s*(\d+)\s+([\d.e+-]+)\s+([\d.e+-]+)\s+([\d.e+-]+)\s+([\d.e+-]+)"
-    )
+    # Helpers for task categories & counts
     task_line_re = re.compile(
         r"\*\*\*\s+([^:]+):\s+([\d.]+)\s+ms\s+\(([\d.]+)\s%?\)"
     )
@@ -1768,28 +1715,11 @@ def analyse_swift_log_timings(
         if rank_match := rank_prefix_re.match(line):
             ranks_seen_in_log.add(int(rank_match.group(1)))
 
-        # Step info rows (capture first 5 numeric columns as in your original)
-        if sm := step_line_re.match(line):
-            try:
-                step_num = int(sm.group(1))
-                step_seen_order.append(step_num)
-                step_info.append(
-                    dict(
-                        step=step_num,
-                        time_1=float(sm.group(2)),
-                        time_2=float(sm.group(3)),
-                        time_3=float(sm.group(4)),
-                        time_4=float(sm.group(5)),
-                    )
-                )
-                # Capture the explicit wall-clock column from the step table.
-                wallclock_ms = _extract_step_wallclock_ms(line)
-                if wallclock_ms is not None:
-                    step_totals[step_num] = wallclock_ms
-            except ValueError:
-                # Skip malformed lines (keep behavior similar to your
-                # warning pattern)
-                pass
+        # Step-table rows: capture the wall-clock column
+        if (step_row := step_table.feed(line)) is not None:
+            wallclock_ms = step_wallclock_ms(step_row)
+            if wallclock_ms is not None:
+                step_totals[int(step_row["Step"])] = wallclock_ms
             continue
 
         # Task category summary rows

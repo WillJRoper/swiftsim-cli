@@ -8,7 +8,6 @@ simulation data:
 - Error maps: Gravity error visualization and mapping
 - Log timing: Performance profiling and timing analysis with plots
 - Task counts: Analyse engine_print_task_counts output for task distribution
-- Timer classification: Automatic function vs operation timer detection
 
 Each analysis type is implemented in its own submodule for better organization
 and maintainability.
@@ -77,7 +76,6 @@ from .log_task_counts import analyse_swift_task_counts
 from .log_timing import analyse_swift_log_timings
 from .mpiuse import analyse_swift_mpiuse
 from .task_plots import analyse_swift_task_plots
-from .timer_classification import classify_timers_by_max_time
 from .timesteps import analyse_timestep_files
 
 __all__ = [
@@ -95,5 +93,4 @@ __all__ = [
     "analyse_swift_task_counts",
     "analyse_swift_mpiuse",
     "analyse_swift_task_plots",
-    "classify_timers_by_max_time",
 ]

@@ -169,10 +169,6 @@ class MultiModeCLIArgs:
         for mode_name in AVAILABLE_MODES:
             mode_module = MODE_MODULES[mode_name]
 
-            # Create a parser to extract help text
-            parser = argparse.ArgumentParser(add_help=False)
-            mode_module.add_arguments(parser)
-
             # Get the first line of the module docstring as description
             desc = (
                 mode_module.__doc__.split(".")[0]
@@ -189,17 +185,3 @@ class MultiModeCLIArgs:
         print("  swift-cli update config --enable-debug make -j 8")
         print()
         print("For mode-specific help: swift-cli <mode> --help")
-
-
-def parse_multimode_args(
-    argv: Sequence[str] | None = None,
-) -> MultiModeCLIArgs:
-    """Parse multi-mode command-line arguments.
-
-    Args:
-        argv: Command-line arguments to parse. If None, uses sys.argv.
-
-    Returns:
-        MultiModeCLIArgs instance with parsed arguments.
-    """
-    return MultiModeCLIArgs(argv)

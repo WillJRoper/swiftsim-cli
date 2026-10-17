@@ -9,7 +9,8 @@ from typing import Optional, Union
 import matplotlib.pyplot as plt
 import numpy as np
 
-from swiftsim_cli.utilities import create_output_path
+from swiftsim_cli.utilities.io import create_output_path
+from swiftsim_cli.utilities.plotting import save_figure
 
 
 def _find_counterpart_file(filepath: str) -> tuple[str, str]:
@@ -214,13 +215,16 @@ def analyse_force_checks(
         # Colors for the plots
         cols = ["#332288", "#88CCEE", "#117733", "#DDCC77", "#CC6677"]
 
-        # Create the figure with subplots
+        # Create the figure with one panel per error component:
+        # (axes, x label, y limit)
         fig = plt.figure()
-        ax1 = plt.subplot(231)  # X-component error
-        ax2 = plt.subplot(232)  # Y-component error
-        ax3 = plt.subplot(233)  # Z-component error
-        ax4 = plt.subplot(234)  # Magnitude error
-        ax5 = plt.subplot(235)  # Potential error
+        panels = (
+            (plt.subplot(231), "δax/|a_exact|", 1.75),
+            (plt.subplot(232), "δay/|a_exact|", 1.75),
+            (plt.subplot(233), "δaz/|a_exact|", 1.75),
+            (plt.subplot(234), "|δa|/|a_exact|", 2.5),
+            (plt.subplot(235), "δφ/φ_exact", 1.75),
+        )
 
         # Process each file and find its counterpart
         for i, (input_file, label) in enumerate(zip(files, labels)):
@@ -257,112 +261,32 @@ def analyse_force_checks(
             error_z = np.abs(diff[:, 2]) / exact_a_norm
             error_pot = np.abs(diff_pot) / np.abs(exact_pot_corrected)
 
-            # Bin the errors for histogram
-            norm_error_hist, _ = np.histogram(
-                norm_error, bins=bin_edges, density=False
-            )
-            norm_error_hist = norm_error_hist / (
-                np.size(norm_error) * bin_size
-            )
-
-            error_x_hist, _ = np.histogram(
-                error_x, bins=bin_edges, density=False
-            )
-            error_x_hist = error_x_hist / (np.size(norm_error) * bin_size)
-
-            error_y_hist, _ = np.histogram(
-                error_y, bins=bin_edges, density=False
-            )
-            error_y_hist = error_y_hist / (np.size(norm_error) * bin_size)
-
-            error_z_hist, _ = np.histogram(
-                error_z, bins=bin_edges, density=False
-            )
-            error_z_hist = error_z_hist / (np.size(norm_error) * bin_size)
-
-            error_pot_hist, _ = np.histogram(
-                error_pot, bins=bin_edges, density=False
-            )
-            error_pot_hist = error_pot_hist / (np.size(norm_error) * bin_size)
-
-            # Calculate statistics
-            norm_median = np.median(norm_error)
-            median_x = np.median(error_x)
-            median_y = np.median(error_y)
-            median_z = np.median(error_z)
-            median_pot = np.median(error_pot)
-
-            norm_per99 = np.percentile(norm_error, 99)
-            per99_x = np.percentile(error_x, 99)
-            per99_y = np.percentile(error_y, 99)
-            per99_z = np.percentile(error_z, 99)
-            per99_pot = np.percentile(error_pot, 99)
-
-            norm_per90 = np.percentile(norm_error, 90)
-            per90_x = np.percentile(error_x, 90)
-            per90_y = np.percentile(error_y, 90)
-            per90_z = np.percentile(error_z, 90)
-            per90_pot = np.percentile(error_pot, 90)
-
             # Use colors from the color list, cycling if necessary
             color = cols[i % len(cols)]
 
-            # Plot X-component errors
-            ax1.semilogx(bins, error_x_hist, color=color, label=label)
-            ax1.text(
-                min_error * 1.5,
-                1.5 - i / 10.0,
-                f"50%→{median_x:.5f} 90%→{per90_x:.5f} 99%→{per99_x:.5f}",
-                ha="left",
-                va="top",
-                color=color,
-            )
+            # Histogram each error component and annotate its percentiles
+            normalisation = np.size(norm_error) * bin_size
+            panel_errors = (error_x, error_y, error_z, norm_error, error_pot)
+            for (ax, _, _), errors in zip(panels, panel_errors):
+                error_hist, _ = np.histogram(
+                    errors, bins=bin_edges, density=False
+                )
+                median = np.median(errors)
+                per90, per99 = np.percentile(errors, [90, 99])
+                ax.semilogx(
+                    bins, error_hist / normalisation, color=color, label=label
+                )
+                ax.text(
+                    min_error * 1.5,
+                    1.5 - i / 10.0,
+                    f"50%→{median:.5f} 90%→{per90:.5f} 99%→{per99:.5f}",
+                    ha="left",
+                    va="top",
+                    color=color,
+                )
 
-            # Plot Y-component errors
-            ax2.semilogx(bins, error_y_hist, color=color, label=label)
-            ax2.text(
-                min_error * 1.5,
-                1.5 - i / 10.0,
-                f"50%→{median_y:.5f} 90%→{per90_y:.5f} 99%→{per99_y:.5f}",
-                ha="left",
-                va="top",
-                color=color,
-            )
-
-            # Plot Z-component errors
-            ax3.semilogx(bins, error_z_hist, color=color, label=label)
-            ax3.text(
-                min_error * 1.5,
-                1.5 - i / 10.0,
-                f"50%→{median_z:.5f} 90%→{per90_z:.5f} 99%→{per99_z:.5f}",
-                ha="left",
-                va="top",
-                color=color,
-            )
-
-            # Plot magnitude errors
-            ax4.semilogx(bins, norm_error_hist, color=color, label=label)
-            ax4.text(
-                min_error * 1.5,
-                1.5 - i / 10.0,
-                f"50%→{norm_median:.5f} 90%→{norm_per90:.5f} "
-                f"99%→{norm_per99:.5f}",
-                ha="left",
-                va="top",
-                color=color,
-            )
-
-            # Plot potential errors
-            ax5.semilogx(bins, error_pot_hist, color=color, label=label)
-            ax5.text(
-                min_error * 1.5,
-                1.5 - i / 10.0,
-                f"50%→{median_pot:.5f} 90%→{per90_pot:.5f} "
-                f"99%→{per99_pot:.5f}",
-                ha="left",
-                va="top",
-                color=color,
-            )
+            norm_median = np.median(norm_error)
+            norm_per90, norm_per99 = np.percentile(norm_error, [90, 99])
 
             # Print summary statistics
             print(f"Processed: {label}")
@@ -376,39 +300,18 @@ def analyse_force_checks(
             print()
 
         # Set up axes labels and limits
-        ax1.set_xlabel("δax/|a_exact|")
-        ax1.set_xlim(min_error, max_error)
-        ax1.set_ylim(0, 1.75)
-
-        ax2.set_xlabel("δay/|a_exact|")
-        ax2.set_xlim(min_error, max_error)
-        ax2.set_ylim(0, 1.75)
-
-        ax3.set_xlabel("δaz/|a_exact|")
-        ax3.set_xlim(min_error, max_error)
-        ax3.set_ylim(0, 1.75)
-
-        ax4.set_xlabel("|δa|/|a_exact|")
-        ax4.set_xlim(min_error, max_error)
-        ax4.set_ylim(0, 2.5)
-        ax4.legend(loc="upper left", fontsize=8)
-
-        ax5.set_xlabel("δφ/φ_exact")
-        ax5.set_xlim(min_error, max_error)
-        ax5.set_ylim(0, 1.75)
+        for ax, xlabel, ymax in panels:
+            ax.set_xlabel(xlabel)
+            ax.set_xlim(min_error, max_error)
+            ax.set_ylim(0, ymax)
+        panels[3][0].legend(loc="upper left", fontsize=8)
 
         # Save the figure
         png_file = create_output_path(
             output_path, prefix, "gravity_checks.png"
         )
-
-        fig.savefig(png_file, dpi=200, bbox_inches="tight")
+        save_figure(fig, png_file, show=show_plot, dpi=200)
         print(f"Plot saved to {png_file}")
-
-        # Show the plot if requested
-        if show_plot:
-            plt.show()
-        plt.close(fig)
 
 
 def add_gravity_checks_arguments(subparsers) -> argparse.ArgumentParser:

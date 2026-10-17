@@ -14,7 +14,9 @@ import pandas as pd  # type: ignore[import-untyped]
 from matplotlib.axes import Axes
 from pandas.errors import EmptyDataError  # type: ignore[import-untyped]
 
-from swiftsim_cli.utilities import create_ascii_table, create_output_path
+from swiftsim_cli.utilities.io import create_output_path, slugify
+from swiftsim_cli.utilities.plotting import save_figure, should_use_log_scale
+from swiftsim_cli.utilities.tables import create_ascii_table
 
 MPIUSE_COLUMNS = [
     "stic",
@@ -246,6 +248,7 @@ def analyse_swift_mpiuse(
         headline = _format_headline(data)
         summary_table = _format_summary_table(data)
         output_text = f"{headline}\n\n{summary_table}\n"
+        label_slug = slugify(label, fallback="mpiuse", keep="._-")
 
         print()
         print(headline)
@@ -254,7 +257,7 @@ def analyse_swift_mpiuse(
         table_path = create_output_path(
             output_path,
             prefix,
-            f"mpiuse_summary_{_slugify(label)}.txt",
+            f"mpiuse_summary_{label_slug}.txt",
             out_dir,
         )
         table_path.write_text(output_text, encoding="utf-8")
@@ -270,7 +273,7 @@ def analyse_swift_mpiuse(
             rank_path = create_output_path(
                 output_path,
                 prefix,
-                f"mpiuse_per_rank_{_slugify(label)}.txt",
+                f"mpiuse_per_rank_{label_slug}.txt",
                 out_dir,
             )
             rank_path.write_text(rank_table + "\n", encoding="utf-8")
@@ -296,33 +299,26 @@ def analyse_swift_mpiuse(
 
     colors = cmap(np.linspace(0, 1, max(1, len(all_data))))
 
-    _plot_total_per_step(
+    plot_args = (colors, markers, output_path, prefix, out_dir, show_plot)
+    step_totals = [data["per_step_totals"] for data in all_data]
+    _plot_step_series(
         all_data,
-        colors,
-        markers,
-        output_path,
-        prefix,
-        out_dir,
-        show_plot,
-        value_column="bytes",
+        step_totals,
+        "bytes",
+        *plot_args,
         filename="mpiuse_total_bytes_per_step.png",
         ylabel="Total bytes per step",
         title="MPI communication volume per step",
         force_log=True,
     )
-    _plot_total_per_step(
+    _plot_step_series(
         all_data,
-        colors,
-        markers,
-        output_path,
-        prefix,
-        out_dir,
-        show_plot,
-        value_column="count",
+        step_totals,
+        "count",
+        *plot_args,
         filename="mpiuse_total_count_per_step.png",
         ylabel="MPI requests per step",
         title="MPI request count per step",
-        force_log=False,
     )
     _plot_subtype_bars(
         all_data,
@@ -349,23 +345,23 @@ def analyse_swift_mpiuse(
         title="MPI request count by subtype",
     )
     if _has_gpart(all_data):
-        _plot_gpart_per_step(
+        _plot_step_series(
             all_data,
-            colors,
-            markers,
-            output_path,
-            prefix,
-            out_dir,
-            show_plot,
+            [_gpart_bytes_per_step(data) for data in all_data],
+            "bytes",
+            *plot_args,
+            filename="mpiuse_gpart_per_step.png",
+            ylabel="gpart bytes per step",
+            title="MPI gpart communication volume per step",
         )
-    _plot_inflight_max(
+    _plot_step_series(
         all_data,
-        colors,
-        markers,
-        output_path,
-        prefix,
-        out_dir,
-        show_plot,
+        [data["inflight_per_step"] for data in all_data],
+        "inflight_max",
+        *plot_args,
+        filename="mpiuse_inflight_max.png",
+        ylabel="Max in-flight bytes",
+        title="MPI in-flight high-water mark per step",
     )
     if per_rank:
         _plot_per_rank_totals(
@@ -773,25 +769,26 @@ def _write_csv(
     csv_data.to_csv(csv_path, index=False)
 
 
-def _plot_total_per_step(
+def _plot_step_series(
     all_data: list[MpiuseData],
+    step_frames: list[pd.DataFrame],
+    value_column: str,
     colors: Any,
     markers: list[str],
     output_path: str | None,
     prefix: str | None,
     out_dir: str,
     show_plot: bool,
-    value_column: str,
     filename: str,
     ylabel: str,
     title: str,
-    force_log: bool,
+    force_log: bool = False,
 ) -> None:
+    """Plot one per-step line per input, from ``step_frames[i]``."""
     fig, ax = plt.subplots(figsize=(10, 6))
     values: list[float] = []
 
-    for index, data in enumerate(all_data):
-        series = data["per_step_totals"]
+    for index, (data, series) in enumerate(zip(all_data, step_frames)):
         yvals = series[value_column].to_numpy(dtype=float)
         values.extend(yvals[yvals > 0])
         plot_values = np.where(yvals > 0, yvals, np.nan)
@@ -809,15 +806,15 @@ def _plot_total_per_step(
     ax.set_xlabel("Step number")
     ax.set_ylabel(ylabel)
     ax.set_title(title)
-    if force_log or _should_use_log(values):
+    if force_log or should_use_log_scale(values):
         ax.set_yscale("log")
     ax.grid(True, alpha=0.3, linestyle="--", which="both")
 
-    out_file = create_output_path(output_path, prefix, filename, out_dir)
-    plt.savefig(out_file, dpi=300, bbox_inches="tight")
-    if show_plot:
-        plt.show()
-    plt.close(fig)
+    save_figure(
+        fig,
+        create_output_path(output_path, prefix, filename, out_dir),
+        show=show_plot,
+    )
 
 
 def _plot_subtype_bars(
@@ -889,115 +886,26 @@ def _plot_subtype_bars(
     ax.set_xticklabels(labels, rotation=45, ha="right")
     ax.set_ylabel(ylabel)
     ax.set_title(title)
-    if _should_use_log(values):
+    if should_use_log_scale(values):
         ax.set_yscale("log")
     ax.grid(True, axis="y", alpha=0.3, linestyle="--", which="both")
 
-    out_file = create_output_path(output_path, prefix, filename, out_dir)
-    plt.savefig(out_file, dpi=300, bbox_inches="tight")
-    if show_plot:
-        plt.show()
-    plt.close(fig)
-
-
-def _plot_gpart_per_step(
-    all_data: list[MpiuseData],
-    colors: Any,
-    markers: list[str],
-    output_path: str | None,
-    prefix: str | None,
-    out_dir: str,
-    show_plot: bool,
-) -> None:
-    fig, ax = plt.subplots(figsize=(10, 6))
-    values: list[float] = []
-
-    for index, data in enumerate(all_data):
-        series = (
-            data["per_step_detail"]
-            .loc[data["per_step_detail"]["subtype"] == "gpart"]
-            .groupby("step", as_index=False)["bytes"]
-            .sum()
-            .sort_values("step")
-        )
-        yvals = series["bytes"].to_numpy(dtype=float)
-        values.extend(yvals[yvals > 0])
-        plot_values = np.where(yvals > 0, yvals, np.nan)
-        ax.plot(
-            series["step"],
-            plot_values,
-            marker=markers[index % len(markers)],
-            markersize=4,
-            color=colors[index],
-            label=data["label"],
-        )
-
-    if len(all_data) > 1:
-        ax.legend()
-    ax.set_xlabel("Step number")
-    ax.set_ylabel("gpart bytes per step")
-    ax.set_title("MPI gpart communication volume per step")
-    if _should_use_log(values):
-        ax.set_yscale("log")
-    ax.grid(True, alpha=0.3, linestyle="--", which="both")
-
-    out_file = create_output_path(
-        output_path,
-        prefix,
-        "mpiuse_gpart_per_step.png",
-        out_dir,
+    save_figure(
+        fig,
+        create_output_path(output_path, prefix, filename, out_dir),
+        show=show_plot,
     )
-    plt.savefig(out_file, dpi=300, bbox_inches="tight")
-    if show_plot:
-        plt.show()
-    plt.close(fig)
 
 
-def _plot_inflight_max(
-    all_data: list[MpiuseData],
-    colors: Any,
-    markers: list[str],
-    output_path: str | None,
-    prefix: str | None,
-    out_dir: str,
-    show_plot: bool,
-) -> None:
-    fig, ax = plt.subplots(figsize=(10, 6))
-    values: list[float] = []
-
-    for index, data in enumerate(all_data):
-        series = data["inflight_per_step"]
-        yvals = series["inflight_max"].to_numpy(dtype=float)
-        values.extend(yvals[yvals > 0])
-        plot_values = np.where(yvals > 0, yvals, np.nan)
-        ax.plot(
-            series["step"],
-            plot_values,
-            marker=markers[index % len(markers)],
-            markersize=4,
-            color=colors[index],
-            label=data["label"],
-        )
-
-    if len(all_data) > 1:
-        ax.legend()
-    ax.set_xlabel("Step number")
-    ax.set_ylabel("Max in-flight bytes")
-    ax.set_title("MPI in-flight high-water mark per step")
-    if _should_use_log(values):
-        ax.set_yscale("log")
-    ax.grid(True, alpha=0.3, linestyle="--", which="both")
-
-    out_file = create_output_path(
-        output_path,
-        prefix,
-        "mpiuse_inflight_max.png",
-        out_dir,
+def _gpart_bytes_per_step(data: MpiuseData) -> pd.DataFrame:
+    """Sum gpart communication bytes per step for one input."""
+    return (
+        data["per_step_detail"]
+        .loc[data["per_step_detail"]["subtype"] == "gpart"]
+        .groupby("step", as_index=False)["bytes"]
+        .sum()
+        .sort_values("step")
     )
-    plt.savefig(out_file, dpi=300, bbox_inches="tight")
-    if show_plot:
-        plt.show()
-    plt.close(fig)
 
 
 def _plot_per_rank_totals(
@@ -1037,16 +945,13 @@ def _plot_per_rank_totals(
     for axis, data in zip(axes.flat, with_rank_data):
         _draw_rank_stack(axis, data, subtype_keys, colors)
 
-    out_file = create_output_path(
-        output_path,
-        prefix,
-        "mpiuse_bytes_per_rank.png",
-        out_dir,
+    save_figure(
+        fig,
+        create_output_path(
+            output_path, prefix, "mpiuse_bytes_per_rank.png", out_dir
+        ),
+        show=show_plot,
     )
-    plt.savefig(out_file, dpi=300, bbox_inches="tight")
-    if show_plot:
-        plt.show()
-    plt.close(fig)
 
 
 def _draw_rank_stack(
@@ -1096,13 +1001,6 @@ def _draw_rank_stack(
         axis.legend(fontsize=8, ncol=2)
 
 
-def _should_use_log(values: list[float]) -> bool:
-    positive_values = [value for value in values if value > 0]
-    if len(positive_values) < 2:
-        return False
-    return max(positive_values) / min(positive_values) >= 100
-
-
 def _has_gpart(all_data: list[MpiuseData]) -> bool:
     return any(
         not data["per_step_detail"]
@@ -1110,10 +1008,6 @@ def _has_gpart(all_data: list[MpiuseData]) -> bool:
         .empty
         for data in all_data
     )
-
-
-def _slugify(value: str) -> str:
-    return re.sub(r"[^A-Za-z0-9._-]+", "_", value).strip("_") or "mpiuse"
 
 
 def _format_subtype_label(key: tuple[str, str]) -> str:

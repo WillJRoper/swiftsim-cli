@@ -37,6 +37,7 @@ from ruamel.yaml import YAML
 from tqdm.auto import tqdm  # type: ignore[import-untyped]
 
 from swiftsim_cli.profile import get_profile_cache_dir, load_swift_profile
+from swiftsim_cli.utilities.step_table import StepTableReader
 
 # Timer database path; None means the active profile's cache directory.
 TIMER_FILE: Path | None = None
@@ -65,16 +66,8 @@ __all__ = [
 # Small regex helpers (kept fast & simple)
 # =============================================================================
 
-# Log step table lines: whitespace, then a step number followed by at least
-# four numeric columns. This avoids misreading elapsed-time lines like
-# ``12.345 foo: ...`` as step ``12``.
-_RE_STEP_LINE = re.compile(
-    r"^\s+(?P<step>\d+)\s+"
-    r"(?P<time>[0-9.eE+\-]+)\s+"
-    r"(?P<col2>[0-9.eE+\-]+)\s+"
-    r"(?P<col3>[0-9.eE+\-]+)\s+"
-    r"(?P<col4>[0-9.eE+\-]+)(?:\s|$)"
-)
+# Label text of a timer that times its whole function ("took X ms").
+GENERIC_TIMER_LABELS = ("took %.3f %s.", "took %.3f %s")
 
 # C string literal content.
 _RE_CSTRING = re.compile(r'"((?:[^"\\]|\\.)*)"')
@@ -853,6 +846,7 @@ def scan_log_instances_by_step(
     rank_prefix = re.compile(r"^\[(?P<rank>\d+)\]\s+")
 
     current_step = None  # Track the current step for timer association
+    step_table = StepTableReader()
 
     with open(log_file, "r", encoding="utf-8", errors="ignore") as f:
         for idx, raw in tqdm(
@@ -861,9 +855,9 @@ def scan_log_instances_by_step(
             line = raw.rstrip("\n")
 
             # Check if this line defines a new step
-            sm = _RE_STEP_LINE.match(line)
-            if sm:
-                current_step = int(sm.group("step"))
+            step_row = step_table.feed(line)
+            if step_row is not None:
+                current_step = int(step_row["Step"])
                 step_lines.append((idx, current_step))
 
             # Quick pre-filter: skip lines that don't contain timing info
@@ -970,7 +964,7 @@ class TimerNestingGenerator:
             # Look for a timer with generic "took" label (function timer)
             for timer_dict in timers:
                 label_text = timer_dict.get("label_text", "")
-                if label_text in ["took %.3f %s.", "took %.3f %s"]:
+                if label_text in GENERIC_TIMER_LABELS:
                     function_timer = timer_dict
                 else:
                     operation_timers.append(timer_dict)
@@ -1263,11 +1257,6 @@ _RE_ENGINE_TASK_COUNTS_BODY = re.compile(
     r"^task counts are\s*\[(?P<body>.*)\]\s*$"
 )
 
-# Regex to match step table data lines (start with spaces, then step number)
-_RE_STEP_TABLE_LINE = re.compile(
-    r"^\s+(?P<step>\d+)\s+(?P<time>[0-9.eE+\-]+)\s+"
-)
-
 
 def scan_task_counts_by_step(
     log_file: str,
@@ -1302,19 +1291,18 @@ def scan_task_counts_by_step(
     # First pass: build step → simulation time mapping from step table
     print("  Extracting simulation times from step table...")
     step_to_sim_time: Dict[int, float] = {}
+    step_table = StepTableReader()
     with open(log_file, "r", encoding="utf-8", errors="ignore") as f:
         for line in f:
-            line = line.rstrip("\n")
-            m = _RE_STEP_TABLE_LINE.match(line)
-            if m:
-                step = int(m.group("step"))
-                sim_time = float(m.group("time"))
-                step_to_sim_time[step] = sim_time
+            row = step_table.feed(line)
+            if row is not None:
+                step_to_sim_time[int(row["Step"])] = row["Time"]
 
     print(f"  Found simulation times for {len(step_to_sim_time)} steps")
 
     current_step: Optional[int] = None
     current_block: Optional[Dict[str, Any]] = None
+    step_table = StepTableReader()
 
     with open(log_file, "r", encoding="utf-8", errors="ignore") as f:
         for idx, raw in tqdm(
@@ -1325,10 +1313,10 @@ def scan_task_counts_by_step(
         ):
             line = raw.rstrip("\n")
 
-            # Track the current step (first integer token on line)
-            sm = _RE_STEP_LINE.match(line)
-            if sm:
-                current_step = int(sm.group("step"))
+            # Track the current step from the step table
+            step_row = step_table.feed(line)
+            if step_row is not None:
+                current_step = int(step_row["Step"])
                 step_lines.append((idx, current_step))
 
             # Look for engine_print_task_counts lines

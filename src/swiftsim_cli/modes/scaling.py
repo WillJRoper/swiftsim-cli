@@ -10,26 +10,36 @@ import textwrap
 from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal, cast
+from typing import Any, Literal, cast
 
 import matplotlib.pyplot as plt
 import numpy as np
+from matplotlib.axes import Axes
+from matplotlib.figure import Figure
 
 from swiftsim_cli.src_parser import (
+    GENERIC_TIMER_LABELS,
     TimerDef,
     TimerInstance,
     compile_site_patterns,
     load_timer_db,
     scan_log_instances_by_step,
 )
-from swiftsim_cli.utilities import create_ascii_table, create_output_path
+from swiftsim_cli.utilities.io import create_output_path, slugify
+from swiftsim_cli.utilities.plotting import save_figure, should_use_log_scale
+from swiftsim_cli.utilities.step_table import (
+    StepTableReader,
+    step_wallclock_ms,
+)
+from swiftsim_cli.utilities.tables import create_ascii_table
 
 MPI_RANKS_RE = re.compile(
     r"MPI is up and running with\s+(?P<ranks>\d+)\s+node\(s\)"
 )
-STEP_LINE_RE = re.compile(
-    r"^\s*(\d+)\s+([\d.e+-]+)\s+([\d.e+-]+)\s+([\d.e+-]+)\s+([\d.e+-]+)"
-)
+# Scaling plot layout: square main axes of this size (inches) above a
+# speedup panel of this height.
+_SCALING_PLOT_SIZE = 10.5
+_SPEEDUP_HEIGHT = 3.0
 
 
 @dataclass
@@ -395,7 +405,12 @@ def analyse_swift_scaling(
                 out_dir=out_dir,
                 filename=(
                     "timer_rank_scaling_"
-                    f"{_slugify(_timer_display_name(timer_id, timer_db))}.png"
+                    + slugify(
+                        _timer_display_name(timer_id, timer_db),
+                        fallback="timer",
+                        lowercase=True,
+                    )
+                    + ".png"
                 ),
             )
             if timer_rank_path is not None:
@@ -508,20 +523,20 @@ def _extract_total_runtime_from_log(
     total_runtime_ms = 0.0
     step_count = 0
 
+    step_table = StepTableReader()
     with open(log_file, "r", encoding="utf-8", errors="ignore") as handle:
-        for raw_line in handle:
-            line = raw_line.strip()
-            step_match = STEP_LINE_RE.match(line)
-            if step_match is None:
+        for line in handle:
+            row = step_table.feed(line)
+            if row is None:
                 continue
 
-            step = int(step_match.group(1))
+            step = int(row["Step"])
             if step_range is not None and (
                 step < step_range[0] or step > step_range[1]
             ):
                 continue
 
-            wallclock_ms = _extract_step_wallclock_ms(line)
+            wallclock_ms = step_wallclock_ms(row)
             if wallclock_ms is None:
                 continue
 
@@ -616,7 +631,7 @@ def _timer_display_name(timer_id: str, timer_db: dict[str, TimerDef]) -> str:
     """Build a readable label for a timer."""
     timer_def = timer_db[timer_id]
     label_text = timer_def.label_text.strip()
-    if label_text in {"took %.3f %s.", "took %.3f %s", "(%s)"}:
+    if label_text in {*GENERIC_TIMER_LABELS, "(%s)"}:
         return timer_def.function
 
     label = _clean_timer_label_text(label_text)
@@ -673,23 +688,10 @@ def _create_scaling_plot(
     series_count = len(legend_labels)
     legend_columns = _legend_columns(legend_labels)
     legend_rows = math.ceil(series_count / legend_columns)
-    plot_size = 10.5
-    speedup_height = 3.0
     legend_height = 0.9 + max(0, legend_rows - 1) * 0.65
-    fig = plt.figure(
-        figsize=(plot_size, plot_size + speedup_height + legend_height)
+    fig, ax, speedup_ax, legend_ax = _make_scaling_axes(
+        _SCALING_PLOT_SIZE + _SPEEDUP_HEIGHT + legend_height, legend_height
     )
-    grid = fig.add_gridspec(
-        3,
-        1,
-        height_ratios=[plot_size, speedup_height, legend_height],
-        hspace=0.04,
-    )
-    ax = fig.add_subplot(grid[0])
-    speedup_ax = fig.add_subplot(grid[1], sharex=ax)
-    legend_ax = fig.add_subplot(grid[2])
-    legend_ax.axis("off")
-    ax.set_box_aspect(1)
 
     all_values: list[float] = []
     plotted = 0
@@ -743,18 +745,14 @@ def _create_scaling_plot(
     # Timer labels follow the optional Total/Perfect pair; index them by
     # timer position so skipped series don't shift later labels.
     timer_label_offset = 2 if include_total_reference else 0
+    series_per_log = _series_per_log(
+        scaling_data, run_statistic, rank_source, per_rank
+    )
     for timer_index, timer_id in enumerate(timer_ids):
         x_values: list[int] = []
         y_values: list[float] = []
 
-        for log_data in scaling_data:
-            totals = (
-                _build_rank_series_dict(log_data, per_rank, run_statistic)
-                if per_rank is not None
-                else _build_main_series_dict(
-                    log_data, run_statistic, rank_source
-                )
-            )
+        for log_data, totals in zip(scaling_data, series_per_log):
             value = totals.get(timer_id)
             if value is None or value <= 0:
                 continue
@@ -764,30 +762,12 @@ def _create_scaling_plot(
         if len(x_values) < 2:
             continue
 
-        ax.plot(
+        _plot_series_with_speedup(
+            ax,
+            speedup_ax,
             x_values,
             y_values,
-            marker="o",
-            linewidth=2,
-            markersize=5,
-            label=legend_labels[timer_label_offset + timer_index],
-        )
-        color = ax.lines[-1].get_color()
-        speedup_ax.plot(
-            x_values,
-            _compute_speedup_series(y_values),
-            marker="o",
-            linewidth=1.8,
-            markersize=4,
-            color=color,
-        )
-        speedup_ax.plot(
-            x_values,
-            _build_perfect_speedup_series(x_values),
-            linestyle="--",
-            linewidth=1.2,
-            color=color,
-            alpha=0.35,
+            legend_labels[timer_label_offset + timer_index],
         )
         all_values.extend(y_values)
         plotted += 1
@@ -798,19 +778,12 @@ def _create_scaling_plot(
 
     ax.set_ylabel("Accumulated Timer Time (ms)")
     ax.set_title(title)
-    ax.grid(True, alpha=0.3, linestyle="--")
-    speedup_ax.set_xlabel("Number of Ranks")
-    speedup_ax.set_ylabel("Relative Speedup")
-    speedup_ax.grid(True, alpha=0.3, linestyle="--")
-    speedup_ax.axhline(1.0, color="0.5", linewidth=1.0, alpha=0.6)
-
-    x_ticks = sorted({item.rank_count for item in scaling_data})
-    ax.set_xticks(x_ticks)
-    speedup_ax.set_xticks(x_ticks)
-    plt.setp(ax.get_xticklabels(), visible=False)
-
-    if _should_use_log_scale(all_values):
-        ax.set_yscale("log")
+    _style_scaling_axes(
+        ax,
+        speedup_ax,
+        sorted({item.rank_count for item in scaling_data}),
+        all_values,
+    )
 
     handles, labels = ax.get_legend_handles_labels()
     legend_ax.legend(
@@ -826,12 +799,11 @@ def _create_scaling_plot(
         borderaxespad=0.0,
     )
 
-    output = create_output_path(output_path, prefix, filename, out_dir)
-    fig.savefig(output, dpi=300, bbox_inches="tight")
-    if show_plot:
-        plt.show()
-    plt.close(fig)
-    return output
+    return save_figure(
+        fig,
+        create_output_path(output_path, prefix, filename, out_dir),
+        show=show_plot,
+    )
 
 
 def _legend_columns(labels: list[str]) -> int:
@@ -859,12 +831,90 @@ def _wrap_legend_label(label: str, width: int = 30) -> str:
     return "\n".join(textwrap.wrap(label, width=width, break_long_words=False))
 
 
-def _should_use_log_scale(values: list[float]) -> bool:
-    """Use a log y-axis when the value range spans two orders of magnitude."""
-    positive_values = [value for value in values if value > 0]
-    if len(positive_values) < 2:
-        return False
-    return max(positive_values) / min(positive_values) >= 100.0
+def _make_scaling_axes(
+    fig_height: float, legend_height: float
+) -> tuple[Figure, Axes, Axes, Axes]:
+    """Create a square scaling plot over a speedup panel and legend area.
+
+    Args:
+        fig_height: Total figure height in inches.
+        legend_height: Height ratio of the legend area.
+
+    Returns:
+        The figure, main axes, speedup axes and (hidden) legend axes.
+    """
+    fig = plt.figure(figsize=(_SCALING_PLOT_SIZE, fig_height))
+    grid = fig.add_gridspec(
+        3,
+        1,
+        height_ratios=[_SCALING_PLOT_SIZE, _SPEEDUP_HEIGHT, legend_height],
+        hspace=0.04,
+    )
+    ax = fig.add_subplot(grid[0])
+    speedup_ax = fig.add_subplot(grid[1], sharex=ax)
+    legend_ax = fig.add_subplot(grid[2])
+    legend_ax.axis("off")
+    ax.set_box_aspect(1)
+    return fig, ax, speedup_ax, legend_ax
+
+
+def _plot_series_with_speedup(
+    ax: Axes,
+    speedup_ax: Axes,
+    x_values: list[int],
+    y_values: list[float],
+    label: str,
+) -> Any:
+    """Plot a timing series, its speedup and the ideal speedup.
+
+    Returns:
+        The colour matplotlib assigned to the series.
+    """
+    ax.plot(
+        x_values,
+        y_values,
+        marker="o",
+        linewidth=2,
+        markersize=5,
+        label=label,
+    )
+    color = ax.lines[-1].get_color()
+    speedup_ax.plot(
+        x_values,
+        _compute_speedup_series(y_values),
+        marker="o",
+        linewidth=1.8,
+        markersize=4,
+        color=color,
+    )
+    speedup_ax.plot(
+        x_values,
+        _build_perfect_speedup_series(x_values),
+        linestyle="--",
+        linewidth=1.2,
+        color=color,
+        alpha=0.35,
+    )
+    return color
+
+
+def _style_scaling_axes(
+    ax: Axes,
+    speedup_ax: Axes,
+    x_ticks: list[int],
+    plotted_values: list[float],
+) -> None:
+    """Apply the shared grid, tick and scale styling to a scaling plot."""
+    ax.grid(True, alpha=0.3, linestyle="--")
+    speedup_ax.set_xlabel("Number of Ranks")
+    speedup_ax.set_ylabel("Relative Speedup")
+    speedup_ax.grid(True, alpha=0.3, linestyle="--")
+    speedup_ax.axhline(1.0, color="0.5", linewidth=1.0, alpha=0.6)
+    ax.set_xticks(x_ticks)
+    speedup_ax.set_xticks(x_ticks)
+    plt.setp(ax.get_xticklabels(), visible=False)
+    if should_use_log_scale(plotted_values):
+        ax.set_yscale("log")
 
 
 def _build_scaling_table(
@@ -898,11 +948,9 @@ def _build_scaling_table(
             ]
         )
 
+    series_per_log = _series_per_log(scaling_data, run_statistic, rank_source)
     for timer_id in timer_ids:
-        values = [
-            _main_timer_value(log_data, timer_id, run_statistic, rank_source)
-            for log_data in scaling_data
-        ]
+        values = [totals.get(timer_id, 0.0) for totals in series_per_log]
         slope = _fit_scaling_slope(
             [log_data.rank_count for log_data in scaling_data], values
         )
@@ -916,14 +964,7 @@ def _build_scaling_table(
                 f"{max_percent:.1f}%",
                 _format_slope(slope),
                 _describe_scaling(slope),
-                *[
-                    _format_time(
-                        _main_timer_value(
-                            log_data, timer_id, run_statistic, rank_source
-                        )
-                    )
-                    for log_data in scaling_data
-                ],
+                *[_format_time(value) for value in values],
             ]
         )
 
@@ -956,15 +997,11 @@ def _build_scaling_analysis(
     total_slope = _fit_scaling_slope(rank_counts, total_times)
 
     timer_slopes: list[tuple[str, float]] = []
+    series_per_log = _series_per_log(scaling_data, run_statistic, rank_source)
     for timer_id in timer_ids:
         slope = _fit_scaling_slope(
             rank_counts,
-            [
-                _main_timer_value(
-                    log_data, timer_id, run_statistic, rank_source
-                )
-                for log_data in scaling_data
-            ],
+            [totals.get(timer_id, 0.0) for totals in series_per_log],
         )
         if slope is not None:
             timer_slopes.append((timer_id, slope))
@@ -1126,13 +1163,7 @@ def _create_timer_rank_scaling_plot(
     filename: str,
 ) -> Path | None:
     """Create one scaling plot for a single timer with one line per rank."""
-    fig = plt.figure(figsize=(10.5, 14.0))
-    grid = fig.add_gridspec(3, 1, height_ratios=[10.5, 3.0, 1.0], hspace=0.04)
-    ax = fig.add_subplot(grid[0])
-    speedup_ax = fig.add_subplot(grid[1], sharex=ax)
-    legend_ax = fig.add_subplot(grid[2])
-    legend_ax.axis("off")
-    ax.set_box_aspect(1)
+    fig, ax, speedup_ax, legend_ax = _make_scaling_axes(14.0, 1.0)
 
     all_values: list[float] = []
     plotted = 0
@@ -1150,22 +1181,8 @@ def _create_timer_rank_scaling_plot(
         if len(x_values) < 2:
             continue
 
-        ax.plot(
-            x_values,
-            y_values,
-            marker="o",
-            linewidth=2,
-            markersize=5,
-            label=f"Rank {rank}",
-        )
-        color = ax.lines[-1].get_color()
-        speedup_ax.plot(
-            x_values,
-            _compute_speedup_series(y_values),
-            marker="o",
-            linewidth=1.8,
-            markersize=4,
-            color=color,
+        color = _plot_series_with_speedup(
+            ax, speedup_ax, x_values, y_values, f"Rank {rank}"
         )
         perfect_y_values = _build_perfect_scaling_series(x_values, y_values)
         ax.plot(
@@ -1174,14 +1191,6 @@ def _create_timer_rank_scaling_plot(
             linestyle="--",
             linewidth=1.5,
             alpha=0.5,
-            color=color,
-        )
-        speedup_ax.plot(
-            x_values,
-            _build_perfect_speedup_series(x_values),
-            linestyle="--",
-            linewidth=1.2,
-            alpha=0.35,
             color=color,
         )
         all_values.extend(y_values)
@@ -1196,17 +1205,12 @@ def _create_timer_rank_scaling_plot(
     ax.set_title(
         f"{_timer_display_name(timer_id, timer_db)} Across Ranks",
     )
-    ax.grid(True, alpha=0.3, linestyle="--")
-    ax.set_xticks(sorted({item.rank_count for item in scaling_data}))
-    speedup_ax.set_xlabel("Number of Ranks")
-    speedup_ax.set_ylabel("Relative Speedup")
-    speedup_ax.grid(True, alpha=0.3, linestyle="--")
-    speedup_ax.axhline(1.0, color="0.5", linewidth=1.0, alpha=0.6)
-    speedup_ax.set_xticks(sorted({item.rank_count for item in scaling_data}))
-    plt.setp(ax.get_xticklabels(), visible=False)
-
-    if _should_use_log_scale(all_values):
-        ax.set_yscale("log")
+    _style_scaling_axes(
+        ax,
+        speedup_ax,
+        sorted({item.rank_count for item in scaling_data}),
+        all_values,
+    )
 
     legend_columns = min(3, max(1, plotted))
     handles, labels = ax.get_legend_handles_labels()
@@ -1218,12 +1222,11 @@ def _create_timer_rank_scaling_plot(
         frameon=False,
     )
 
-    output = create_output_path(output_path, prefix, filename, out_dir)
-    fig.savefig(output, dpi=300, bbox_inches="tight")
-    if show_plot:
-        plt.show()
-    plt.close(fig)
-    return output
+    return save_figure(
+        fig,
+        create_output_path(output_path, prefix, filename, out_dir),
+        show=show_plot,
+    )
 
 
 def _collect_verbose_ranks(scaling_data: list[ScalingLogData]) -> list[int]:
@@ -1264,15 +1267,11 @@ def _plot_would_use_log_scale(
 ) -> bool:
     """Return whether the corresponding scaling plot should use log scale."""
     values: list[float] = []
+    series_per_log = _series_per_log(
+        scaling_data, run_statistic, rank_source, per_rank
+    )
     for timer_id in timer_ids:
-        for log_data in scaling_data:
-            totals = (
-                _build_rank_series_dict(log_data, per_rank, run_statistic)
-                if per_rank is not None
-                else _build_main_series_dict(
-                    log_data, run_statistic, rank_source
-                )
-            )
+        for totals in series_per_log:
             value = totals.get(timer_id)
             if value is not None and value > 0:
                 values.append(value)
@@ -1281,7 +1280,7 @@ def _plot_would_use_log_scale(
             scaling_data, per_rank, run_statistic, rank_source
         )
         values.extend(value for value in total_values if value > 0)
-    return _should_use_log_scale(values)
+    return should_use_log_scale(values)
 
 
 def _build_total_series(
@@ -1337,18 +1336,6 @@ def _compute_speedup_series(y_values: list[float]) -> list[float]:
     return [anchor_value / value for value in y_values]
 
 
-def _extract_step_wallclock_ms(line: str) -> float | None:
-    """Extract the step-table wallclock column from one SWIFT step row."""
-    parts = line.split()
-    if len(parts) < 13:
-        return None
-
-    try:
-        return float(parts[12])
-    except ValueError:
-        return None
-
-
 def _create_runtime_scaling_plot(
     scaling_data: list[RuntimeScalingLogData],
     output_path: str | None,
@@ -1369,13 +1356,7 @@ def _create_runtime_scaling_plot(
     if len(plot_x_values) < 2:
         return None
 
-    fig = plt.figure(figsize=(10.5, 13.5))
-    grid = fig.add_gridspec(3, 1, height_ratios=[10.5, 3.0, 1.0], hspace=0.04)
-    ax = fig.add_subplot(grid[0])
-    speedup_ax = fig.add_subplot(grid[1], sharex=ax)
-    legend_ax = fig.add_subplot(grid[2])
-    legend_ax.axis("off")
-    ax.set_box_aspect(1)
+    fig, ax, speedup_ax, legend_ax = _make_scaling_axes(13.5, 1.0)
 
     perfect_y_values = _build_perfect_scaling_series(plot_x_values, y_values)
     ax.plot(
@@ -1416,19 +1397,9 @@ def _create_runtime_scaling_plot(
 
     ax.set_ylabel("Total Runtime (ms)")
     ax.set_title("Total Runtime Scaling by MPI Rank Count")
-    ax.grid(True, alpha=0.3, linestyle="--")
-    speedup_ax.set_xlabel("Number of Ranks")
-    speedup_ax.set_ylabel("Relative Speedup")
-    speedup_ax.grid(True, alpha=0.3, linestyle="--")
-    speedup_ax.axhline(1.0, color="0.5", linewidth=1.0, alpha=0.6)
-
-    x_ticks = sorted(set(x_values))
-    ax.set_xticks(x_ticks)
-    speedup_ax.set_xticks(x_ticks)
-    plt.setp(ax.get_xticklabels(), visible=False)
-
-    if _should_use_log_scale(y_values + perfect_y_values):
-        ax.set_yscale("log")
+    _style_scaling_axes(
+        ax, speedup_ax, sorted(set(x_values)), y_values + perfect_y_values
+    )
 
     handles, labels = ax.get_legend_handles_labels()
     legend_ax.legend(
@@ -1444,17 +1415,13 @@ def _create_runtime_scaling_plot(
         borderaxespad=0.0,
     )
 
-    output = create_output_path(
-        output_path,
-        prefix,
-        "runtime_scaling.png",
-        out_dir,
+    return save_figure(
+        fig,
+        create_output_path(
+            output_path, prefix, "runtime_scaling.png", out_dir
+        ),
+        show=show_plot,
     )
-    fig.savefig(output, dpi=300, bbox_inches="tight")
-    if show_plot:
-        plt.show()
-    plt.close(fig)
-    return output
 
 
 def _build_runtime_scaling_summary(
@@ -1544,16 +1511,22 @@ def _build_rank_series_dict(
     }
 
 
-def _main_timer_value(
-    log_data: ScalingLogData,
-    timer_id: str,
+def _series_per_log(
+    scaling_data: list[ScalingLogData],
     run_statistic: Literal["sum", "mean"],
     rank_source: Literal["root", "all"],
-) -> float:
-    """Get the value of one timer for the main scaling view."""
-    return _build_main_series_dict(log_data, run_statistic, rank_source).get(
-        timer_id, 0.0
-    )
+    per_rank: int | None = None,
+) -> list[dict[str, float]]:
+    """Build each log's timer series once, for the main or one-rank view."""
+    if per_rank is not None:
+        return [
+            _build_rank_series_dict(log_data, per_rank, run_statistic)
+            for log_data in scaling_data
+        ]
+    return [
+        _build_main_series_dict(log_data, run_statistic, rank_source)
+        for log_data in scaling_data
+    ]
 
 
 def _main_total_value(
@@ -1693,9 +1666,3 @@ def _truncate(text: str, limit: int) -> str:
     if len(text) <= limit:
         return text
     return text[: limit - 3] + "..."
-
-
-def _slugify(text: str) -> str:
-    """Convert display text into a filesystem-friendly slug."""
-    slug = re.sub(r"[^a-zA-Z0-9]+", "_", text.strip().lower())
-    return slug.strip("_") or "timer"

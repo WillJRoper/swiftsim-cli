@@ -11,15 +11,11 @@ import numpy as np
 from ruamel.yaml import YAML
 
 from swiftsim_cli.modes.utils import _get_cubic_box_size
+from swiftsim_cli.params import round_trip_yaml
 from swiftsim_cli.profile import load_swift_profile
 from swiftsim_cli.swiftsim_dir import get_swiftsim_dir
 
-# Configure YAML for round-trip comment preservation and consistent formatting
-yaml = YAML()
-yaml.default_flow_style = False
-yaml.indent(mapping=4, sequence=4, offset=2)
-yaml.width = 80
-yaml.allow_unicode = True
+yaml = round_trip_yaml()
 
 # Plain loader used to turn --param override strings into YAML scalars
 _scalar_yaml = YAML(typ="safe")

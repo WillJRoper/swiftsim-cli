@@ -28,7 +28,8 @@ from swiftsim_cli.profile import (
     validate_profile_name,
 )
 from swiftsim_cli.swiftsim_dir import build_profile, update_profile
-from swiftsim_cli.utilities import ascii_art, create_ascii_table
+from swiftsim_cli.utilities.io import ascii_art
+from swiftsim_cli.utilities.tables import create_ascii_table
 
 DEFAULT_UPSTREAM = "origin/master"
 

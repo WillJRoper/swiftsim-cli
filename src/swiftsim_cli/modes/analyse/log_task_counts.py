@@ -32,7 +32,8 @@ from swiftsim_cli.src_parser import (
     TaskCountSnapshot,
     scan_task_counts_by_step,
 )
-from swiftsim_cli.utilities import create_output_path
+from swiftsim_cli.utilities.io import create_output_path
+from swiftsim_cli.utilities.plotting import save_figure
 
 
 class LogData(TypedDict):
@@ -386,10 +387,7 @@ def analyse_swift_task_counts(
     p1 = create_output_path(
         output_path, prefix, "task_counts_per_step.png", out_dir
     )
-    plt.savefig(p1, dpi=300, bbox_inches="tight")
-    if show_plot:
-        plt.show()
-    plt.close()
+    save_figure(fig, p1, show=show_plot)
 
     # ------------------------------------------------------------------
     # Plot 2: Cumulative tasks vs simulation time
@@ -418,10 +416,7 @@ def analyse_swift_task_counts(
     p2 = create_output_path(
         output_path, prefix, "task_counts_cumulative.png", out_dir
     )
-    plt.savefig(p2, dpi=300, bbox_inches="tight")
-    if show_plot:
-        plt.show()
-    plt.close()
+    save_figure(fig, p2, show=show_plot)
 
     # ------------------------------------------------------------------
     # Plot 3: Individual task types vs simulation time
@@ -536,10 +531,7 @@ def analyse_swift_task_counts(
         p3 = create_output_path(
             output_path, prefix, "task_counts_by_type.png", out_dir
         )
-        plt.savefig(p3, dpi=300, bbox_inches="tight")
-        if show_plot:
-            plt.show()
-        plt.close()
+        save_figure(fig, p3, show=show_plot)
 
         print("\nCreated task-count plots:")
         print(f"  - {p1}")

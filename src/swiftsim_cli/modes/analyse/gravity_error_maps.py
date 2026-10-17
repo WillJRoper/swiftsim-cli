@@ -14,7 +14,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.colors import LogNorm
 
-from swiftsim_cli.utilities import create_output_path
+from swiftsim_cli.utilities.io import create_output_path
+from swiftsim_cli.utilities.plotting import save_figure
 
 from .gravity_checks import _find_counterpart_file, _load_force_pair
 
@@ -331,13 +332,8 @@ def _create_continuous_error_map(
         f"gravity_error_map_{safe_label}.png",
     )
 
-    fig.savefig(png_file, dpi=200, bbox_inches="tight")
+    save_figure(fig, png_file, show=show_plot, dpi=200)
     print(f"Continuous error map saved to {png_file}")
-
-    # Show the plot if requested
-    if show_plot:
-        plt.show()
-    plt.close()
 
 
 def _create_threshold_error_map(
@@ -465,10 +461,5 @@ def _create_threshold_error_map(
         f"gravity_binary_error_map_{safe_label}.png",
     )
 
-    fig.savefig(png_file, dpi=200, bbox_inches="tight")
+    save_figure(fig, png_file, show=show_plot, dpi=200)
     print(f"Binary error map saved to {png_file}")
-
-    # Show the plot if requested
-    if show_plot:
-        plt.show()
-    plt.close()

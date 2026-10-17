@@ -10,7 +10,6 @@ tests/
 ├── unit/                 # Unit tests
 │   ├── test_cli.py       # CLI functionality tests  
 │   ├── test_src_parser.py        # Source parser tests
-│   ├── test_analyse_classification.py  # Timer classification tests
 │   └── test_utilities.py # Utility function tests
 └── README.md            # This file
 ```
@@ -66,10 +65,6 @@ make test-fast     # Run tests quickly (no coverage)
   - Log pattern compilation  
   - Timer instance scanning
   - Tree-sitter integration (when available)
-- **test_analyse_classification.py**: Tests the timer classification logic including:
-  - Nesting database integration
-  - Synthetic timer creation
-  - Heuristic classification fallbacks
 - **test_utilities.py**: Tests utility functions including:
   - ASCII table creation
   - File system operations

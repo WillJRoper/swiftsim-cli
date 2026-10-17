@@ -20,7 +20,7 @@ from swiftsim_cli.profile import (
     git,
     update_profile_fields,
 )
-from swiftsim_cli.utilities import run_command_in_dir
+from swiftsim_cli.utilities.io import run_command_in_dir
 
 # Matches an option at the start of a `./configure --help` line, e.g.
 # "  --enable-debug=[yes/no]" or "  -h, --help". Placeholder entries such as

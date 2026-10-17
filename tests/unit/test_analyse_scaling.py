@@ -20,7 +20,6 @@ from swiftsim_cli.modes.scaling import (
     _extract_rank_count_from_log,
     _fit_scaling_slope,
     _legend_columns,
-    _main_timer_value,
     _main_total_value,
     _plot_would_use_log_scale,
     _rank_source_description,
@@ -29,7 +28,7 @@ from swiftsim_cli.modes.scaling import (
     _run_statistic_description,
     _run_statistic_title,
     _select_timer_ids,
-    _should_use_log_scale,
+    _series_per_log,
     _wrap_legend_label,
 )
 from swiftsim_cli.src_parser import TimerDef, TimerInstance
@@ -123,12 +122,6 @@ def test_fit_scaling_slope_matches_inverse_scaling():
 
     assert slope is not None
     assert slope == pytest.approx(-1.0)
-
-
-def test_should_use_log_scale_requires_large_dynamic_range():
-    """Log scale is only enabled for sufficiently wide ranges."""
-    assert _should_use_log_scale([1.0, 100.0])
-    assert not _should_use_log_scale([10.0, 20.0, 30.0])
 
 
 def test_build_total_series_uses_total_time_by_default():
@@ -318,8 +311,12 @@ def test_main_series_supports_root_vs_all_and_sum_vs_mean():
         "timer_a": 4.0,
         "timer_b": 3.0,
     }
-    assert _main_timer_value(log_data, "timer_a", "sum", "all") == 12.0
-    assert _main_timer_value(log_data, "timer_a", "mean", "all") == 4.0
+    assert _series_per_log([log_data], "sum", "all") == [
+        {"timer_a": 12.0, "timer_b": 6.0}
+    ]
+    assert _series_per_log([log_data], "mean", "root", per_rank=1) == [
+        {"timer_a": 4.0, "timer_b": 3.0}
+    ]
     assert _main_total_value(log_data, "sum", "all") == 18.0
     assert _main_total_value(log_data, "mean", "all") == pytest.approx(3.6)
     assert _main_total_value(log_data, "sum", "root") == 4.0

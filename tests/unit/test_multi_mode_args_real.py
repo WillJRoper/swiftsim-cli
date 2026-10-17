@@ -6,7 +6,7 @@ from unittest.mock import patch
 
 import pytest
 
-from swiftsim_cli.multi_mode_args import MultiModeCLIArgs, parse_multimode_args
+from swiftsim_cli.multi_mode_args import MultiModeCLIArgs
 
 
 def test_single_mode_make():
@@ -76,14 +76,3 @@ def test_unknown_argument():
     """Test when an unknown argument is encountered."""
     with pytest.raises(argparse.ArgumentTypeError, match="Unknown argument"):
         MultiModeCLIArgs(["unknown_command"])
-
-
-def test_parse_multimode_args_function():
-    """Test the parse_multimode_args convenience function."""
-    argv = ["make", "-j", "8"]
-    parser = parse_multimode_args(argv)
-    assert isinstance(parser, MultiModeCLIArgs)
-    assert len(parser.modes) == 1
-    mode_name, mode_args = parser.modes[0]
-    assert mode_name == "make"
-    assert mode_args.nr_threads == 8

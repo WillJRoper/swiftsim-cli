@@ -14,7 +14,9 @@ import matplotlib.pyplot as plt
 import numpy as np
 from tqdm.auto import tqdm  # type: ignore[import-untyped]
 
-from swiftsim_cli.utilities import create_ascii_table, create_output_path
+from swiftsim_cli.utilities.io import create_output_path
+from swiftsim_cli.utilities.plotting import save_figure
+from swiftsim_cli.utilities.tables import create_ascii_table
 
 from .task_debug_data import TaskDebugData, TaskFilter, TaskRecord
 from .task_plot_metadata import CELL_SUBTYPES, CELL_TYPES
@@ -300,10 +302,7 @@ def analyse_swift_task_plots(
             output_root, output_prefix, filename, out_dir
         )
         print(f"Saving combined timeline to {output}...", flush=True)
-        figure.savefig(output, dpi=300, bbox_inches="tight")
-        if show_plot:
-            plt.show()
-        plt.close(figure)
+        save_figure(figure, output, show=show_plot)
 
         report = _task_timing_report(task_records, current_rank)
         print("\n" + report)
@@ -335,12 +334,7 @@ def analyse_swift_task_plots(
                 activity_name,
                 out_dir,
             )
-            activity_figure.savefig(
-                activity_output, dpi=300, bbox_inches="tight"
-            )
-            if show_plot:
-                plt.show()
-            plt.close(activity_figure)
+            save_figure(activity_figure, activity_output, show=show_plot)
 
 
 def _select_ranks(task_data: TaskDebugData, rank: int | None) -> list[int]:

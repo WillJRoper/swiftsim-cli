@@ -80,15 +80,20 @@ class TestScalingRun:
 
 
 def test_extract_total_runtime_from_log(tmp_path: Path):
-    """Runtime extraction sums the step-table wallclock column."""
+    """Runtime extraction sums the header-located wallclock column."""
     log_file = tmp_path / "swift.log"
+    # An older 13-column table (no sink-/b-Updates), so the wall-clock
+    # column is the 11th, not the 13th.
     log_file.write_text(
         "\n".join(
             [
                 "[0000] main: MPI is up and running with 4 node(s).",
-                "1 0.0 0.0 0.0 0.0 0 0 0 0 0 0 0 10.0",
-                "2 0.0 0.0 0.0 0.0 0 0 0 0 0 0 0 20.0",
-                "3 0.0 0.0 0.0 0.0 0 0 0 0 0 0 0 30.0",
+                "#   Step  Time Scale-factor Redshift Time-step Time-bins "
+                "Updates g-Updates s-Updates Wall-clock time [ms] Props "
+                "Dead time [ms]",
+                "  1 0.0 0.0 0.0 0.0 1 56 0 0 0 10.0 265 99.0",
+                "  2 0.0 0.0 0.0 0.0 1 56 0 0 0 20.0 265 99.0",
+                "  3 0.0 0.0 0.0 0.0 1 56 0 0 0 30.0 265 99.0",
             ]
         ),
         encoding="utf-8",

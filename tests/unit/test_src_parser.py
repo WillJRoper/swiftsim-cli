@@ -365,6 +365,40 @@ class TestLogScanning:
         assert step_lines == []
         assert None in instances_by_step
 
+    def test_scan_log_instances_tracks_header_driven_steps(self, temp_dir):
+        """Steps come from header-matched rows, with or without MPI ranks."""
+        timer_db = {
+            "test.c:1": TimerDef(
+                timer_id="test.c:1",
+                function="space_split",
+                log_pattern=r"space_split:\s+took\s+([\d.]+)\s+ms\.",
+                start_line=1,
+                end_line=1,
+                label_text="took %.3f %s.",
+                timer_type="function",
+            )
+        }
+        compiled = compile_site_patterns(timer_db)
+        log_file = temp_dir / "old_table.log"
+        log_file.write_text(
+            "#   Step  Time Scale-factor Redshift Time-step Time-bins "
+            "Updates g-Updates s-Updates Wall-clock time [ms] Props "
+            "Dead time [ms]\n"
+            "  7 0.1 0.5 1.0 0.01 40 41 10 20 0 12.5 1 0.5\n"
+            "[0000] [00001.0] space_split: took 4.0 ms.\n"
+            "[0001]   8 0.2 0.6 0.6 0.01 40 41 10 20 0 13.5 1 0.5\n"
+            "[0001] [00002.0] space_split: took 5.0 ms.\n",
+            encoding="utf-8",
+        )
+
+        instances_by_step, step_lines = scan_log_instances_by_step(
+            str(log_file), compiled, timer_db
+        )
+
+        assert step_lines == [(1, 7), (3, 8)]
+        assert [inst.time_ms for inst in instances_by_step[7]] == [4.0]
+        assert [inst.time_ms for inst in instances_by_step[8]] == [5.0]
+
     def test_scan_log_instances_splits_runtime_timer_variants(
         self, temp_dir, sample_timer_db
     ):

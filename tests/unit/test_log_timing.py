@@ -7,7 +7,6 @@ import matplotlib.pyplot as plt
 import pytest
 
 from swiftsim_cli.modes.analyse.log_timing import (
-    _extract_step_wallclock_ms,
     _hierarchy_corrected_total,
     _hierarchy_direct_accounted_time,
     _print_hierarchical_analysis,
@@ -96,21 +95,6 @@ class TestBuildStats:
         assert stats["call_count"] == 4
         assert stats["mean_time"] == pytest.approx(0.75)
         assert stats["total_time"] == pytest.approx(3.0)
-
-
-class TestStepTableParsing:
-    """Tests for extracting totals from SWIFT step rows."""
-
-    def test_extract_step_wallclock_ms_uses_wallclock_column(self):
-        """Step totals should come from Wall-clock time, not dead time."""
-        line = (
-            "       0   1.448448e-04    0.0400000   24.0000000   "
-            "0.000000e+00    1   56            0    286773236            "
-            "0            0            0            263601.156    265   "
-            "       4652.056"
-        )
-
-        assert _extract_step_wallclock_ms(line) == pytest.approx(263601.156)
 
 
 class TestDisplayName:
@@ -949,14 +933,10 @@ class TestCreateTimeSeriesPlot:
     """Tests for the time series plotting helper."""
 
     @patch("swiftsim_cli.modes.analyse.log_timing.create_output_path")
-    @patch("swiftsim_cli.modes.analyse.log_timing.plt.savefig")
-    @patch("swiftsim_cli.modes.analyse.log_timing.plt.close")
-    @patch("swiftsim_cli.modes.analyse.log_timing.plt.show")
+    @patch("swiftsim_cli.modes.analyse.log_timing.save_figure")
     def test_create_time_series_plot_uses_stacked_subplots(
         self,
-        mock_show,
-        mock_close,
-        mock_savefig,
+        mock_save_figure,
         mock_create_output_path,
         tmp_path,
     ):
@@ -1009,13 +989,13 @@ class TestCreateTimeSeriesPlot:
         )
 
         assert output == tmp_path / "07_time_series.png"
-        mock_savefig.assert_called_once()
-        mock_show.assert_not_called()
-        mock_close.assert_called_once()
-
         figure = plt.gcf()
+        mock_save_figure.assert_called_once_with(
+            figure, tmp_path / "07_time_series.png", show=False
+        )
         assert len(figure.axes) == 3
         assert figure.get_size_inches()[1] == pytest.approx(19.5)
+        plt.close(figure)
 
 
 class TestHierarchicalAnalysisDefaults:

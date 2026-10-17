@@ -1,5 +1,7 @@
-"""A module containing generic utility functions for SWIFTSim-CLI."""
+"""Filesystem, subprocess and output-path helpers."""
 
+import re
+import subprocess
 from pathlib import Path
 from typing import Sequence
 
@@ -25,21 +27,7 @@ def run_command_in_dir(command: Sequence[str], directory: Path) -> None:
         FileNotFoundError: If the specified directory does not exist.
         CalledProcessError: If the command fails.
     """
-    import subprocess
-
     subprocess.run(command, cwd=str(directory), check=True)
-
-
-def make_directory(path: Path) -> None:
-    """Create a directory if it does not exist.
-
-    Args:
-        path: The path to the directory to create.
-    """
-    if not path.exists():
-        path.mkdir(parents=True, exist_ok=True)
-    elif not path.is_dir():
-        raise FileExistsError(f"Path {path} exists and is not a directory.")
 
 
 def create_output_path(
@@ -88,60 +76,29 @@ def create_output_path(
     return output_file
 
 
-def create_ascii_table(headers, rows, title=None):
-    """Create a formatted ASCII table.
+def slugify(
+    text: str,
+    fallback: str = "item",
+    lowercase: bool = False,
+    keep: str = "",
+) -> str:
+    """Convert display text into a filesystem-friendly slug.
+
+    Every run of characters other than ASCII letters, digits and the
+    characters in ``keep`` is replaced by a single underscore, and leading
+    or trailing underscores are removed.
 
     Args:
-        headers: List of column headers
-        rows: List of row data (each row is a list)
-        title: Optional table title
+        text: The text to convert.
+        fallback: Returned when nothing usable is left of ``text``.
+        lowercase: Whether to lowercase the text first.
+        keep: Extra characters to keep as they are (e.g. ``"._-"``).
 
     Returns:
-        String containing the formatted table
+        The slug, or ``fallback`` if the slug would be empty.
     """
-    # Calculate column widths
-    col_widths = [len(str(header)) for header in headers]
-    for row in rows:
-        for i, cell in enumerate(row):
-            col_widths[i] = max(col_widths[i], len(str(cell)))
-
-    # Add padding
-    col_widths = [w + 2 for w in col_widths]
-
-    # Create separator line
-    separator = "+" + "+".join("-" * w for w in col_widths) + "+"
-
-    # Build table
-    table_lines = []
-
-    # Title
-    if title:
-        total_width = len(separator)
-        table_lines.append("+" + "=" * (total_width - 2) + "+")
-        title_line = f"| {title:^{total_width - 4}} |"
-        table_lines.append(title_line)
-
-    table_lines.append(separator)
-
-    # Headers
-    header_line = "|"
-    for i, header in enumerate(headers):
-        header_line += f" {str(header):^{col_widths[i] - 2}} |"
-    table_lines.append(header_line)
-    table_lines.append(separator)
-
-    # Rows
-    for row in rows:
-        row_line = "|"
-        for i, cell in enumerate(row):
-            # Right-align numbers, left-align text
-            cell_str = str(cell)
-            if i == 0:  # First column (names) - left align
-                row_line += f" {cell_str:<{col_widths[i] - 2}} |"
-            else:  # Other columns (numbers) - right align
-                row_line += f" {cell_str:>{col_widths[i] - 2}} |"
-        table_lines.append(row_line)
-
-    table_lines.append(separator)
-
-    return "\n".join(table_lines)
+    text = text.strip()
+    if lowercase:
+        text = text.lower()
+    slug = re.sub(rf"[^A-Za-z0-9{re.escape(keep)}]+", "_", text)
+    return slug.strip("_") or fallback

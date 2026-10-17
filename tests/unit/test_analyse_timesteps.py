@@ -80,19 +80,17 @@ def _make_timestep_line(time_value: float, wallclock_ms: float) -> str:
     parts[2] = time_value
     parts[12] = wallclock_ms
     parts[14] = wallclock_ms / 10.0
-    return " " + " ".join(str(value) for value in parts) + "\n"
+    return "  0 " + " ".join(str(value) for value in parts[1:]) + "\n"
 
 
 @patch("swiftsim_cli.modes.analyse.timesteps.create_output_path")
-@patch("swiftsim_cli.modes.analyse.timesteps.plt.close")
-@patch("swiftsim_cli.modes.analyse.timesteps.plt.savefig")
+@patch("swiftsim_cli.modes.analyse.timesteps.save_figure")
 @patch("swiftsim_cli.modes.analyse.timesteps.plt.tight_layout")
 @patch("swiftsim_cli.modes.analyse.timesteps.plt.subplots")
 def test_match_runtimes_trims_to_shortest_dataset(
     mock_subplots,
     mock_tight_layout,
-    mock_savefig,
-    mock_close,
+    mock_save_figure,
     mock_create_output_path,
     tmp_path: Path,
 ):
@@ -134,15 +132,13 @@ def test_match_runtimes_trims_to_shortest_dataset(
 
 
 @patch("swiftsim_cli.modes.analyse.timesteps.create_output_path")
-@patch("swiftsim_cli.modes.analyse.timesteps.plt.close")
-@patch("swiftsim_cli.modes.analyse.timesteps.plt.savefig")
+@patch("swiftsim_cli.modes.analyse.timesteps.save_figure")
 @patch("swiftsim_cli.modes.analyse.timesteps.plt.tight_layout")
 @patch("swiftsim_cli.modes.analyse.timesteps.plt.subplots")
 def test_shared_extent_reports_speedup_without_trimming(
     mock_subplots,
     mock_tight_layout,
-    mock_savefig,
-    mock_close,
+    mock_save_figure,
     mock_create_output_path,
     tmp_path: Path,
     capsys,
@@ -178,15 +174,13 @@ def test_shared_extent_reports_speedup_without_trimming(
 
 
 @patch("swiftsim_cli.modes.analyse.timesteps.create_output_path")
-@patch("swiftsim_cli.modes.analyse.timesteps.plt.close")
-@patch("swiftsim_cli.modes.analyse.timesteps.plt.savefig")
+@patch("swiftsim_cli.modes.analyse.timesteps.save_figure")
 @patch("swiftsim_cli.modes.analyse.timesteps.plt.tight_layout")
 @patch("swiftsim_cli.modes.analyse.timesteps.plt.subplots")
 def test_timestep_axis_label_is_inferred_from_header(
     mock_subplots,
     mock_tight_layout,
-    mock_savefig,
-    mock_close,
+    mock_save_figure,
     mock_create_output_path,
     tmp_path: Path,
 ):
@@ -217,15 +211,13 @@ def test_timestep_axis_label_is_inferred_from_header(
 
 
 @patch("swiftsim_cli.modes.analyse.timesteps.create_output_path")
-@patch("swiftsim_cli.modes.analyse.timesteps.plt.close")
-@patch("swiftsim_cli.modes.analyse.timesteps.plt.savefig")
+@patch("swiftsim_cli.modes.analyse.timesteps.save_figure")
 @patch("swiftsim_cli.modes.analyse.timesteps.plt.tight_layout")
 @patch("swiftsim_cli.modes.analyse.timesteps.plt.subplots")
 def test_timestep_axis_label_falls_back_without_header(
     mock_subplots,
     mock_tight_layout,
-    mock_savefig,
-    mock_close,
+    mock_save_figure,
     mock_create_output_path,
     tmp_path: Path,
 ):
@@ -253,15 +245,13 @@ def test_timestep_axis_label_falls_back_without_header(
 
 
 @patch("swiftsim_cli.modes.analyse.timesteps.create_output_path")
-@patch("swiftsim_cli.modes.analyse.timesteps.plt.close")
-@patch("swiftsim_cli.modes.analyse.timesteps.plt.savefig")
+@patch("swiftsim_cli.modes.analyse.timesteps.save_figure")
 @patch("swiftsim_cli.modes.analyse.timesteps.plt.tight_layout")
 @patch("swiftsim_cli.modes.analyse.timesteps.plt.subplots")
 def test_nthreads_converts_main_axis_to_cpu_time(
     mock_subplots,
     mock_tight_layout,
-    mock_savefig,
-    mock_close,
+    mock_save_figure,
     mock_create_output_path,
     tmp_path: Path,
 ):
@@ -294,15 +284,13 @@ def test_nthreads_converts_main_axis_to_cpu_time(
 
 
 @patch("swiftsim_cli.modes.analyse.timesteps.create_output_path")
-@patch("swiftsim_cli.modes.analyse.timesteps.plt.close")
-@patch("swiftsim_cli.modes.analyse.timesteps.plt.savefig")
+@patch("swiftsim_cli.modes.analyse.timesteps.save_figure")
 @patch("swiftsim_cli.modes.analyse.timesteps.plt.tight_layout")
 @patch("swiftsim_cli.modes.analyse.timesteps.plt.subplots")
 def test_non_monotonic_x_skips_runtime_comparison(
     mock_subplots,
     mock_tight_layout,
-    mock_savefig,
-    mock_close,
+    mock_save_figure,
     mock_create_output_path,
     tmp_path: Path,
     capsys,
@@ -326,3 +314,61 @@ def test_non_monotonic_x_skips_runtime_comparison(
     output = capsys.readouterr().out
     assert "not monotonically increasing" in output
     assert "RUNTIME COMPARISON" not in output
+
+
+@patch("swiftsim_cli.modes.analyse.timesteps.create_output_path")
+@patch("swiftsim_cli.modes.analyse.timesteps.save_figure")
+@patch("swiftsim_cli.modes.analyse.timesteps.plt.tight_layout")
+@patch("swiftsim_cli.modes.analyse.timesteps.plt.subplots")
+def test_older_13_column_table_uses_header_columns(
+    mock_subplots,
+    mock_tight_layout,
+    mock_save_figure,
+    mock_create_output_path,
+    tmp_path: Path,
+):
+    """Tables without sink-/b-Updates locate wall-clock from the header."""
+    timestep_file = tmp_path / "timesteps.txt"
+    timestep_file.write_text(
+        "# Step Properties: Rebuild=1, Redistribute=2\n"
+        "#   Step  Time Scale-factor Redshift Time-step Time-bins Updates "
+        "g-Updates s-Updates Wall-clock time [ms] Props Dead time [ms]\n"
+        "  0 0.0 0.5 1.0 0.0 1 56 0 0 0 3600000.0 265 360000.0\n"
+        "  1 0.1 0.6 0.6 0.1 40 40 0 0 0 3600000.0 1 0.0\n",
+        encoding="utf-8",
+    )
+    ax1 = Mock()
+    ax2 = Mock()
+    mock_subplots.return_value = (Mock(), (ax1, ax2))
+    mock_create_output_path.return_value = tmp_path / "plot.png"
+
+    analyse_timestep_files([str(timestep_file)], ["run"], show_plot=False)
+
+    x = np.asarray(ax1.plot.call_args_list[0].args[0])
+    wallclock_y = np.asarray(ax1.plot.call_args_list[0].args[1])
+    deadtime_y = np.asarray(ax1.plot.call_args_list[1].args[1])
+    assert np.array_equal(x, np.array([0.5, 0.6]))
+    assert np.allclose(wallclock_y, [1.0, 2.0])
+    assert np.allclose(deadtime_y, [0.1, 0.1])
+    ax2.set_xlabel.assert_called_once_with("Scale factor")
+    mock_save_figure.assert_called_once()
+
+
+def test_no_parsable_rows_raises(tmp_path: Path):
+    """A file with no step rows is an error, not an empty plot."""
+    timestep_file = tmp_path / "timesteps.txt"
+    timestep_file.write_text("# just a comment\nnot a row\n", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="No step-table rows"):
+        analyse_timestep_files([str(timestep_file)], ["run"], show_plot=False)
+
+
+def test_time_column_out_of_range_raises(tmp_path: Path):
+    """Selecting a column the table does not have is a clear error."""
+    timestep_file = tmp_path / "timesteps.txt"
+    timestep_file.write_text(_make_timestep_line(1.0, 1.0), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="out of range"):
+        analyse_timestep_files(
+            [str(timestep_file)], ["run"], show_plot=False, time_column=15
+        )

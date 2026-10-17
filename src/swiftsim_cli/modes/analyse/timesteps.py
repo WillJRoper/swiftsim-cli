@@ -11,7 +11,6 @@ Key functions:
 
 import argparse
 import math
-import re
 from typing import Any
 
 import matplotlib
@@ -19,26 +18,16 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.lines import Line2D
 
-from swiftsim_cli.utilities import create_ascii_table, create_output_path
+from swiftsim_cli.utilities.io import create_output_path
+from swiftsim_cli.utilities.plotting import save_figure
+from swiftsim_cli.utilities.step_table import (
+    DEAD_TIME_COLUMN,
+    WALLCLOCK_COLUMN,
+    StepTableReader,
+)
+from swiftsim_cli.utilities.tables import create_ascii_table
 
 tab10 = matplotlib.colormaps["tab10"]
-
-_TIMESTEP_HEADER_LABELS = [
-    "Step",
-    "Time",
-    "Scale-factor",
-    "Redshift",
-    "Time-step",
-    "Time-bins",
-    "Updates",
-    "g-Updates",
-    "s-Updates",
-    "sink-Updates",
-    "b-Updates",
-    "Wall-clock time [ms]",
-    "Props",
-    "Dead time [ms]",
-]
 
 _TIMESTEP_LABEL_ALIASES = {
     "Time": "Time [Internal Units]",
@@ -149,46 +138,6 @@ def _normalise_timestep_label(label: str) -> str:
     return _TIMESTEP_LABEL_ALIASES.get(label, label)
 
 
-def _infer_timestep_column_labels(
-    header_line: str, data_line: str
-) -> dict[int, str]:
-    """Infer timestep column labels by aligning the header with a data row."""
-    header_positions = []
-    search_start = 0
-    for label in _TIMESTEP_HEADER_LABELS:
-        position = header_line.find(label, search_start)
-        if position == -1:
-            continue
-
-        header_positions.append((position, _normalise_timestep_label(label)))
-        search_start = position + len(label)
-
-    if not header_positions:
-        return {}
-
-    data_positions = [
-        match.start() for match in re.finditer(r"\S+", data_line)
-    ]
-    if not data_positions:
-        return {}
-
-    labels_by_column = {}
-    min_column = 0
-    for position, label in header_positions:
-        candidate_columns = range(min_column, len(data_positions))
-        if min_column >= len(data_positions):
-            break
-
-        column = min(
-            candidate_columns,
-            key=lambda index: abs(data_positions[index] - position),
-        )
-        labels_by_column[column] = label
-        min_column = column + 1
-
-    return labels_by_column
-
-
 def analyse_timestep_files(
     files: list[str],
     labels: list[str],
@@ -221,7 +170,8 @@ def analyse_timestep_files(
             to show CPU time.
 
     Raises:
-        ValueError: If the number of files and labels do not match.
+        ValueError: If the number of files and labels do not match, or if a
+            file contains no step-table rows.
     """
     # Make sure the number of files and labels match
     if len(files) != len(labels):
@@ -241,10 +191,6 @@ def analyse_timestep_files(
     if time_column < 0:
         raise ValueError("time_column must be non-negative.")
 
-    # Column indices in the timestep table
-    x_index = time_column
-    wall_clock_index = 12
-    deadtime_index = -1
     place_legend_below = len(labels) > 3
     figure_height = 8.0
 
@@ -256,54 +202,41 @@ def analyse_timestep_files(
     x: list[np.ndarray[Any, Any]] = []
     y: list[np.ndarray[Any, Any]] = []
     deadtime: list[np.ndarray[Any, Any]] = []
-    column_labels: dict[int, str] = {}
+    x_label: str | None = None
     runtime_comparison = None
     for file_index, file in enumerate(files):
         xi_values: list[float] = []
         yi_values: list[float] = []
         dti_values: list[float] = []
-        header_line = ""
+        step_table = StepTableReader()
         with open(file, "r") as f:
             for line in f:
-                # Ensure we aren't reading a comment line
-                if line.startswith("#"):
-                    if "Step" in line:
-                        header_line = line
+                row = step_table.feed(line)
+                if row is None:
                     continue
 
-                # If the line doesn't start with an empty space, its not a
-                # data line
-                if not line[0].isspace():
-                    continue
-
-                # Split the line into parts
-                parts = line.split()
-
-                # Ensure we found 15 columns
-                if len(parts) != 15:
-                    continue
-
-                # Ensure all 15 columns are numbers
-                try:
-                    [float(part) for part in parts]
-                except ValueError:
-                    print(
-                        "Failed to parse line:",
-                        line,
-                        "in file:",
-                        file,
-                        "(this is probably fine)",
+                columns = step_table.columns
+                if time_column >= len(columns):
+                    raise ValueError(
+                        f"time_column {time_column} is out of range for "
+                        f"'{file}', which has {len(columns)} columns."
                     )
-                    continue
-
-                if not column_labels and header_line:
-                    column_labels = _infer_timestep_column_labels(
-                        header_line, line
+                if WALLCLOCK_COLUMN not in row or DEAD_TIME_COLUMN not in row:
+                    raise ValueError(
+                        f"'{file}' has no '{WALLCLOCK_COLUMN}' or "
+                        f"'{DEAD_TIME_COLUMN}' column."
                     )
+                if x_label is None and step_table.header_seen:
+                    x_label = _normalise_timestep_label(columns[time_column])
 
-                xi_values.append(float(parts[x_index]))
-                yi_values.append(float(parts[wall_clock_index]))
-                dti_values.append(float(parts[deadtime_index]))
+                xi_values.append(row[columns[time_column]])
+                yi_values.append(row[WALLCLOCK_COLUMN])
+                dti_values.append(row[DEAD_TIME_COLUMN])
+
+        if not xi_values:
+            raise ValueError(
+                f"No step-table rows could be parsed from '{file}'."
+            )
 
         time_scale = nthreads[file_index] if nthreads is not None else 1
 
@@ -374,7 +307,8 @@ def analyse_timestep_files(
         ax1.plot(xi, dt, "--", color=color, alpha=0.6, linewidth=2)
 
     # Set labels and title for main plot
-    x_label = column_labels.get(time_column, _get_x_axis_label(time_column))
+    if x_label is None:
+        x_label = _get_x_axis_label(time_column)
     y_label = "CPU hrs" if nthreads is not None else "Time [hrs]"
     ax1.set_ylabel(y_label)
 
@@ -477,16 +411,8 @@ def analyse_timestep_files(
     else:
         plt.tight_layout()
 
-    # Create the output path
     output_file = create_output_path(
         output_path, prefix, "timestep_analysis.png"
     )
-
-    # Save the figure if an output path is provided
-    plt.savefig(output_file, dpi=300, bbox_inches="tight")
+    save_figure(fig, output_file, show=show_plot)
     print(f"Plot saved to {output_file}")
-
-    # Show the plot if requested
-    if show_plot:
-        plt.show()
-    plt.close()

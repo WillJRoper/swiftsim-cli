@@ -5,15 +5,28 @@ from pathlib import Path
 from ruamel.yaml import YAML
 
 PARAMS: dict | None = None
-PARAMS_SOURCE: Path | None | object = None
+PARAMS_SOURCE: Path | None = None
 PARAMS_VERSION = 0
 
-# Configure YAML for round-trip comment preservation and consistent formatting
-yaml = YAML()
-yaml.default_flow_style = False
-yaml.indent(mapping=4, sequence=4, offset=2)
-yaml.width = 80
-yaml.allow_unicode = True
+
+def round_trip_yaml() -> YAML:
+    """Create a YAML instance for reading and writing SWIFT parameter files.
+
+    The instance preserves comments on round trips and uses the
+    formatting conventions of SWIFT's example parameter files.
+
+    Returns:
+        A configured round-trip YAML instance.
+    """
+    yaml = YAML()
+    yaml.default_flow_style = False
+    yaml.indent(mapping=4, sequence=4, offset=2)
+    yaml.width = 80
+    yaml.allow_unicode = True
+    return yaml
+
+
+yaml = round_trip_yaml()
 
 
 def _clean_yaml_text(text: str, spaces_per_tab: int = 4) -> str:
