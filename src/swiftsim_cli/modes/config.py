@@ -1,10 +1,12 @@
-"""A module containing tools for configuring SWIFT."""
+"""Config mode for configuring the active SWIFT profile."""
 
 import argparse
-from pathlib import Path
 
+from swiftsim_cli.profile import get_profile
 from swiftsim_cli.swiftsim_dir import (
     _run_command_in_swift_dir,
+    configure_profile,
+    ensure_configure_script,
     get_swiftsim_dir,
 )
 
@@ -55,8 +57,10 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
 def run(args: argparse.Namespace) -> None:
     """Execute the config mode.
 
-    Note that the user can very readily pass incorrectly formed options. We let
-    SWIFT itself handle that, as it will give a useful error message.
+    The presets and any extra ``--<option>`` flags become the active
+    profile's configure flags (validated against ``./configure --help``).
+    With no presets or flags, the profile is reconfigured with its stored
+    flags.
 
     Args:
         args: The parsed arguments from the command line.
@@ -108,56 +112,28 @@ def run(args: argparse.Namespace) -> None:
         opts.extend(args.options)
 
         # Remove any duplicate options while preserving order
-        seen = set()
-        unique_opts = []
-        for x in opts:
-            if x not in seen:
-                seen.add(x)
-                unique_opts.append(x)
+        unique_opts = list(dict.fromkeys(opts))
         args.options = unique_opts
 
         # Now run the configuration
-        config_swiftsim(opts=unique_opts)
+        config_swiftsim(opts=unique_opts or None)
 
 
-def config_swiftsim(opts: list[str], swift_dir: Path | None = None) -> None:
-    """Configure SWIFT itself.
-
-    This will navigate to the SWIFT directory (erroring if there is not one
-    set) and then run the SWIFT configuration script with the provided options.
+def config_swiftsim(opts: list[str] | None = None) -> None:
+    """Configure the active profile's worktree.
 
     Args:
-        opts: The options to pass to the SWIFT configuration script.
-        swift_dir: Optional path to the SWIFT directory. If None, uses the
-            directory from the SWIFT-utils config.
+        opts: Flags for ``./configure``; these replace the profile's stored
+            configure flags. If None, the stored flags are used.
 
     Raises:
-        FileNotFoundError: If the SWIFT directory does not exist.
-        ValueError: If the SWIFT directory is not set in the configuration.
+        ProfileError: If a flag is unknown or configure fails.
     """
-    # Get the SWIFT directory
-    swift_dir = get_swiftsim_dir(swift_dir)
-
-    # Run the command in the SWIFT directory
-    _run_command_in_swift_dir(["./configure", *opts], swift_dir)
+    configure_profile(get_profile(), opts)
 
 
-def show_config_options(swift_dir: Path | None = None) -> None:
-    """Show the configuration options for SWIFT.
-
-    This will navigate to the SWIFT directory (erroring if there is not one
-    set) and then run the SWIFT configuration script with the --help option.
-
-    Args:
-        swift_dir: Optional path to the SWIFT directory. If None, uses the
-            directory from the SWIFT-utils config.
-
-    Raises:
-        FileNotFoundError: If the SWIFT directory does not exist.
-        ValueError: If the SWIFT directory is not set in the configuration.
-    """
-    # Get the SWIFT directory
-    swift_dir = get_swiftsim_dir(swift_dir)
-
-    # Run the command in the SWIFT directory
+def show_config_options() -> None:
+    """Show the configure options for the active profile's worktree."""
+    swift_dir = get_swiftsim_dir()
+    ensure_configure_script(swift_dir)
     _run_command_in_swift_dir(["./configure", "--help"], swift_dir)

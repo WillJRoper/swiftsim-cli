@@ -3,12 +3,7 @@
 import argparse
 from unittest.mock import Mock, patch
 
-from swiftsim_cli.modes.config import (
-    add_arguments,
-    config_swiftsim,
-    run,
-    show_config_options,
-)
+from swiftsim_cli.modes.config import add_arguments, run
 
 
 class TestConfigMode:
@@ -244,105 +239,3 @@ class TestConfigMode:
         opts = call_args[1]["opts"]
         assert "--custom-opt1" in opts
         assert "--custom-opt2" in opts
-
-
-class TestConfigSwiftsim:
-    """Tests for config_swiftsim function."""
-
-    @patch("swiftsim_cli.modes.config._run_command_in_swift_dir")
-    @patch("swiftsim_cli.modes.config.get_swiftsim_dir")
-    def test_config_swiftsim(self, mock_get_dir, mock_run_command, tmp_path):
-        """Test configuring SWIFT with options."""
-        # Create a temp directory
-        swift_dir = tmp_path / "swift"
-        swift_dir.mkdir()
-
-        # Mock get_swiftsim_dir to return the directory
-        mock_get_dir.return_value = swift_dir
-
-        # Call config_swiftsim
-        config_swiftsim(["--enable-debug"], swift_dir)
-
-        # Verify get_swiftsim_dir was called
-        mock_get_dir.assert_called_once_with(swift_dir)
-
-        # Verify the configure command was run
-        mock_run_command.assert_called_once_with(
-            ["./configure", "--enable-debug"], swift_dir
-        )
-
-    @patch("swiftsim_cli.modes.config._run_command_in_swift_dir")
-    @patch("swiftsim_cli.modes.config.get_swiftsim_dir")
-    def test_config_swiftsim_without_dir(
-        self, mock_get_dir, mock_run_command, tmp_path
-    ):
-        """Test configuring SWIFT without explicit directory (uses config)."""
-        # Create a temp directory
-        swift_dir = tmp_path / "swift"
-        swift_dir.mkdir()
-
-        # Mock get_swiftsim_dir to return a directory
-        mock_get_dir.return_value = swift_dir
-
-        # Call config_swiftsim without directory
-        config_swiftsim(["--enable-ipo"], None)
-
-        # Verify get_swiftsim_dir was called with None
-        mock_get_dir.assert_called_once_with(None)
-
-        # Verify the configure command was run
-        mock_run_command.assert_called_once_with(
-            ["./configure", "--enable-ipo"], swift_dir
-        )
-
-
-class TestShowConfigOptions:
-    """Tests for show_config_options function."""
-
-    @patch("swiftsim_cli.modes.config._run_command_in_swift_dir")
-    @patch("swiftsim_cli.modes.config.get_swiftsim_dir")
-    def test_show_config_options(
-        self, mock_get_dir, mock_run_command, tmp_path
-    ):
-        """Test showing configuration options."""
-        # Create a temp directory
-        swift_dir = tmp_path / "swift"
-        swift_dir.mkdir()
-
-        # Mock get_swiftsim_dir to return the directory
-        mock_get_dir.return_value = swift_dir
-
-        # Call show_config_options
-        show_config_options(swift_dir)
-
-        # Verify get_swiftsim_dir was called
-        mock_get_dir.assert_called_once_with(swift_dir)
-
-        # Verify the configure --help command was run
-        mock_run_command.assert_called_once_with(
-            ["./configure", "--help"], swift_dir
-        )
-
-    @patch("swiftsim_cli.modes.config._run_command_in_swift_dir")
-    @patch("swiftsim_cli.modes.config.get_swiftsim_dir")
-    def test_show_config_options_without_dir(
-        self, mock_get_dir, mock_run_command, tmp_path
-    ):
-        """Test showing options without explicit directory (uses config)."""
-        # Create a temp directory
-        swift_dir = tmp_path / "swift"
-        swift_dir.mkdir()
-
-        # Mock get_swiftsim_dir to return a directory
-        mock_get_dir.return_value = swift_dir
-
-        # Call show_config_options without directory
-        show_config_options(None)
-
-        # Verify get_swiftsim_dir was called with None
-        mock_get_dir.assert_called_once_with(None)
-
-        # Verify the configure --help command was run
-        mock_run_command.assert_called_once_with(
-            ["./configure", "--help"], swift_dir
-        )

@@ -29,7 +29,7 @@ import numpy as np
 from ruamel.yaml import YAML
 from tqdm.auto import tqdm
 
-from swiftsim_cli.profile import load_swift_profile
+from swiftsim_cli.profile import get_profile_cache_dir, load_swift_profile
 from swiftsim_cli.src_parser import (
     compile_site_patterns,
     generate_timer_nesting_database,
@@ -206,7 +206,7 @@ def load_timer_nesting(
             is required. This is intentionally not caught to ensure users
             are aware of configuration issues.
     """
-    nesting_file = Path.home() / ".swiftsim-utils" / "timer_nesting.yaml"
+    nesting_file = get_profile_cache_dir() / "timer_nesting.yaml"
 
     # Check if we need to generate the database
     should_generate = force_regenerate or (
