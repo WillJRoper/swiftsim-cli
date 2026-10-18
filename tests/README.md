@@ -13,7 +13,10 @@ tests/
 ├── data/
 │   ├── c_archetypes/  # Archetypal C syntax cases + expectations
 │   ├── logs/          # Scrubbed excerpts of real SWIFT logs + synthetic logs
-│   └── swift_src/     # Synthetic SWIFT-like C tree matching the logs
+│   ├── swift_src/     # Synthetic SWIFT-like C tree matching the logs
+│   ├── tasks/         # Small task dumps (11, 13/17 and 19 columns), a threadpool dump
+│   │                  # and a minimal SWIFT tree (task.c, cell.h) for names
+│   └── test_log.txt   # A short SWIFT log
 └── README.md
 ```
 
@@ -70,12 +73,24 @@ skipped unless `SWIFT_SRC` is set.
   the real output
 - **test_profile.py**, **test_profile_worktrees.py**: profile storage and the
   worktree-based profile commands against temporary git repositories
-- **test_config.py**, **test_modes_new.py**, **test_output_times*.py**,
-  **test_show.py**, **test_utils_mode.py**, **test_params.py**,
-  **test_cosmology.py**: the other modes and their helpers
-- **test_analyse_*.py**, **test_gravity_*.py**, **test_mpiuse.py**,
-  **test_task_plots.py**, **test_log_task_counts.py**,
-  **test_step_table.py**: the analysis subcommands
+- **test_profile_workflows.py**: whole profile workflows against temporary
+  git repositories: chained `update ... make` building once, update safety
+  (autostash conflicts, no upstream, mid-rebase worktrees), `show`
+  cosmology, non-interactive `--init`/`--edit --set`, upstream changes,
+  `--remove`/`--adopt` safety, migration and user-facing messages
+- **test_modes_new.py**: `new`, including every bundled template in
+  `src/swiftsim_cli/templates` passing the SWIFT parser checks, template
+  selection from the ICs, zoom softenings and `--check`
+- **test_config.py**, **test_output_times.py**, **test_show.py**,
+  **test_utils_mode.py**, **test_params.py**, **test_cosmology.py**: the
+  other modes and their helpers
+- **test_analyse_scaling.py**: the `analyse scaling` package (data loading,
+  timers, runtime and plots)
+- **test_task_plots.py**: `analyse task-plots` on the dumps in `data/tasks`
+  (every column layout, names parsed from `data/tasks/swift_src`, filters)
+- **test_analyse_init.py**, **test_analyse_timesteps.py**,
+  **test_gravity_*.py**, **test_mpiuse.py**, **test_log_task_counts.py**,
+  **test_step_table.py**: the other analysis subcommands
 - **test_timer_db.py**: Timer formats, function/operation rule, call graph,
   caching and revision matching (against `data/swift_src` and a temporary
   git repository)
@@ -100,7 +115,7 @@ The test suite uses pytest fixtures defined in `conftest.py`:
 - `in_inputs_dir`: runs the test in a directory holding empty input files
   (`a.txt`, `swift.log`, `ics.hdf5`, ...) and a `reports/` directory, for
   parse-only tests (input paths are checked at parse time)
-- `write_tiny_ics`: writes a tiny gas-only HDF5 initial conditions file
+- `write_tiny_ics`: writes a tiny HDF5 initial conditions file
 - `gitsetup` (in `unit/conftest.py`): a fresh bare remote, main clone and
   worktree root, with git isolated from your global configuration
 - `logs_dir`: The log fixtures (`data/logs`)
@@ -159,4 +174,5 @@ Test configuration is in `pyproject.toml`:
 - Failure thresholds
 
 Lint (ruff) and type checks (mypy) run alongside the tests in CI and in the
-pre-commit hooks.
+pre-commit hooks (the pre-commit mypy hook checks only the staged files; CI
+checks the whole tree).

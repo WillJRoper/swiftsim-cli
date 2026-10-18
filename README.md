@@ -21,7 +21,8 @@ lists and analyses the logs and diagnostics SWIFT writes.
 - **Profiles**: every profile is its own git worktree, branch, set of
   configure flags and build, so switching never needs a rebuild.
 - **Simulation setup**: create a run directory with a ready-to-run
-  `params.yml` derived from your initial conditions.
+  `params.yml` from a bundled template, filled in from your initial
+  conditions and checked against SWIFT's parameter parser.
 - **Output times**: generate snapshot/snipshot output lists in redshift, time
   or scale factor.
 - **Analysis**: per-step timer call trees from SWIFT logs, timestep plots,
@@ -55,6 +56,7 @@ Check the installation with `swift-cli --version`.
 #    (interactive: clone path, worktree root, upstream, configure flags,
 #    data directory, softening constants)
 swift-cli profile --init
+#    Without prompts: swift-cli profile --init --repo ~/swiftsim -y
 
 # 2. Add more profiles, each with its own branch, flags and build
 swift-cli profile --new zoom --upstream origin/zoom \
@@ -90,17 +92,36 @@ Because builds never share a directory, switching profiles is instant and can ne
 ```bash
 swift-cli profile --new zoom --upstream origin/zoom --configure-flags="--enable-debug" --build -j 16
 swift-cli profile --list              # all profiles (* marks the current one)
-swift-cli profile --show [NAME]       # details of one profile
+swift-cli profile --show zoom         # settings of one profile (default: current)
+swift-cli show zoom                   # the same, plus its parameter file's cosmology
 swift-cli profile --switch zoom       # or: swift-cli switch zoom
 swift-cli profile --edit zoom         # change upstream, flags, paths, constants
-swift-cli profile --update [NAME] -j 16   # or: swift-cli update -j 16
+swift-cli profile --edit zoom --set upstream=origin/zoom-v2 --set softening_coeff=0.04
+swift-cli profile --update zoom -j 16 # or, for the current profile: swift-cli update -j 16
 swift-cli profile --update-all -j 16  # update every profile, then print a summary
 swift-cli profile --remove zoom       # removes the worktree (and optionally the branch)
-swift-cli profile --remove zoom --force  # ...even if the worktree has untracked files
+swift-cli profile --remove zoom --force -y  # even with untracked files; keeps the branch
+swift-cli profile --new zoom --reuse-branch  # recreate it on the kept swift-cli/zoom branch
 swift-cli --profile zoom make -j 16   # build another profile without switching
 ```
 
-Updating a profile runs `git pull --rebase --autostash` in its worktree (your local commits are replayed on top of the upstream, and any uncommitted changes are stashed and re-applied afterwards). If the rebase hits conflicts nothing is built and you're told how to resolve them. Otherwise `./autogen.sh` is run if `./configure` is missing, `./configure` is (re)run only if the profile has never been configured or its configure flags changed, and then `make` is run.
+`profile --init` asks for the main clone, worktree root, upstream, configure
+flags, data directory and softening constants. With `--repo DIR` it asks
+nothing and takes the rest from `--worktree-root`, `--name` (default
+`default`), `--upstream`, `--configure-flags` and `--set KEY=VALUE`.
+`profile --edit NAME --set KEY=VALUE` (repeatable) changes only the given
+settings without prompting; the keys are `upstream`, `configure_flags`,
+`data_dir`, `parameter_file`, `softening_coeff` and `softening_pivot_z`.
+`-y/--yes` answers the confirmation of `--remove`, `--migrate` and `--init`
+(`--remove --yes` keeps the profile's branch and prints the `git branch -D`
+command). In interactive prompts each answer is checked as it is given; piped
+answers are read one line per question, and an empty line keeps the default.
+
+Updating a profile runs `git pull --rebase --autostash` in its worktree (your local commits are replayed on top of the upstream, and any uncommitted changes are stashed and re-applied afterwards). It fails up front if the branch has no upstream, and reports "Already up to date" or how many commits were pulled. If the rebase, or re-applying your stashed changes, hits conflicts nothing is built and you're told how to resolve them. Otherwise `./autogen.sh` is run if `./configure` is missing, `./configure` is (re)run only if the profile has never been configured or its configure flags changed, and then `make` is run. No build starts in a worktree that is mid-rebase or has unresolved conflicts, and a failed `configure` or `make` exits with that command's own exit code.
+
+`update --no-build` only pulls. When `update` is followed by `config` or `make` in the same command it skips its own build, so `swift-cli update config --debug-build make -j 8` builds once.
+
+Changing a profile's upstream with `--edit` moves a branch with no commits of its own to the new upstream (refused if the worktree has uncommitted changes); a branch with its own commits keeps them, and the `git rebase --onto` command to move them is printed.
 
 `swift-cli config` sets the current profile's configure flags (from presets such as `--debug-build` and/or any `--<option>` flags) and reconfigures. Flags are validated against the options listed by `./configure --help` in that profile's worktree, with suggestions for typos.
 
@@ -110,22 +131,32 @@ Already have worktrees made by hand? Register them with:
 swift-cli profile --adopt ../swiftsim-my-feature --name my-feature
 ```
 
-Profiles are stored in `~/.swiftsim-utils/profiles.yaml` and per-profile caches (e.g. the timer database used by `analyse log`) in `~/.swiftsim-utils/cache/<name>/`. If you have a profile file from an older version of `swift-cli`, convert it (after reviewing the plan it prints) with:
+`--remove` deletes only the worktrees swift-cli created; adopted worktrees,
+the main clone and worktrees shared with another profile are only
+unregistered.
+
+Profiles are stored in `~/.swiftsim-utils/profiles.yaml` and per-profile caches (e.g. the timer database used by `analyse log` and the task names used by `analyse task-plots`) in `~/.swiftsim-utils/cache/<name>/`. If you have a profile file from an older version of `swift-cli`, convert it (after reviewing the plan it prints) with:
 
 ```bash
-swift-cli profile --migrate
+swift-cli profile --migrate                         # worktrees next to the clone
+swift-cli profile --migrate --worktree-root ~/swift-profiles -y
 ```
 
-The migration also deletes the old timer databases (`timers.yaml` and
-`timer_nesting.yaml` in `~/.swiftsim-utils/` and its `cache/<name>/`
-directories), which are no longer used; they are listed in the plan first.
+The plan lists the settings that are dropped (for example cosmology keys)
+and the files in `~/.swiftsim-utils` that are no longer used, including the
+old timer databases (`timers.yaml` and `timer_nesting.yaml`), which the
+migration deletes. Nothing is fetched until you confirm, and nothing is
+written or deleted unless at least one profile migrates; an old `Current`
+entry that matches no profile becomes a profile called `current`.
 
 ## Global options
 
 Global options must come before the first mode:
 
-- `--profile NAME`: run every mode against profile `NAME` instead of the
-  current one (e.g. `swift-cli --profile zoom make -j 16`).
+- `--profile NAME`: run every mode that acts on one profile against
+  profile `NAME` instead of the current one (e.g.
+  `swift-cli --profile zoom make -j 16`). The name is checked before any
+  mode runs; `profile --list`, `--new` and `--switch` ignore it.
 - `--debug`: show full tracebacks instead of a one-line `error: ...` (or set
   `SWIFT_CLI_DEBUG=1`).
 - `--version`, `-h/--help`.
@@ -225,7 +256,7 @@ as `warning: ...` lines and do not stop the chain.
 | `make` | Compile the current profile |
 | `update` | Pull (rebase onto upstream) and rebuild the current profile |
 | `switch` | Make another profile the current one |
-| `show` | Show the current profile and/or the parameter file's cosmology |
+| `show` | Show a profile (default: the current one) and its parameter file's cosmology |
 | `new` | Create a run directory with a `params.yml` |
 | `output-times` | Generate an output-time list |
 | `analyse` | Analyse SWIFT logs and diagnostics (subcommands below) |
@@ -237,35 +268,87 @@ as `warning: ...` lines and do not stop the chain.
 swift-cli config --list-options                    # ./configure --help
 swift-cli config --debug-build                     # preset flags
 swift-cli config --eagle --with-cooling=COLIBRE    # preset + any --<option>
+swift-cli config --with-hydro=sphenix CC=icx       # options and VAR=value
 swift-cli config                                   # reconfigure with stored flags
 ```
 
-Presets: `--debug-build`, `--gravity`, `--eagle`, `--eaglexl`. Any other
-`--<option>` flag is validated against `./configure --help` in the profile's
-worktree (with suggestions for typos) and passed on. The resulting flags
-replace the profile's stored configure flags.
+Presets: `--debug-build`, `--gravity`, `--eagle`, `--eaglexl` (`--eagle`
+and `--eaglexl` are mutually exclusive). Any other `--<option>[=value]`
+flag is validated against `./configure --help` in the profile's worktree
+(with suggestions for typos) and passed on, as are `VAR=value`
+assignments; anything else is rejected (`--with-hydro sphenix` suggests
+`--with-hydro=sphenix`). A later value for an option overrides an earlier
+one, with a warning. The resulting flags replace the profile's stored
+configure flags.
 
 ### `make`, `update`, `switch`, `show`
 
 ```bash
 swift-cli make -j 16             # -j/--nr-threads, --clean runs make clean first
 swift-cli update -j 16           # pull, reconfigure if needed, build
+swift-cli update --no-build      # only pull
 swift-cli switch zoom            # same as profile --switch zoom
-swift-cli show --all             # profile and its parameter file's cosmology
+swift-cli show                   # current profile and its parameter file's cosmology
+swift-cli show zoom --cosmo      # only the cosmology of profile zoom
 ```
 
 ### `new`
 
 ```bash
-swift-cli new -o runs/L100 --ics ics/L100.hdf5 \
-    --set Cosmology:a_end=1.0 --set Snapshots:basename=L100
+swift-cli new -o runs/L100 --ics ics/L100.hdf5 --set Snapshots:basename=L100
+swift-cli new -o runs/L100 --ics ics/L100.hdf5 --template cosmo-hydro --check
+swift-cli new -o runs/L100 --ics ics/L100.hdf5 -P my_params.yml --force
 ```
 
-Writes `runs/L100/params.yml` from the profile's
-`examples/parameter_example.yml`, with absolute paths to the ICs and to
-`restart/` and `snapshots/` subdirectories, the units, softenings and start
-time (`a_begin` or `time_begin`) derived from the ICs, and your
-`--set ROOT:KEY=VALUE` overrides. An existing `params.yml` is only replaced with `--force`.
+Writes `runs/L100/params.yml`, starting from one of swift-cli's bundled,
+runnable parameter templates (derived from SWIFT's own examples):
+
+| Template | For | SWIFT flags |
+| --- | --- | --- |
+| `cosmo-dmo` | cosmological, dark matter only | `--cosmology --self-gravity` |
+| `cosmo-hydro` | cosmological, gravity + hydro | `--cosmology --self-gravity --hydro` |
+| `isolated-gravity` | non-cosmological, non-periodic, gravity | `--self-gravity` |
+| `isolated-hydro` | non-cosmological, non-periodic, gravity + hydro | `--self-gravity --hydro` |
+
+The template is chosen from the ICs (cosmological if the header has a
+positive `Redshift` or 0 < `Time` < 1; hydro if there is gas).
+`--template NAME` picks one explicitly; `-P/--params FILE` (or the
+profile's `parameter_file`, unless it is SWIFT's `parameter_example.yml`)
+starts from your own file instead. `new` then fills in:
+
+- absolute paths to the ICs and to `snapshots/` and `restart/` in the run
+  directory;
+- the unit system from the ICs' `Units` group; cosmological ICs without one
+  are taken to be Gadget-style (h^-1 units, sqrt(a) velocities), so
+  `cleanup_h_factors` and `cleanup_velocity_factors` are set to 1;
+- `a_begin` (cosmological) or `time_begin`, with the first snapshot and
+  statistics times to match; non-cosmological runs get no `Cosmology`
+  section;
+- softenings: the profile's `softening_coeff` times the mean
+  inter-particle separation (comoving, with the maximal physical softening
+  at the pivot redshift, for cosmological runs; maximal physical only, with
+  a warning, for non-cosmological runs). Zoom ICs (a `PartType2`
+  background) use the high-resolution particle mass and set
+  `Gravity:softening_ratio_background`, plus a `ZoomRegion` section and the
+  `--zoom` flag when the profile's SWIFT has zoom support
+  (`src/zoom_region`);
+- `generate_gas_in_ics` when a hydro template is used with DM-only ICs;
+- your `--set SECTION:KEY=VALUE` overrides (repeatable): integers and
+  floats are written as numbers, `[a, b]` as a list, anything else
+  verbatim; new keys or sections are added with a warning (in case of a
+  typo), and empty values are rejected.
+
+Before anything is written the result is checked against SWIFT's parameter
+parser (no duplicate keys or sections, lines of at most 255 characters, at
+most 700 parameters and 64 sections, no placeholder values such as
+`FLT_MAX`); the run directory is created only once it passes. `new` prints
+the softenings it wrote and the `swift ...` command to run with, adding
+`--stars` when the ICs contain stars (SWIFT drops them otherwise). An
+existing `params.yml` is only replaced with `--force`.
+
+`--check` runs the profile's built `swift` binary with `--dry-run` and the
+right physics flags on the new file, from inside the run directory, and
+reports SWIFT's verdict.
 
 ### `output-times`
 
@@ -275,30 +358,49 @@ swift-cli output-times -P params.yml --first-snap-z 10 --delta-z 0.5
 
 # Snapshots every 0.05 in scale factor plus snipshots every 0.01
 swift-cli output-times -P params.yml --first-snap-scale-factor 0.1 \
-    --delta-scale-factor 0.05 --snipshot-delta-scale-factor 0.01
+    --delta-scale-factor 0.05 --snipshot-delta-scale-factor 0.01 \
+    --output-list output_list.txt --force
 
 # Non-cosmological run: times in internal units
 swift-cli output-times --first-snap-time 0 --delta-time 0.1 --final-snap-time 2
 ```
 
+The first output, the final output, the snapshot interval and the snipshot
+interval are each given in one unit (`--first-snap-{z,time,scale-factor}`,
+`--final-snap-...`, `--delta-{z,time,scale-factor,log-scale-factor}`,
+`--snipshot-delta-...`); contradictory, zero or negative values are usage
+errors. `--delta-log-scale-factor` is the interval in log10(a). The final
+output defaults to `Cosmology:a_end` from the parameter file.
+
 The list is written to `--output-list FILE` (default: `output_list.txt` in
-the current directory). The interval (`--delta-*`) chooses the units of the
-list; `--list-units` overrides them. With snipshots the list gets a `Select Output` column.
+the current directory); an existing list is only replaced with `--force`.
+The interval (`--delta-*`) chooses the units of the list; `--list-units`
+overrides them. The list stops at the final output, snapshot and snipshot
+entries are never duplicated (snapshots win), and it must hold at least two
+outputs. With snipshots the list gets a `Select Output` column, and SWIFT
+also needs `Snapshots:select_output_on: 1` and a select-output file (a note
+is printed).
+
 With a cosmology, `--*-time` values are given as ages of the Universe in
 Gyr, and the list is written as ages in SWIFT's *internal* time units
 (UnitLength_in_cgs / UnitVelocity_in_cgs from the parameter file's
 `InternalUnitSystem`), which is what SWIFT expects for a `# Time` list in a
-cosmological run.
+cosmological run. `--no-cosmology` ignores the parameter file's `Cosmology`
+section. Redshifts and scale factors need no cosmology; only times do.
+Conversions follow SWIFT's own cosmology (radiation, neutrinos, w0/wa).
 
 ### `utils`
 
 ```bash
-swift-cli utils softenings --ics ics.hdf5 -P params.yml
+swift-cli utils softenings --ics ics.hdf5
+swift-cli utils softenings --ics ics.hdf5 -P params.yml --softening-coeff 0.04
 ```
 
-Prints the mean interparticle separation and the comoving/maximal physical
-softening of each particle species (coefficient and pivot redshift default
-to the profile's values).
+Prints the mean inter-particle separation and the comoving/maximal physical
+softening of each particle species (dark matter, baryons, neutrinos, and
+the zoom background), using exactly the calculation `new` uses. `-P` is
+optional (the default is the template `new` would pick); the coefficient
+and pivot redshift default to the profile's values.
 
 ## Analysis (`analyse`)
 
@@ -354,33 +456,146 @@ inputs that cannot be used while others can are skipped with a warning.
 Parameter files are always given with `-P/--params` and initial conditions
 with `--ics`.
 
-### Subcommands
+### Timesteps (`analyse timesteps`)
 
 ```bash
-# Timestep files of two runs, CPU time from the threads each run used
+# Timestep files (or logs) of two runs, in core-hours
 swift-cli analyse timesteps run1/timesteps.txt run2/timesteps.txt \
-    -l run1 run2 --threads-per-run 64 128 --time-column redshift
+    -l run1 run2 --cores-per-run 64 128 --time-column redshift
+```
 
-# Gravity accuracy: SWIFT forces vs the exact gravity checks
-swift-cli analyse gravity-checks gravity_checks_exact_step0000.dat
+Plots the cumulative wall-clock and dead time of each run against
+`--time-column`: `auto` (default) uses the scale factor if it varies in
+every input and otherwise time (non-cosmological runs), with a note when it
+falls back; `step`, `time`, `scale-factor` and `redshift` choose
+explicitly. `--cores-per-run N ...` (MPI ranks x threads per rank, one per
+run) turns the times into core-hours.
+`--match-runtimes` trims every run to the shortest x range. The runtime
+comparison table is skipped, with a warning, when the x column is constant
+or decreasing.
+
+Steps repeated after a restart replace the earlier rows ("N rows
+superseded by a restart"), malformed rows are counted and skipped, and gaps
+in the step sequence are warned about and break the plotted lines. The
+`Dead time [ms]` column is optional (older SWIFT versions). The plot is
+`timesteps_analysis/timesteps_analysis.png`.
+
+### Gravity accuracy (`analyse gravity-checks`, `analyse gravity-error-maps`)
+
+```bash
+swift-cli analyse gravity-checks gravity_checks_exact_step0000.dat --all-orders
 swift-cli analyse gravity-error-maps gravity_checks_exact_step0000.dat \
-    --resolution 50
+    --resolution 50 --vmin 1e-6 --vmax 1e-2 --box-size 100
+```
 
-# Task counts printed by engine_print_task_counts
+Both need SWIFT configured with `--enable-gravity-force-checks=N`. Give
+either file of a pair (`gravity_checks_exact_*` or
+`gravity_checks_swift_*`); the counterpart
+(`..._step<N>[_order<K>].dat`) is found next to it and particles are
+matched by ID. An exact file with SWIFT files of several multipole orders
+is compared with the lowest order unless `--all-orders` is given.
+Particles with non-finite values are dropped with a warning, errors are
+undefined where the exact acceleration is zero (counted by
+`gravity-checks`, dropped with a warning by `gravity-error-maps`), and a
+warning is given when the exact and SWIFT positions differ.
+
+`gravity-checks` prints one table per run (median, 90% and 99% error per
+component, the shares below `--min-error` and above `--max-error`, and the
+undefined count) and
+plots error histograms with a percentile summary panel.
+`gravity-error-maps` maps the median relative error per hexagon (or per
+particle for samples of up to 5000) in three projections, plus a binary
+map of the particles above `--thresh` with an error histogram. The colour
+scale runs from the 1st to the 99th percentile of the errors unless
+`--vmin`/`--vmax` are given; distances are measured from the median
+particle position, wrapped periodically with `--box-size L`.
+
+### Task counts (`analyse task-counts`)
+
+```bash
 swift-cli analyse task-counts swift.log --tasks self pair --steps 10 100
+```
 
-# Task-debug (-y) and threadpool (-Y) timings on a shared axis
-swift-cli analyse task-plots thread_info-step64.dat threadpool_info-step64.dat \
+Plots the `engine_print_task_counts` output (SWIFT run with `-v 1`) per
+step. The total uses SWIFT's `System total` (all ranks) when it is printed,
+otherwise the sum of each rank's total; the per-type counts are the tasks
+that run (skipped tasks are one `skipped (any type)` row). A log that only
+has some ranks' counts (typically rank 0 of an MPI run) gives a warning
+and the axis labels say "(rank 0 only)". Unknown `--tasks` names are
+errors.
+
+### Task plots (`analyse task-plots`)
+
+```bash
+# Task-debug (-y) timings, optionally with the threadpool (-Y) dump above
+swift-cli analyse task-plots thread_info-step64.dat \
+    --threadpool threadpool_info-step64.dat \
     --tasks pair/force self/force --activity-plot
+swift-cli analyse task-plots thread_info_MPI-step64.dat --rank 0 --c-type zoom
+```
 
-# Scaling across runs with different MPI rank counts
+Needs SWIFT configured with `--enable-task-debugging` and run with `-y N`
+(and, for `--threadpool`, `--enable-threadpool-debugging` and `-Y N`).
+Every `task_dump_all` layout is read: upstream 11-column (non-MPI) and
+13-column (MPI) dumps, older zoom 17-column MPI rows, and zoom 19/21-column
+dumps; the cell filters (`--c-type`, `--ci-subtype`, ..., by name or index)
+need a 19/21-column dump.
+
+Task, subtype and cell-type names are parsed from the SWIFT source
+(`src/task.c`, `src/cell.h`) of the active profile's checkout, or of
+`--swift-src DIR`, and cached per profile. Without a source tree built-in
+tables are used with a warning; indices outside the tables warn and show
+as `unknown_N`. Unknown `--tasks` labels or cell names are errors listing
+the valid names, and ranks with no matching task are skipped with a
+warning. All ranks share one time window (by default the longest step in
+the dump headers; `--limit`, `--mintic`).
+
+### MPI use (`analyse mpiuse`)
+
+Compares MPI communication recorded by SWIFT when built with
+`--enable-mpiuse-reports`. Each input is a directory, glob, or
+`mpiuse_report-rank*-step*.dat` file set representing one run; several
+inputs are compared side by side.
+
+```bash
+swift-cli analyse mpiuse master_reports fewer_gpart_comms_reports \
+  --labels master fewer_gpart_comms \
+  --prefix gravity_cmp \
+  --format both \
+  --per-rank
+```
+
+Each message is logged by SWIFT as a send and a receive; volumes are
+counted once (from the send side), and bytes sent and received are reported
+separately. The output has per-input summary tables (with `TOTAL send` and
+`TOTAL recv` rows), a cross-input comparison table, per-step and
+per-subtype plots, per-rank sent/received tables and plots with
+`--per-rank`, and per-step CSV files with `--format csv|both`. `--subtypes
+gpart grav_counts` restricts everything, including the in-flight
+high-water mark, to those subtypes; `--steps START END` restricts the
+steps.
+
+### Scaling (`analyse scaling`)
+
+```bash
 swift-cli analyse scaling timers logs/*.log --steps 10 100 -p zoom
+swift-cli analyse scaling timers logs/*.log --rank-source all --swift-src ~/swiftsim
 swift-cli analyse scaling runtime logs/*.log
 ```
 
-`analyse scaling timers` plots the timers whose exclusive time (excluding
-nested timers) is at least `--min-percent-threshold` percent of the step
-time in at least one log (default: 5).
+Both compare logs of runs with at least two different MPI rank counts
+(and warn when their step counts differ by more than 1%).
+`scaling timers` uses the same per-step timer trees as `analyse log` (and
+the same timer database flags `--swift-src`, `--no-match-revision`,
+`--regenerate-db`) and plots the timers whose exclusive time is at least
+`--min-percent-threshold` percent of the step time in at least one log
+(default: 5). `--rank-source root` (default) uses rank 0; `all` uses the
+mean over the ranks that printed timers (`-v 2` logs). A "SCALING INPUTS"
+table lists each log's ranks, steps, step time, timed share and unmatched
+timer lines, and `rank_imbalance_summary.txt` gives each timer's
+max/mean over ranks.
+`scaling runtime` uses the summed step-table wall-clock time. Both leave
+out step 0 and restart rows, like `analyse log`.
 
 ### Log timing analysis (`analyse log`)
 
@@ -392,32 +607,45 @@ swift-cli analyse log swift.log                     # rank 0, all steps
 swift-cli analyse log swift.log --steps 100 200 --top-n 10
 swift-cli analyse log swift.log --rank all          # per rank + imbalance
 swift-cli analyse log swift.log --hierarchy-functions engine_rebuild
+swift-cli analyse log swift.log --swift-src ~/swiftsim --regenerate-db
 ```
 
-- Timers are read from the SWIFT source with tree-sitter. By default the
-  source is taken at the revision printed in the log (extracted with
-  `git archive` from the profile's repository into the profile cache; the
-  checkout is not touched); `--no-match-revision` uses the checkout as it
-  is, and `--swift-src DIR` any other source tree. The parsed database is
+- Timers are read from the SWIFT source with tree-sitter (including
+  `examples/main.c`). By default the source is taken at the revision
+  printed in the log (extracted with `git archive` from the profile's
+  repository into the profile cache; the checkout is not touched);
+  `--no-match-revision` uses the checkout as it is, and `--swift-src DIR`
+  any other source tree (it must contain C files). The parsed database is
   cached and rebuilt only when the source changes (`--regenerate-db`
   forces a rebuild). The share of timer lines matched to the source is
-  always reported.
+  always reported, with a warning when more than 5% are unmatched.
 - The timers of each step are nested into the call tree that actually ran
   (a function called from several places is attributed to the caller that
   contained each call), so nothing is counted twice. All percentages are of
   the step-table wall-clock time: the top-level breakdown, including the
   untimed remainder, sums to 100%. Exclusive (self) times add up; inclusive
-  times of nested timers do not.
+  times of nested timers do not. A warning is given if any step's coverage
+  exceeds 105%.
 - The table row SWIFT prints for step N comes at the start of step N+1, so
   the timers before row N are step N's; those before row 0 are
-  initialisation.
+  initialisation. Timers `main()` prints between steps (for example
+  `task_dump_all`) are reported in a separate "BETWEEN STEPS" table and are
+  not part of any step.
 - MPI ranks are never summed: `--rank N` picks one rank (default 0) and
   `--rank all` analyses each rank and compares them.
+- Interleaved or damaged lines (as written by several ranks at once) are
+  split and rebuilt where possible; a warning reports how many lines were
+  cut, recovered or dropped, and steps whose rows are missing are left out
+  of the per-step analysis.
+- `--steps` outside the log's steps is an error naming the available range.
 
 The console shows a short summary; `log_analysis/analysis_tables.txt` has
 the call tree, the timers by exclusive time, the per-caller breakdown of the
-`--hierarchy-functions`, per-step coverage, initialisation, task categories
-and task counts, alongside the charts.
+`--hierarchy-functions`, the steps whose coverage is outside 90-105%,
+initialisation, the between-steps timers, task categories and task counts,
+alongside the charts. The coverage of every step is in
+`log_analysis/per_step_coverage.csv`. Outputs left from an earlier run in
+the same directory are removed first.
 
 Interpreting the numbers:
 
@@ -435,34 +663,6 @@ Interpreting the numbers:
   `--no-match-revision` or `--swift-src`; the reported match rate shows how
   many timer lines were recognised.
 
-### MPI use analysis (`analyse mpiuse`)
-
-The `analyse mpiuse` subcommand compares MPI communication recorded by
-SWIFT when built with `--enable-mpiuse-reports`.
-
-Each input should be a directory, glob, or single
-`mpiuse_report-rank*-step*.dat` file set representing one run. Multiple
-inputs are compared side by side.
-
-```bash
-# Compare MPI communication between two runs
-swift-cli analyse mpiuse master_reports fewer_gpart_comms_reports \
-  --labels master fewer_gpart_comms \
-  --prefix gravity_cmp \
-  --format both \
-  --per-rank
-```
-
-This produces:
-
-- Per-input ASCII summary tables
-- A cross-input comparison table with byte deltas
-- Per-step and per-subtype plots in `mpiuse_analysis/` (under `--out`)
-- Optional per-step CSV output with `--format csv` or `--format both`
-
-Useful filters include `--subtypes gpart grav_counts` and
-`--steps START END`.
-
 ## Migrating from older versions
 
 - **Profiles**: profile files from before the worktree-based profiles are
@@ -471,7 +671,9 @@ Useful filters include `--subtypes gpart grav_counts` and
   deleted).
 - **Flags**: many flags were renamed for v1.0 (e.g. `-o/--out` is always
   an output directory, `new --path`/`--param` are now `-o/--out`/`--set`,
-  and parameter files use `-P/--params`). See
+  parameter files use `-P/--params`, `analyse task-plots` takes the
+  threadpool dump as `--threadpool FILE` and `analyse timesteps` uses
+  `--cores-per-run`). See
   [CHANGELOG.md](https://github.com/WillJRoper/swiftsim-cli/blob/main/CHANGELOG.md) for the full list.
 
 ## Development
@@ -497,7 +699,8 @@ Project layout:
 - `src/swiftsim_cli/cli.py`: entry point; `multi_mode_args.py`: multi-mode
   parsing
 - `src/swiftsim_cli/modes/`: one module per mode (`analyse/` holds the
-  analysis subcommands)
+  analysis subcommands, `analyse/scaling/` the scaling package)
+- `src/swiftsim_cli/templates/`: the parameter templates used by `new`
 - `src/swiftsim_cli/profile.py`: profile storage and git worktree management
 - `src/swiftsim_cli/swiftsim_dir.py`: configure/build/update helpers
 - `src/swiftsim_cli/timing/`: timer database, log scanning and the per-step

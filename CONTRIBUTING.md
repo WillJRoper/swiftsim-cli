@@ -15,8 +15,11 @@ install time), so in an editable install it goes stale as you commit; re-run
 `pip install -e .` to refresh it.
 
 The pre-commit hooks run ruff (lint and format) and mypy. The mypy hook uses
-the mypy installed in your environment and checks `src` and `tests` with the
-`[tool.mypy]` settings in `pyproject.toml`, exactly as CI does.
+the mypy installed in your environment with the `[tool.mypy]` settings in
+`pyproject.toml`, but checks only the staged Python files (mypy still
+follows their imports), so untracked work-in-progress files cannot break a
+commit. CI runs `mypy` on the whole of `src` and `tests`, so run it
+yourself before opening a pull request.
 
 ## Before opening a pull request
 
@@ -45,6 +48,8 @@ SETUPTOOLS_SCM_PRETEND_VERSION=1.0.0 VIRTUAL_ENV=/tmp/vmin \
     uv pip install --resolution lowest-direct ".[test]"
 /tmp/vmin/bin/python -m pytest -p no:cacheprovider -o addopts="" tests
 ```
+
+Bump a floor only after this passes, and record it in the changelog.
 
 Add tests for new behaviour (see [tests/README.md](tests/README.md)) and a
 line under an "Unreleased" heading in [CHANGELOG.md](CHANGELOG.md) for
