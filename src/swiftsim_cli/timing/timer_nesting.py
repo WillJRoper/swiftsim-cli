@@ -7,7 +7,11 @@ claims earlier, still unclaimed records C (most recent first) when:
 1. statically R can contain C: R is the function timer of F and C is an
    operation of F or C's function is reachable from F; or R is an
    operation of F and C's function is reachable from a call inside R's
-   line range, or C is an operation of F lexically inside R;
+   line range, or C is an operation of F lexically inside R. A record
+   whose function is not in the source (a timer missing from the source
+   revision used) can be contained by any function timer, and contain
+   anything as a function timer; an unmatched operation of a known
+   function can contain what that function reaches;
 2. C ended no earlier than R started (allowing for the 0.1 s resolution
    of the elapsed times printed in the log);
 3. claiming C would not make R's children add up to more than R.
@@ -51,19 +55,27 @@ class Node:
 
 
 def can_contain(outer: Record, inner: Record, db: TimerDB) -> bool:
-    """Whether the source allows ``inner`` to run inside ``outer``."""
-    if outer.kind == "function":
-        if inner.function == outer.function:
-            return inner.kind == "operation"
-        return inner.function in db.reach(outer.function)
-    if outer.timer is None:
-        return False
+    """Whether the source allows ``inner`` to run inside ``outer``.
+
+    Records the source cannot place (their function is not in it, or an
+    unmatched line of a known function) fall back to looser rules, leaving
+    the timing and sum conditions of :func:`build_tree` to decide.
+    """
     if inner.function == outer.function:
+        if outer.kind == "function":
+            return inner.kind == "operation"
         return (
             inner.kind == "operation"
             and inner.timer is not None
+            and outer.timer is not None
             and db.lexically_inside(inner.timer, outer.timer)
         )
+    if not db.knows(inner.function) or not db.knows(outer.function):
+        # Not in the source: any function timer may contain it.
+        return outer.kind == "function"
+    if outer.kind == "function" or outer.timer is None:
+        # An unmatched operation can contain what its function reaches.
+        return inner.function in db.reach(outer.function)
     return inner.function in db.op_reach(outer.timer)
 
 

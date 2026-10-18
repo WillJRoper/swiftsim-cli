@@ -30,6 +30,7 @@ import io
 import json
 import re
 import subprocess
+import sys
 import tarfile
 import tempfile
 from bisect import bisect_right
@@ -50,13 +51,24 @@ if TYPE_CHECKING:
     import tree_sitter
 
 # Bump whenever the database contents or format change.
-PARSER_VERSION = 2
+PARSER_VERSION = 3
 
 # Directories (relative to the parse root) that are never parsed.
 EXCLUDED_DIRS = {"tests", "examples", "argparse"}
 
-# Top-level source paths of a SWIFT checkout.
-SWIFT_SOURCE_PATHS = ("src", "swift.c", "swift_fof.c")
+# Source paths of a SWIFT checkout (older revisions keep main() in
+# examples/main.c and examples/main_fof.c instead of swift.c/swift_fof.c).
+MAIN_FILES = (
+    "swift.c",
+    "swift_fof.c",
+    "examples/main.c",
+    "examples/main_fof.c",
+)
+SWIFT_SOURCE_PATHS = ("src", *MAIN_FILES)
+
+# The function running one step: timers outside its reach print between
+# the steps (e.g. task dumps in main()) and are not part of any step.
+STEP_FUNCTION = "engine_step"
 
 # Milliseconds per unit printed by clocks_getunit().
 UNIT_TO_MS = {
@@ -264,6 +276,10 @@ class LogicalTimer:
     regex: re.Pattern[str] = field(init=False, repr=False, compare=False)
     _label_format: str = field(init=False, repr=False, compare=False)
     _n_labels: int = field(init=False, repr=False, compare=False)
+    _key: str = field(init=False, repr=False, compare=False)
+    _prefix: re.Pattern[str] | None = field(
+        default=None, init=False, repr=False, compare=False
+    )
 
     def __post_init__(self) -> None:
         """Compile the regex and the key template."""
@@ -276,6 +292,16 @@ class LogicalTimer:
             lambda m: "{}" if m.group().endswith("s") else m.group(),
             template,
         )
+        self._key = sys.intern(timer_key(self.function, self.kind, self.label))
+
+    @property
+    def prefix_regex(self) -> re.Pattern[str]:
+        """Regex matching the body up to the time (for truncated lines)."""
+        if self._prefix is None:
+            end = self.pattern.find(_NUMBER)
+            end = len(self.pattern) if end < 0 else end + len(_NUMBER)
+            self._prefix = re.compile(self.pattern[:end])
+        return self._prefix
 
     @property
     def specificity(self) -> int:
@@ -284,11 +310,11 @@ class LogicalTimer:
 
     def key(self, match: re.Match[str]) -> str:
         """Display key of one log line matched by this timer."""
-        label = self.label
-        if self._n_labels:
-            values = [match.group(f"l{i}") for i in range(self._n_labels)]
-            label = self._label_format.format(*values)
-        return timer_key(self.function, self.kind, label)
+        if not self._n_labels:
+            return self._key
+        values = [match.group(f"l{i}") for i in range(self._n_labels)]
+        label = self._label_format.format(*values)
+        return sys.intern(timer_key(self.function, self.kind, label))
 
 
 def timer_key(function: str, kind: str, label: str) -> str:
@@ -339,8 +365,59 @@ class TimerDB:
         for timers in self.by_function.values():
             timers.sort(key=lambda t: -t.specificity)
         self.by_function = dict(self.by_function)
+        self.functions: frozenset[str] = frozenset(
+            {*self.calls, *self.by_function}.union(*self.calls.values())
+        )
         self._reach: dict[str, frozenset[str]] = {}
         self._op_reach: dict[int, frozenset[str]] = {}
+        self._step_reach: frozenset[str] | None = None
+        self._untimed_reach: frozenset[str] | None = None
+
+    def knows(self, function: str) -> bool:
+        """Whether the source defines (or calls) a function of this name."""
+        return function in self.functions
+
+    def in_step(self, function: str) -> bool:
+        """Whether a function's timers can print inside a step.
+
+        False only for functions the source shows cannot run inside
+        ``engine_step``. Functions the source does not know, and every
+        function when the source has no ``engine_step``, count as inside.
+        """
+        if not self.knows(STEP_FUNCTION):
+            return True
+        if self._step_reach is None:
+            self._step_reach = self.reach(STEP_FUNCTION) | {STEP_FUNCTION}
+        return function in self._step_reach or not self.knows(function)
+
+    def outside_step_root(self, function: str) -> bool:
+        """Whether a top-level timer of this function ran between steps.
+
+        True for functions ``main`` calls directly that a step can only
+        reach through functions with their own function timers (e.g.
+        ``task_dump_stats``, also called by ``engine_repartition``): inside
+        a step such a timer would be nested under one of those, so if it
+        is top level, ``main`` called it after the step.
+        """
+        if not self.knows(STEP_FUNCTION):
+            return False
+        if self._untimed_reach is None:
+            seen = {STEP_FUNCTION}
+            stack = [STEP_FUNCTION]
+            while stack:
+                for callee in self.calls.get(stack.pop(), ()):
+                    if callee not in seen:
+                        seen.add(callee)
+                        if not any(
+                            t.kind == "function"
+                            for t in self.by_function.get(callee, ())
+                        ):
+                            stack.append(callee)
+            self._untimed_reach = frozenset(seen)
+        return (
+            function in self.calls.get("main", ())
+            and function not in self._untimed_reach
+        )
 
     def reach(self, function: str) -> frozenset[str]:
         """Every function reachable from ``function`` through calls."""
@@ -400,7 +477,7 @@ def _source_files(root: Path) -> list[Path]:
         if not EXCLUDED_DIRS.intersection(path.relative_to(base).parts)
     ]
     if base != root:
-        files += [root / n for n in ("swift.c", "swift_fof.c")]
+        files += [root / n for n in MAIN_FILES]
     return sorted(p for p in files if p.is_file())
 
 
@@ -718,6 +795,11 @@ def build_timer_db(root: Path) -> dict[str, Any]:
     fallback_sites = 0
     unplaced: list[str] = []
     files = _source_files(root)
+    if not files:
+        raise ValueError(
+            f"no C source files found in {root}; point --swift-src at a "
+            "SWIFT checkout (or its src/ directory)"
+        )
 
     for path in files:
         rel = path.relative_to(root).as_posix()
@@ -750,6 +832,23 @@ def build_timer_db(root: Path) -> dict[str, Any]:
         entry["sites"].append(f"{site['file']}:{site['line']}")
         start = site["start"] if site["start"] is not None else site["line"]
         entry["ranges"].append([site["file"], start, site["line"]])
+
+    # "fof_link_attachable_particles() took ..." inside that very function
+    # times the whole function (unless it has a function timer already).
+    with_function_timer = {
+        e["function"] for e in grouped.values() if e["kind"] == "function"
+    }
+    for entry in grouped.values():
+        name = entry["function"]
+        if (
+            entry["kind"] == "operation"
+            and name not in with_function_timer
+            and re.fullmatch(
+                rf"\s*{re.escape(name)}\s*(?:\(\s*\))?", entry["label"]
+            )
+        ):
+            entry["kind"], entry["label"] = "function", ""
+            with_function_timer.add(name)
 
     op_functions = {
         e["function"] for e in grouped.values() if e["kind"] == "operation"
@@ -794,6 +893,11 @@ def _git_head(root: Path) -> str | None:
         return None
 
 
+def _source_status(root: Path) -> str:
+    """``git status --porcelain`` of the source paths of a checkout."""
+    return git("status", "--porcelain", "--", *SWIFT_SOURCE_PATHS, cwd=root)
+
+
 def source_key(root: Path) -> str:
     """Cache key of a source tree's current state.
 
@@ -806,9 +910,7 @@ def source_key(root: Path) -> str:
     digest = hashlib.sha1()
     head = _git_head(root)
     if head is not None:
-        status = git(
-            "status", "--porcelain", "--", *SWIFT_SOURCE_PATHS, cwd=root
-        )
+        status = _source_status(root)
         digest.update(status.encode())
         for line in status.splitlines():
             name = line.split(maxsplit=1)[-1].split(" -> ")[-1]
@@ -883,8 +985,9 @@ def load_revision_db(
     payload = None if regenerate else _load_cached(path, key)
     if payload is None:
         print(f"Parsing timers at revision {sha[:8]} (git archive) ...")
-        present = set(git("ls-tree", "--name-only", sha, cwd=repo).split())
-        paths = [p for p in SWIFT_SOURCE_PATHS if p in present]
+        paths = git(
+            "ls-tree", "--name-only", sha, "--", *SWIFT_SOURCE_PATHS, cwd=repo
+        ).split()
         archive = subprocess.run(
             ["git", "-C", str(repo), "archive", "--format=tar", sha, *paths],
             capture_output=True,
@@ -903,18 +1006,23 @@ def resolve_timer_db(
     swift_src: Path | None = None,
     match_revision: bool = True,
     regenerate: bool = False,
+    log_dirty: bool = False,
 ) -> tuple[TimerDB, str]:
     """Pick the timer database to analyse a log with.
 
     By default the database is built from the revision the log reports
     (if the profile's repository has it), otherwise from the profile's
-    working tree.
+    working tree. When the log's revision is the checkout's HEAD but the
+    checkout has uncommitted changes, a clean log is analysed with the
+    committed source (``git archive``) and a dirty one with the working
+    tree.
 
     Args:
         log_revision: Commit hash from the log's "Revision:" line.
         swift_src: Explicit source tree to use instead of the profile's.
         match_revision: Whether to build from the log's revision.
         regenerate: Rebuild the database even if cached.
+        log_dirty: Whether the log's revision was marked ``-dirty``.
 
     Returns:
         The database and a one-line description of the choice.
@@ -941,6 +1049,17 @@ def resolve_timer_db(
         status = "revision matching disabled; using the profile's working tree"
     elif head is not None and head.startswith(log_revision):
         status = f"log revision {log_revision} matches the working tree HEAD"
+        if _source_status(root):
+            if not log_dirty:
+                db = load_revision_db(root, log_revision, regenerate)
+                return db, (
+                    f"{status}; the working tree has uncommitted changes, so "
+                    "the committed source was used (git archive)"
+                )
+            status += (
+                " (with uncommitted changes; the log was also written by a "
+                "modified tree)"
+            )
     elif head is not None:
         try:
             db = load_revision_db(root, log_revision, regenerate)

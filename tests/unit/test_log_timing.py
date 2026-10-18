@@ -253,3 +253,126 @@ class TestEndToEnd:
             analyse_swift_log_timings(
                 str(logs_dir / "sample.txt"), output_path=tmp_path, top_n=0
             )
+
+
+ROW = (
+    "{n:8d}   1.0e-05    0.0078125  127.0   0.0e+00    1   56            0"
+    "     100            0            0            0             {wall}"
+    "    265           495.008\n"
+)
+
+
+class TestChecks:
+    """Validation, warnings and outputs added in the second review."""
+
+    def test_step_range_outside_the_log(
+        self, logs_dir, swift_src_dir, tmp_path
+    ):
+        """--steps matching no step names the available range."""
+        with pytest.raises(ValueError, match="the log has steps 1-4"):
+            analyse_swift_log_timings(
+                str(logs_dir / "sample.txt"),
+                output_path=tmp_path,
+                swift_src=swift_src_dir,
+                step_range=(10, 20),
+            )
+        with pytest.raises(ValueError, match="START must not exceed END"):
+            analyse_swift_log_timings(
+                str(logs_dir / "sample.txt"),
+                output_path=tmp_path,
+                swift_src=swift_src_dir,
+                step_range=(3, 2),
+            )
+
+    def test_stale_outputs_removed(
+        self, logs_dir, swift_src_dir, tmp_path, fast_plots
+    ):
+        """Charts an earlier run wrote but this one does not are removed."""
+        out_dir = tmp_path / "log_analysis"
+        out_dir.mkdir()
+        for name in PLOTS:
+            (out_dir / name).touch()
+        analyse_swift_log_timings(
+            str(logs_dir / "zero_time.txt"),
+            output_path=tmp_path,
+            swift_src=swift_src_dir,
+        )
+        assert not (out_dir / "07_time_series.png").exists()
+        assert not (out_dir / "per_step_coverage.csv").exists()
+
+    def test_coverage_csv_and_outliers(
+        self, logs_dir, swift_src_dir, tmp_path, fast_plots
+    ):
+        """Every step goes to the CSV; the text has only outliers."""
+        analyse_swift_log_timings(
+            str(logs_dir / "sample.txt"),
+            output_path=tmp_path,
+            swift_src=swift_src_dir,
+        )
+        out_dir = tmp_path / "log_analysis"
+        rows = (out_dir / "per_step_coverage.csv").read_text().splitlines()
+        assert len(rows) == 5
+        tables = (out_dir / "analysis_tables.txt").read_text()
+        assert "PER-STEP COVERAGE OUTLIERS (rank 0: 0 of 4" in tables
+
+    def test_warnings(self, swift_src_dir, tmp_path, capsys, fast_plots):
+        """Unmatched lines, damaged lines and >105% coverage warn."""
+        log = tmp_path / "w.log"
+        log.write_text(
+            ROW.format(n=0, wall="1.000")
+            + "[00002.0] engine_launch: (tasks) took 900.000 ms.\n"
+            + "[00002.0] mystery_fn: took 300.000 ms.\n"
+            + "[00002.0] engine_collect_end_of_step: took 5.0[00002.1] "
+            "x: y\n"
+            + "[00002.5] task_dump_all: took 400.000 ms.\n"
+            + ROW.format(n=1, wall="1000.000")
+        )
+        analyse_swift_log_timings(
+            str(log), output_path=tmp_path, swift_src=swift_src_dir
+        )
+        captured = capsys.readouterr()
+        err = captured.err
+        assert "match no timer in the SWIFT source" in err
+        assert "had another line appended" in err
+        assert "more than 105% of the wall-clock time in 1 step" in err
+        assert "Timers between steps (not in the step time): 0.4 s" in (
+            captured.out
+        )
+
+    def test_no_elapsed_stamps(self, swift_src_dir, tmp_path, fast_plots):
+        """Without rank-0 elapsed stamps there is no run-time split."""
+        log = tmp_path / "r1.log"
+        log.write_text(
+            ROW.format(n=0, wall="1.000")
+            + "[0001] [00002.0] engine_launch: (tasks) took 9.000 ms.\n"
+            + ROW.format(n=1, wall="10.000")
+        )
+        analyse_swift_log_timings(
+            str(log), output_path=tmp_path, swift_src=swift_src_dir, rank=1
+        )
+        tables = (
+            tmp_path / "log_analysis" / "analysis_tables.txt"
+        ).read_text()
+        assert "Run time" not in tables
+
+
+def test_dense_time_series(tmp_path, fast_plots):
+    """Over DENSE_STEPS steps the time series uses rolling medians."""
+    import numpy as np
+
+    from swiftsim_cli.timing.log_scan import Record, Step
+    from swiftsim_cli.timing.timer_nesting import Node
+    from swiftsim_cli.timing.timing_hierarchy import StepTree, aggregate
+
+    trees = []
+    for n in range(1, timing_plots.DENSE_STEPS + 50):
+        step = Step(number=n, kind="step", wallclock_ms=10.0 + n % 7)
+        rec = Record(0, 1.0, 9.0, "f", "function", "f", None, n)
+        trees.append(StepTree(step, 0, [Node(rec)]))
+    h = aggregate(trees, 0, sum(t.step.wallclock_ms or 0.0 for t in trees))
+    path = timing_plots.step_time_series(trees, h, tmp_path / "t.png", False)
+    assert path is not None and path.is_file()
+    x, y = timing_plots._rolling_median(np.arange(10.0), np.arange(10.0), 5)
+    assert list(x) == [2, 3, 4, 5, 6, 7] and list(y) == [2, 3, 4, 5, 6, 7]
+    x, y = timing_plots._rolling_median(np.arange(3.0), np.arange(3.0), 5)
+    assert len(y) == 3

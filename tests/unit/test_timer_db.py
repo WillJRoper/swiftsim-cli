@@ -9,6 +9,7 @@ import pytest
 
 from swiftsim_cli.timing import timer_db
 from swiftsim_cli.timing.timer_db import (
+    LogicalTimer,
     TimerDB,
     build_timer_db,
     load_source_db,
@@ -109,6 +110,25 @@ class TestParseTimerFormat:
         """No number after 'took' -> not a timer."""
         assert parse_timer_format("took a while") is None
         assert parse_timer_format("nothing here %d") is None
+
+    def test_prefix_regex(self):
+        """The prefix regex matches a line cut after its time."""
+        fmt = parse_timer_format("Doing %s took %.3f %s.")
+        assert fmt is not None
+        timer = LogicalTimer(
+            "f",
+            "operation",
+            fmt.pattern,
+            "Doing %s",
+            ["a.c:1"],
+            [("a.c", 1, 1)],
+        )
+        m = timer.prefix_regex.match("Doing it took 12.5")
+        assert m is not None and m["ms"] == "12.5"
+        assert timer.regex.match("Doing it took 12.5") is None
+        full = timer.regex.match("Doing it took 1 ms.")
+        assert full is not None
+        assert timer.key(full) == "f: Doing it"
 
 
 class TestSyntheticTree:
@@ -295,6 +315,46 @@ class TestCacheAndRevisions:
         assert set(db.by_function) == {"new_fn"}
         assert "matches the working tree" in status
 
+    def test_head_revision_with_dirty_tree(self, tiny_repo):
+        """HEAD + uncommitted changes: a clean log uses the commit."""
+        repo, _ = tiny_repo
+        head = _git(repo, "rev-parse", "HEAD")
+        (repo / "src" / "engine.c").write_text(
+            'void wip_fn(void){ticks t=getticks();message("took %.3f %s.");}'
+        )
+        db, status = resolve_timer_db(head[:10])
+        assert set(db.by_function) == {"new_fn"}
+        assert "uncommitted changes" in status and "git archive" in status
+        db, status = resolve_timer_db(head[:10], log_dirty=True)
+        assert set(db.by_function) == {"wip_fn"}
+        assert "(with uncommitted changes" in status
+
+    def test_old_main_files(self, tiny_repo):
+        """Old revisions keep main() in examples/main.c: it is parsed."""
+        repo, _ = tiny_repo
+        (repo / "examples").mkdir()
+        (repo / "examples" / "main.c").write_text(
+            "int main(void){ticks t=getticks();"
+            'message("Reading initial conditions took %.3f %s.",1,"");}'
+        )
+        (repo / "examples" / "other.c").write_text(
+            'void ex(void){ticks t=getticks();message("took %.3f %s.");}'
+        )
+        _git(repo, "add", ".")
+        _git(repo, "commit", "-qm", "three")
+        sha = _git(repo, "rev-parse", "HEAD")
+        _git(repo, "commit", "-q", "--allow-empty", "-m", "four")
+        db, status = resolve_timer_db(sha[:8])
+        assert "matched log revision" in status
+        assert "main" in db.by_function and "ex" not in db.by_function
+        db, _ = resolve_timer_db(None)
+        assert "main" in db.by_function
+
+    def test_empty_source_tree_is_an_error(self, tmp_path):
+        """A --swift-src without C files is an error, not an empty DB."""
+        with pytest.raises(ValueError, match="no C source files"):
+            resolve_timer_db(None, swift_src=tmp_path)
+
     def test_no_match_revision(self, tiny_repo):
         """--no-match-revision uses the working tree."""
         _, first = tiny_repo
@@ -380,3 +440,22 @@ class TestCacheAndRevisions:
         files = list(timer_db._db_cache_dir().glob("tree-*.json"))
         assert len(files) == 1
         assert json.loads(files[0].read_text())["key"] == source_key(repo)
+
+
+def test_own_name_label_is_a_function_timer(tmp_path):
+    """'f() took (FOF SCALING): ...' inside f times all of f."""
+    (tmp_path / "fof.c").write_text(
+        "void f(void){ticks t=getticks();"
+        'message("f() took (FOF SCALING): %.3f %s.",1,"");}\n'
+        "void g(void){ticks t=getticks();"
+        'message("g() took (FOF SCALING): %.3f %s.",1,"");'
+        'message("took %.3f %s.",1,"");}\n'
+    )
+    db = TimerDB(build_timer_db(tmp_path))
+    (f,) = db.by_function["f"]
+    assert (f.kind, f.label) == ("function", "")
+    # g already has a function timer: its labelled one stays an op
+    assert sorted(t.kind for t in db.by_function["g"]) == [
+        "function",
+        "operation",
+    ]

@@ -11,12 +11,35 @@ before the first row are initialisation (row 0's wall-clock time is
 ``engine_init_particles``; a restarted run's first row has a wall-clock
 time of 0.000). Records after the last row belong to an incomplete step
 with no wall-clock time.
+
+MPI ranks (``-v 2``): step rows are printed by rank 0 only, and other
+ranks' lines may reach the log after rank 0's row of the step they belong
+to. Rank 0 records are assigned by log position; a record of another rank
+is assigned to the earliest step whose closing row was printed at or after
+its elapsed time (rank 0's last elapsed time before the row), so a late
+line still lands in its own step. Elapsed times are printed to 0.1 s, so
+records within 0.1 s of a row go to the step that row closes.
+
+Damaged lines: output of several threads can interleave, appending one
+line to another (``... took 280.495 m[25656.3] other: ...``). Such lines
+are split at the embedded ``[elapsed]`` stamp. A cut timer line is still
+recognised when its text up to a complete time matches a known timer (the
+unit is then assumed to be ms). Otherwise, as the displaced rest of a cut
+line usually follows on a line of its own (``nch: (tasks) took 3.2 ms.``),
+the start is kept and joined with the next unprefixed line that is not a
+step row; what still cannot be read is dropped and counted. Step rows are
+recovered the same way. A step closed after missing rows is marked
+``gap`` (its records span several steps but its wall-clock time is one
+step's) and left out of the per-step analysis.
 """
 
 from __future__ import annotations
 
 import re
+import sys
+from bisect import bisect_left
 from collections import Counter, defaultdict
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -33,6 +56,10 @@ from swiftsim_cli.utilities.step_table import (
 
 # "[rank] [elapsed] function: body" (the rank only appears in MPI runs).
 _PREFIX = re.compile(r"^(?:\[(\d+)\]\s+)?\[([\d.]+)\]\s+(\w+):\s+(.*)$")
+# An "[rank] [elapsed]" stamp inside a line: the start of another line.
+_STAMP = re.compile(r"(?:\[\d+\]\s+)?\[\d+\.\d\]")
+# A time printed in full (SWIFT prints three decimals).
+_FULL_TIME = re.compile(r"\.\d{3}$")
 # Any timing line, used for lines no known timer matches.
 _GENERIC_TOOK = re.compile(
     r"^(?P<label>.*?)\s*took\b\s*:?\s*(?:\([^)]*\)\s*:?\s*)?"
@@ -97,7 +124,9 @@ class Step:
 
     Attributes:
         number: Step number (the number of the row that closes it).
-        kind: "init", "step" or "incomplete" (no closing row).
+        kind: "init", "step", "gap" (closed after missing step rows, so
+            its records span several steps) or "incomplete" (no closing
+            row).
         wallclock_ms: The row's wall-clock time.
         sim_time: The row's simulation time.
         records: Timer records per rank, in log order.
@@ -133,6 +162,11 @@ class LogScan:
         timer_ranks: Ranks that printed timer lines.
         init_end_s: Rank-0 elapsed time when the first row was printed.
         last_elapsed_s: Last rank-0 elapsed time in the log.
+        step_gaps: (previous, next) step numbers of rows out of sequence.
+        cut_lines: Lines another line was appended to.
+        recovered: Damaged timer lines still matched to a timer.
+        recovered_rows: Damaged step rows still read.
+        lost: Damaged lines that could not be read (dropped).
     """
 
     steps: list[Step]
@@ -145,11 +179,16 @@ class LogScan:
     timer_ranks: set[int] = field(default_factory=set)
     init_end_s: float | None = None
     last_elapsed_s: float = 0.0
+    step_gaps: list[tuple[int, int]] = field(default_factory=list)
+    cut_lines: int = 0
+    recovered: int = 0
+    recovered_rows: int = 0
+    lost: int = 0
 
     @property
     def complete_steps(self) -> list[Step]:
         """Steps closed by a row (excluding initialisation)."""
-        return [s for s in self.steps if s.kind == "step"]
+        return [s for s in self.steps if s.kind in ("step", "gap")]
 
     @property
     def init_step(self) -> Step | None:
@@ -168,13 +207,15 @@ def parse_revision(text: str) -> tuple[str | None, bool]:
     return sha.group(1), sha.group(2) is not None
 
 
-def read_log_revision(path: str | Path, max_lines: int = 500) -> str | None:
-    """Commit hash a log was written by (from its header), if printed."""
+def read_log_revision(
+    path: str | Path, max_lines: int = 500
+) -> tuple[str | None, bool]:
+    """Commit hash a log was written by and whether it was ``-dirty``."""
     with open(path, encoding="utf-8", errors="ignore") as handle:
         for _, line in zip(range(max_lines), handle):
             if "Revision:" in line:
-                return parse_revision(line)[0]
-    return None
+                return parse_revision(line)
+    return None, False
 
 
 def _unknown_record(
@@ -185,12 +226,15 @@ def _unknown_record(
     if m is None:
         return None
     label = re.sub(r"\d+(?:\.\d+)?", "#", " ".join(m.group("label").split()))
+    func = sys.intern(func)
     unparenthesised = re.sub(r"\([^)]*\)", "", label)
+    if unparenthesised.strip() == func:
+        label = unparenthesised = ""  # "func() took ...": the whole function
     kind = (
         "operation" if re.search(r"[A-Za-z]", unparenthesised) else "function"
     )
     ms = float(m.group("ms")) * UNIT_TO_MS.get(m.group("unit") or "ms", 1.0)
-    key = "unknown:" + timer_key(func, kind, label)
+    key = sys.intern("unknown:" + timer_key(func, kind, label))
     return Record(rank, elapsed, ms, func, kind, key, None, line)
 
 
@@ -228,6 +272,24 @@ def _add_task_count_line(
         step.task_counts.append(block)
 
 
+def _match_timer(
+    timers: Sequence[LogicalTimer], body: str, cut: bool
+) -> tuple[LogicalTimer, re.Match[str]] | None:
+    """The timer matching a line body (or, for a cut line, its start)."""
+    for timer in timers:
+        tm = timer.regex.match(body)
+        if tm is not None:
+            return timer, tm
+    if cut:
+        for timer in timers:
+            tm = timer.prefix_regex.match(body)
+            if tm is not None and (
+                tm.end() < len(body) or _FULL_TIME.search(tm["ms"])
+            ):
+                return timer, tm
+    return None
+
+
 def scan_log(path: str | Path, db: TimerDB | None = None) -> LogScan:
     """Scan a SWIFT log in one pass.
 
@@ -245,6 +307,11 @@ def scan_log(path: str | Path, db: TimerDB | None = None) -> LogScan:
     open_blocks: dict[int, TaskCountSnapshot] = {}
     by_function = db.by_function if db is not None else {}
     last_number: int | None = None
+    # Rank-0 elapsed time at each closed row (parallel to scan.steps).
+    boundaries: list[float] = []
+    # The start of a cut line that could not be read on its own: its rest
+    # may follow on a later line of its own.
+    head = ""
 
     def close(row: dict[str, float]) -> None:
         nonlocal current, last_number
@@ -257,66 +324,119 @@ def scan_log(path: str | Path, db: TimerDB | None = None) -> LogScan:
             scan.init_end_s = scan.last_elapsed_s
             scan.restart = wall == 0.0
             current.kind = "init" if number == 0 or wall == 0.0 else "step"
+        elif number != last_number + 1:
+            current.kind = "gap"
+            scan.step_gaps.append((last_number, number))
         else:
             current.kind = "step"
         scan.steps.append(current)
+        boundaries.append(scan.last_elapsed_s)
         last_number = number
         current = Step(number=number + 1)
 
+    def step_of(rank: int, elapsed: float) -> Step:
+        if rank == 0 or not boundaries or elapsed > boundaries[-1]:
+            return current
+        return scan.steps[bisect_left(boundaries, elapsed)]
+
+    def set_head(line: str) -> None:
+        nonlocal head
+        scan.lost += bool(head)
+        head = line
+
     with open(path, encoding="utf-8", errors="ignore") as handle:
         for line_no, raw in enumerate(handle, 1):
-            line = raw.rstrip()
-            m = _PREFIX.match(line)
-            if m is None:
-                if scan.revision is None and "Revision:" in line:
-                    scan.revision, scan.revision_dirty = parse_revision(line)
-                row = table.feed(line)
-                if row is not None:
-                    close(row)
-                continue
+            rest = raw.rstrip()
+            joined = False
+            while rest:
+                line, rest, was_joined = rest, "", joined
+                joined = cut = False
+                m = _PREFIX.match(line)
+                start = m.start(4) if m else 1
+                if line.find("[", start) >= 0 and (
+                    stamp := _STAMP.search(line, start)
+                ):
+                    line, rest, cut = (
+                        line[: stamp.start()],
+                        line[stamp.start() :],
+                        True,
+                    )
+                    scan.cut_lines += 1
+                    if m is not None:
+                        m = _PREFIX.match(line)
+                if m is None:
+                    if scan.revision is None and "Revision:" in line:
+                        scan.revision, scan.revision_dirty = parse_revision(
+                            line
+                        )
+                    row = table.feed(line)
+                    if row is not None:
+                        scan.recovered_rows += cut or was_joined
+                        close(row)
+                    elif head and not cut and line.strip():
+                        # The rest of a cut line, printed on a later line.
+                        rest, head, joined = head + line, "", True
+                    elif cut and not was_joined:
+                        set_head(line)
+                    elif was_joined:
+                        scan.lost += 1
+                    continue
 
-            rank = int(m[1]) if m[1] else 0
-            elapsed = float(m[2])
-            func, body = m[3], m[4]
-            if rank == 0:
-                scan.last_elapsed_s = elapsed
+                rank = int(m[1]) if m[1] else 0
+                elapsed = float(m[2])
+                func, body = m[3], m[4]
+                if rank == 0:
+                    scan.last_elapsed_s = elapsed
+                timers = by_function.get(func, ())
+                if cut and not was_joined and (not body or timers):
+                    found = _match_timer(timers, body, True) if body else None
+                    if found is None:
+                        set_head(line)
+                        continue
+                damaged = cut or was_joined
 
-            if db is not None and "took" in body:
-                record = None
-                for timer in by_function.get(func, ()):
-                    tm = timer.regex.match(body)
-                    if tm is not None:
+                if db is not None and "took" in body:
+                    record = None
+                    found = _match_timer(timers, body, damaged)
+                    if found is not None:
+                        timer, tm = found
                         unit = tm.groupdict().get("unit") or "ms"
                         record = Record(
                             rank,
                             elapsed,
                             float(tm["ms"]) * UNIT_TO_MS.get(unit, 1.0),
-                            func,
+                            timer.function,
                             timer.kind,
                             timer.key(tm),
                             timer,
                             line_no,
                         )
                         scan.matched += 1
-                        break
-                else:
-                    record = _unknown_record(
-                        func, body, rank, elapsed, line_no
-                    )
+                        scan.recovered += damaged
+                    elif damaged:
+                        scan.lost += 1
+                    else:
+                        record = _unknown_record(
+                            func, body, rank, elapsed, line_no
+                        )
+                        if record is not None:
+                            scan.unmatched[record.key[len("unknown:") :]] += 1
                     if record is not None:
-                        scan.unmatched[record.key[len("unknown:") :]] += 1
-                if record is not None:
-                    current.records[rank].append(record)
-                    scan.timer_ranks.add(rank)
-            elif func == "scheduler_report_task_times":
-                if cm := _TASK_CATEGORY.match(body):
-                    category = cm[1].strip()
-                    if category.lower() != "total":
-                        current.task_categories[rank][category] += float(cm[2])
-            elif func == "engine_print_task_counts":
-                _add_task_count_line(body, rank, line_no, open_blocks, current)
-            elif func == "main" and (mm := _MPI_RANKS.search(body)):
-                scan.n_ranks = int(mm[1])
+                        step_of(rank, elapsed).records[rank].append(record)
+                        scan.timer_ranks.add(rank)
+                elif func == "scheduler_report_task_times":
+                    if cm := _TASK_CATEGORY.match(body):
+                        category = cm[1].strip()
+                        if category.lower() != "total":
+                            current.task_categories[rank][category] += float(
+                                cm[2]
+                            )
+                elif func == "engine_print_task_counts":
+                    _add_task_count_line(
+                        body, rank, line_no, open_blocks, current
+                    )
+                elif func == "main" and (mm := _MPI_RANKS.search(body)):
+                    scan.n_ranks = int(mm[1])
 
     if current.records or current.task_counts or current.task_categories:
         scan.steps.append(current)

@@ -123,14 +123,16 @@ class TestMatching:
             "[00001.0] mystery: Doing 12 things took 1.5 ms.\n"
             "[00001.1] mystery: took 2.0 ms.\n"
             "[00001.1] mystery: nothing took place here\n"
+            "[00001.2] mystery: mystery() took (FOF SCALING): 4.0 ms.\n"
         )
         scan = scan_log(log, synthetic_db)
         records = scan.steps[0].records[0]
         assert [(r.key, r.kind, r.ms) for r in records] == [
             ("unknown:mystery: Doing # things", "operation", 1.5),
             ("unknown:mystery", "function", 2.0),
+            ("unknown:mystery", "function", 4.0),
         ]
-        assert scan.unmatched == {"mystery: Doing # things": 1, "mystery": 1}
+        assert scan.unmatched == {"mystery: Doing # things": 1, "mystery": 2}
         assert scan.steps[0].kind == "incomplete"
 
     def test_runtime_label_and_unit(self, synthetic_db, tmp_path):
@@ -233,7 +235,144 @@ class TestRevision:
 
     def test_read_log_revision(self, logs_dir, tmp_path):
         """The revision is read from the log header."""
-        assert read_log_revision(logs_dir / "sample.txt") == "9ee518c2"
+        assert read_log_revision(logs_dir / "sample.txt") == (
+            "9ee518c2",
+            False,
+        )
         empty = tmp_path / "empty.log"
         empty.write_text("nothing\n")
-        assert read_log_revision(empty) is None
+        assert read_log_revision(empty) == (None, False)
+
+
+WARNING = "hydro_part_has_no_neighbours: WARNING: Gas particle treated badly."
+
+
+class TestDamagedLines:
+    """Lines with other output appended (from real interleaved logs)."""
+
+    def _scan(self, synthetic_db, tmp_path, text):
+        log = tmp_path / "log.txt"
+        log.write_text(ROW.format(n=0, wall="1.000") + text)
+        return scan_log(log, synthetic_db)
+
+    def test_time_read_up_to_the_cut(self, synthetic_db, tmp_path):
+        """A cut after a complete time keeps the timer (ms assumed)."""
+        scan = self._scan(
+            synthetic_db,
+            tmp_path,
+            f"[00002.0] engine_launch: (tasks) took 280.495 m[00002.1] "
+            f"{WARNING}\n"
+            f"[00002.0] engine_prepare: took 10.089 ms (including unskip, "
+            f"rebuild and rewei[00002.1] {WARNING}\n"
+            f"[00002.0] engine_collect_end_of_step: took 7.867[00002.1] "
+            f"{WARNING}\n" + ROW.format(n=1, wall="300.000"),
+        )
+        step = _step(scan, 1)
+        assert {r.key: r.ms for r in step.records[0]} == {
+            "engine_launch (tasks)": pytest.approx(280.495),
+            "engine_prepare": pytest.approx(10.089),
+            "engine_collect_end_of_step": pytest.approx(7.867),
+        }
+        assert scan.cut_lines == 3 and scan.recovered == 3
+        assert not scan.unmatched and scan.lost == 0
+
+    def test_truncated_time_joined_with_its_rest(self, synthetic_db, tmp_path):
+        """An incomplete time is joined with the rest on a later line."""
+        scan = self._scan(
+            synthetic_db,
+            tmp_path,
+            f"[00002.0] engine_launch: (tasks) to[00002.1] {WARNING}\n"
+            f"[00002.1] {WARNING}\n"
+            "ok 3439.710 ms.\n"
+            f"[00002.0] engine_unskip: took 3[00002.1] {WARNING}\n"
+            "1.250 ms.\n" + ROW.format(n=1, wall="3500.000"),
+        )
+        keys = {r.key: r.ms for r in _step(scan, 1).records[0]}
+        assert keys["engine_launch (tasks)"] == pytest.approx(3439.71)
+        assert keys["engine_unskip"] == pytest.approx(31.25)
+        assert scan.recovered == 2 and scan.lost == 0
+
+    def test_prefix_cut_mid_name(self, synthetic_db, tmp_path):
+        """'[el] engine_lau' + later 'nch: ...' is one line again."""
+        scan = self._scan(
+            synthetic_db,
+            tmp_path,
+            f"[00002.0] engine_lau[00002.1] {WARNING}\n"
+            "nch: (tasks) took 1931.072 ms.\n"
+            f"[00003.0[00003.1] {WARNING}\n"
+            "] engine_launch: (tasks) took 100.000 ms.\n"
+            + ROW.format(n=1, wall="2100.000"),
+        )
+        recs = _step(scan, 1).records[0]
+        assert [r.ms for r in recs] == [1931.072, 100.0]
+        assert recs[0].elapsed == 2.0 and recs[1].elapsed == 3.0
+
+    def test_cut_step_row_rejoined(self, synthetic_db, tmp_path):
+        """A step row cut by a warning is rebuilt from its displaced rest."""
+        row = ROW.format(n=1, wall="146.776").rstrip("\n")
+        head, tail = row[: row.index("265")], row[row.index("265") :]
+        scan = self._scan(
+            synthetic_db,
+            tmp_path,
+            "[00002.0] engine_launch: (tasks) took 140.000 ms.\n"
+            f"{head}[00002.1] {WARNING}\n{tail}\n",
+        )
+        assert _step(scan, 1).wallclock_ms == pytest.approx(146.776)
+        assert scan.recovered_rows == 1 and not scan.step_gaps
+
+    def test_unreadable_fragment_dropped(self, synthetic_db, tmp_path):
+        """What cannot be rebuilt is counted, not made an unknown timer."""
+        scan = self._scan(
+            synthetic_db,
+            tmp_path,
+            f"[00002.0] engine_unskip: took 3[00002.1] {WARNING}\n"
+            f"[00002.0] engine_prepare: took 1[00002.1] {WARNING}\n"
+            + ROW.format(n=1, wall="1.000"),
+        )
+        assert scan.lost == 1  # the first head was replaced
+        assert not scan.unmatched and not _step(scan, 1).records[0]
+
+    def test_missing_row_marks_a_gap(self, synthetic_db, tmp_path):
+        """A step closed after a lost row is a gap, not a clean step."""
+        log = tmp_path / "log.txt"
+        log.write_text(
+            ROW.format(n=0, wall="1.000")
+            + ROW.format(n=1, wall="2.000")
+            + ROW.format(n=3, wall="3.000")
+            + ROW.format(n=4, wall="4.000")
+        )
+        scan = scan_log(log, synthetic_db)
+        assert [(s.number, s.kind) for s in scan.steps] == [
+            (0, "init"),
+            (1, "step"),
+            (3, "gap"),
+            (4, "step"),
+        ]
+        assert scan.step_gaps == [(1, 3)]
+        assert [s.number for s in scan.complete_steps] == [1, 3, 4]
+
+
+class TestLateRankLines:
+    """-v 2: other ranks' lines reaching the log after rank 0's row."""
+
+    def test_assigned_by_elapsed_time(self, synthetic_db, tmp_path):
+        """A late rank-1 line goes to the step its elapsed time is in."""
+        log = tmp_path / "log.txt"
+        log.write_text(
+            ROW.format(n=0, wall="1.000")
+            + "[0000] [00010.0] engine_launch: (tasks) took 900.000 ms.\n"
+            + ROW.format(n=1, wall="1000.000")
+            # rank 1's step-1 timers, printed after rank 0's row 1
+            + "[0001] [00009.9] engine_launch: (tasks) took 800.000 ms.\n"
+            + "[0001] [00010.0] engine_collect_end_of_step: took 5.0 ms.\n"
+            # step 2 (rank 0 by position, rank 1 by time)
+            + "[0000] [00011.0] engine_launch: (tasks) took 950.000 ms.\n"
+            + "[0001] [00010.9] engine_launch: (tasks) took 850.000 ms.\n"
+            + ROW.format(n=2, wall="1000.000")
+        )
+        scan = scan_log(log, synthetic_db)
+        s1, s2 = _step(scan, 1), _step(scan, 2)
+        assert [r.ms for r in s1.records[1]] == [800.0, 5.0]
+        assert [r.ms for r in s2.records[1]] == [850.0]
+        assert [r.ms for r in s1.records[0]] == [900.0]
+        assert [r.ms for r in s2.records[0]] == [950.0]

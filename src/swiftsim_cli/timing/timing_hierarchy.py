@@ -15,19 +15,30 @@ entries overlap and cannot be summed.
 The step time is the sum of the step-table wall-clock times of the steps
 analysed. The top-level breakdown (the timers not contained in any other,
 plus the untimed remainder) sums to 100% of it.
+
+Timers of functions that cannot run inside ``engine_step`` (e.g. the task
+dumps ``main`` does after a step) print between two step rows but are not
+part of either step's wall-clock time; they are kept apart as "between
+steps" and left out of the step trees and the step time.
 """
 
 from __future__ import annotations
 
+import csv
 from collections import defaultdict
 from dataclasses import dataclass, field
+from pathlib import Path as FilePath
 
-from swiftsim_cli.timing.log_scan import Step
+from swiftsim_cli.timing.log_scan import Record, Step
 from swiftsim_cli.timing.timer_db import TimerDB
 from swiftsim_cli.timing.timer_nesting import Node, build_tree
 from swiftsim_cli.utilities.tables import create_ascii_table
 
 UNTIMED = "untimed in step"
+
+# Per-step coverage outside these bounds (percent) is reported.
+COVERAGE_LOW = 90.0
+COVERAGE_HIGH = 105.0
 
 Path = tuple[str, ...]
 
@@ -63,6 +74,7 @@ class StepTree:
     step: Step
     rank: int
     roots: list[Node]
+    between: list[Record] = field(default_factory=list)
 
     @property
     def timed(self) -> float:
@@ -79,21 +91,53 @@ class StepTree:
 def build_step_trees(
     steps: list[Step], rank: int, db: TimerDB
 ) -> list[StepTree]:
-    """Nest the records of one rank in each step."""
-    return [
-        StepTree(step, rank, build_tree(step.records.get(rank, []), db))
-        for step in steps
-    ]
+    """Nest the records of one rank in each step.
+
+    Outside initialisation, records of functions that cannot run inside a
+    step, and top-level records ``main`` must have printed after the step
+    (see :meth:`TimerDB.outside_step_root`), go to
+    :attr:`StepTree.between` instead of the tree.
+    """
+    trees = []
+    for step in steps:
+        records = step.records.get(rank, [])
+        between: list[Record] = []
+        if step.kind != "init":
+            inside: list[Record] = []
+            for record in records:
+                (inside if db.in_step(record.function) else between).append(
+                    record
+                )
+            records = inside
+        roots = build_tree(records, db)
+        if step.kind != "init":
+            outside = [
+                n for n in roots if db.outside_step_root(n.record.function)
+            ]
+            if outside:
+                roots = [n for n in roots if n not in outside]
+                between.extend(n.record for n in outside)
+        trees.append(StepTree(step, rank, roots, between))
+    return trees
 
 
 def select_steps(
-    steps: list[Step], step_range: tuple[int, int] | None
+    steps: list[Step],
+    step_range: tuple[int, int] | None,
+    kinds: tuple[str, ...] = ("step",),
 ) -> list[Step]:
-    """Complete steps with a wall-clock time, optionally within a range."""
+    """Steps with a wall-clock time, optionally within a range.
+
+    Args:
+        steps: The scanned steps.
+        step_range: Inclusive (first, last) step numbers, or None.
+        kinds: Step kinds to keep; by default only clean steps (not
+            initialisation, incomplete steps or steps after missing rows).
+    """
     return [
         s
         for s in steps
-        if s.kind == "step"
+        if s.kind in kinds
         and s.wallclock_ms
         and (step_range is None or step_range[0] <= s.number <= step_range[1])
     ]
@@ -110,6 +154,8 @@ class Hierarchy:
         total: The denominator: summed wall-clock time of the steps (ms).
         n_steps: Number of steps aggregated.
         negative: Nodes whose children add up to more than 1% over them.
+        between: Timers printed between steps, per key (not in ``paths``
+            or the step time).
     """
 
     rank: int
@@ -118,6 +164,7 @@ class Hierarchy:
     total: float
     n_steps: int
     negative: int = 0
+    between: dict[str, PathStats] = field(default_factory=dict)
     _children: dict[Path, list[Path]] = field(default_factory=dict, repr=False)
 
     def __post_init__(self) -> None:
@@ -234,10 +281,19 @@ def aggregate(trees: list[StepTree], rank: int, total: float) -> Hierarchy:
         for child in node.children:
             walk(child, path, step)
 
+    between: dict[str, PathStats] = defaultdict(PathStats)
     for tree in trees:
         for root in tree.roots:
             walk(root, (), tree.step.number)
-    return Hierarchy(rank, dict(paths), kinds, total, len(trees), negative)
+        for record in tree.between:
+            stats = between[record.key]
+            stats.calls += 1
+            stats.inclusive += record.ms
+            stats.max = max(stats.max, record.ms)
+            stats.steps.add(tree.step.number)
+    return Hierarchy(
+        rank, dict(paths), kinds, total, len(trees), negative, dict(between)
+    )
 
 
 def hierarchy_for(
@@ -492,31 +548,72 @@ def rank_imbalance_table(hierarchies: dict[int, Hierarchy], top_n: int) -> str:
     )
 
 
-def coverage_table(trees: list[StepTree]) -> str:
-    """Per-step wall-clock time, timed time and coverage."""
-    rows = []
-    for tree in trees:
-        wall = tree.step.wallclock_ms or 0.0
-        top = max(tree.roots, key=lambda n: n.inclusive, default=None)
-        rows.append(
-            [
-                tree.step.number,
-                _fmt(wall),
-                _fmt(tree.timed),
-                _pct(tree.coverage or 0.0),
-                _fmt(wall - tree.timed),
-                top.record.key if top else "",
-            ]
-        )
+def between_steps_table(h: Hierarchy, top_n: int) -> str:
+    """Timers printed between steps (not part of the step time)."""
+    rows = [
+        [key, _fmt(s.inclusive), s.calls, _fmt(s.max)]
+        for key, s in sorted(h.between.items(), key=lambda b: -b[1].inclusive)
+    ]
     return create_ascii_table(
-        [
-            "Step",
-            "Wall-clock (ms)",
-            "Timed (ms)",
-            "Coverage",
-            "Untimed (ms)",
-            "Largest timer",
-        ],
-        rows,
-        f"PER-STEP COVERAGE (rank {trees[0].rank})" if trees else "",
+        ["Timer", "Time (ms)", "Calls", "Max (ms)"],
+        rows[:top_n],
+        f"BETWEEN STEPS (rank {h.rank}; outside every step's wall-clock "
+        "time, not counted above)",
+    )
+
+
+def coverage_outliers(trees: list[StepTree]) -> list[StepTree]:
+    """Steps whose coverage is outside [COVERAGE_LOW, COVERAGE_HIGH]."""
+    return [
+        t
+        for t in trees
+        if t.coverage is not None
+        and not COVERAGE_LOW <= t.coverage <= COVERAGE_HIGH
+    ]
+
+
+def _coverage_row(tree: StepTree) -> list[object]:
+    wall = tree.step.wallclock_ms or 0.0
+    top = max(tree.roots, key=lambda n: n.inclusive, default=None)
+    return [
+        tree.step.number,
+        f"{wall:.3f}",
+        f"{tree.timed:.3f}",
+        f"{tree.coverage or 0.0:.1f}",
+        f"{wall - tree.timed:.3f}",
+        top.record.key if top else "",
+    ]
+
+
+_COVERAGE_HEADERS = [
+    "Step",
+    "Wall-clock (ms)",
+    "Timed (ms)",
+    "Coverage (%)",
+    "Untimed (ms)",
+    "Largest timer",
+]
+
+
+def write_coverage_csv(trees: list[StepTree], path: FilePath) -> FilePath:
+    """Write the per-step coverage of every step to a CSV file."""
+    with open(path, "w", newline="", encoding="utf-8") as handle:
+        writer = csv.writer(handle)
+        writer.writerow(_COVERAGE_HEADERS)
+        writer.writerows(_coverage_row(t) for t in trees)
+    return path
+
+
+def coverage_table(trees: list[StepTree], top_n: int) -> str:
+    """The ``top_n`` steps whose coverage is furthest outside the bounds."""
+    outliers = sorted(
+        coverage_outliers(trees), key=lambda t: -abs((t.coverage or 0) - 100)
+    )
+    rank = trees[0].rank if trees else 0
+    return create_ascii_table(
+        _COVERAGE_HEADERS,
+        [_coverage_row(t) for t in outliers[:top_n]],
+        f"PER-STEP COVERAGE OUTLIERS (rank {rank}: {len(outliers)} of "
+        f"{len(trees)} steps outside {COVERAGE_LOW:.0f}-"
+        f"{COVERAGE_HIGH:.0f}%, worst first)",
     )

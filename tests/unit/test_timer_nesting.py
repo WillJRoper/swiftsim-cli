@@ -201,13 +201,50 @@ class TestClaimingRules:
         assert [c.record.line for c in f_root.children[0].children] == [1]
 
     def test_unknown_records(self):
-        """Unknown timers nest by function name; unknown ops claim nothing."""
+        """Unmatched lines of known functions nest by reach."""
         db = _db()
         unknown_g = Record(0, 1.0, 1, "g", "function", "unknown:g", None, 1)
         unknown_op = Record(
             0, 1.0, 2, "f", "operation", "unknown:f: x", None, 2
         )
         f = _rec(db, "f", "function", 10, 1.0, line=3)
-        assert not can_contain(unknown_op, unknown_g, db)
+        # An unmatched op of f may contain what f reaches.
+        assert can_contain(unknown_op, unknown_g, db)
+        h = Record(0, 1.0, 1, "h", "function", "unknown:h", None, 4)
+        assert not can_contain(unknown_op, h, db)
         (root,) = build_tree([unknown_g, unknown_op, f], db)
-        assert [c.record.line for c in root.children] == [1, 2]
+        assert [c.record.line for c in root.children] == [2]
+        assert [c.record.line for c in root.children[0].children] == [1]
+
+    def test_functions_missing_from_source(self):
+        """Timers of functions the source lacks nest by timing and sum.
+
+        A timer missing from the source revision used (e.g. a log written
+        by another revision) used to stay at the top level, double
+        counting it with the timer that contained it.
+        """
+        db = _db()
+        new = Record(
+            0, 1.0, 4, "new_fn", "function", "unknown:new_fn", None, 1
+        )
+        f = _rec(db, "f", "function", 10, 1.0, line=2)
+        assert can_contain(f, new, db)
+        (root,) = build_tree([new, f], db)
+        assert root.record is f and root.children[0].record is new
+        # As an outer function timer it may contain known functions...
+        g = _rec(db, "g", "function", 1, 1.0, line=1)
+        new_outer = Record(
+            0, 1.0, 4, "new_fn", "function", "unknown:new_fn", None, 2
+        )
+        assert can_contain(new_outer, g, db)
+        # ... but an unknown op of an unknown function contains nothing.
+        new_op = Record(
+            0, 1.0, 4, "new_fn", "operation", "unknown:new_fn: x", None, 2
+        )
+        assert not can_contain(new_op, g, db)
+        # Sequential siblings are not claimed (timing condition).
+        early = Record(
+            0, 1.0, 4, "new_fn", "function", "unknown:new_fn", None, 1
+        )
+        late_f = _rec(db, "f", "function", 10, 5.0, line=2)
+        assert len(build_tree([early, late_f], db)) == 2

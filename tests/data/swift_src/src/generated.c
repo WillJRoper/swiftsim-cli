@@ -417,6 +417,7 @@ void engine_repartition(void) {
   partition_repartition();
   scheduler_report_task_times();
   space_free_cells();
+  task_dump_stats();
   if (verbose)
     message("took %.3f %s.",
             clocks_from_ticks(getticks() - tic), clocks_getunit());
@@ -460,6 +461,59 @@ void engine_step(void) {
               clocks_from_ticks(getticks() - tic_32), clocks_getunit());
   }
   pm_mesh_compute_potential();
+  /* What a step can run (the log nesting is reproduced elsewhere). */
+  engine_activate_fof_attach_tasks();
+  engine_activate_fof_tasks();
+  engine_allocate_foreign_particles();
+  engine_collect_end_of_step();
+  engine_drift_all();
+  engine_drift_top_multipoles();
+  engine_exchange_cells();
+  engine_exchange_strays();
+  engine_exchange_top_multipoles();
+  engine_fof();
+  engine_launch();
+  engine_make_fof_tasks();
+  engine_makeproxies_with_zoom_region();
+  engine_maketasks();
+  engine_marktasks();
+  engine_prepare();
+  engine_print_task_counts();
+  engine_rebuild();
+  engine_recompute_displacement_constraint();
+  engine_redistribute();
+  engine_repartition();
+  engine_repartition_trigger();
+  engine_split_gas_particles();
+  engine_unskip();
+  fof_allocate();
+  fof_compute_group_props();
+  fof_compute_local_sizes();
+  fof_finalise_attachables();
+  fof_link_attachable_particles();
+  partition_repartition();
+  proxy_cells_exchange();
+  proxy_tags_exchange();
+  repart_edge_metis_zoom();
+  scheduler_report_task_times();
+  scheduler_reweight();
+  space_bparts_get_cell_index();
+  space_free_cells();
+  space_gparts_get_cell_index();
+  space_list_useful_top_level_cells();
+  space_parts_get_cell_index();
+  space_rebuild();
+  space_regrid();
+  space_regrid_zoom();
+  space_sparts_get_cell_index();
+  space_split();
+  space_synchronize_particle_positions();
+  void_space_split();
+  zoom_engine_make_hierarchical_void_tasks();
+  zoom_engine_make_self_gravity_tasks();
+  zoom_get_region_dim_and_shift();
+  zoom_void_space_split();
+  zoom_void_timestep_collect();
 }
 
 void engine_unskip(void) {

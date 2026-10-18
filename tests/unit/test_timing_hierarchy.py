@@ -1,12 +1,17 @@
 """Tests for the call-path aggregation and its tables."""
 
+import copy
+
 import pytest
 
 from swiftsim_cli.timing.log_scan import scan_log
+from swiftsim_cli.timing.timer_db import TimerDB, build_timer_db
 from swiftsim_cli.timing.timing_hierarchy import (
     UNTIMED,
     aggregate,
+    between_steps_table,
     build_step_trees,
+    coverage_outliers,
     coverage_table,
     flat_table,
     function_table,
@@ -16,6 +21,13 @@ from swiftsim_cli.timing.timing_hierarchy import (
     select_steps,
     top_level_table,
     tree_table,
+    write_coverage_csv,
+)
+
+ROW = (
+    "{n:8d}   1.0e-05    0.0078125  127.0   0.0e+00    1   56            0"
+    "     100            0            0            0             {wall}"
+    "    265           495.008\n"
 )
 
 
@@ -149,7 +161,7 @@ class TestEdgeCases:
         top_level_table(h, 5, "T")
         tree_table(h, 5, "T")
         flat_table(h, 5, "F")
-        coverage_table([])
+        coverage_table([], 5)
 
     def test_zero_time_timers_in_a_step(self, synthetic_db, tmp_path):
         """0.000 ms timers in a timed step are harmless."""
@@ -188,8 +200,102 @@ class TestEdgeCases:
         assert "1.11" in table  # 1.25 / mean(1, 1.25)
         assert "RANK IMBALANCE (2 ranks)" in table
 
-    def test_coverage_table(self, sample):
-        """The per-step table lists every step."""
+    def test_coverage_table(self, sample, tmp_path):
+        """Only outliers are tabled; the CSV lists every step."""
         _, trees, _ = sample
-        table = coverage_table(trees)
-        assert "3196.8" in table and "PER-STEP COVERAGE (rank 0)" in table
+        table = coverage_table(trees, 5)
+        assert "PER-STEP COVERAGE OUTLIERS (rank 0: 0 of 4 steps" in table
+        csv = write_coverage_csv(trees, tmp_path / "c.csv")
+        lines = csv.read_text().splitlines()
+        assert lines[0].startswith("Step,Wall-clock (ms)")
+        assert len(lines) == 5 and "3196.752" in lines[1]
+
+    def test_coverage_outliers(self, sample):
+        """Steps outside 90-105% are outliers, worst first."""
+        _, trees, _ = sample
+        trees = copy.deepcopy(trees)
+        trees[0].step.wallclock_ms = 10 * trees[0].timed
+        trees[1].step.wallclock_ms = 0.5 * trees[1].timed
+        assert set(map(id, coverage_outliers(trees))) == {
+            id(trees[0]),
+            id(trees[1]),
+        }
+        table = coverage_table(trees, 1)
+        assert "2 of 4 steps" in table
+        # Only the worst (top_n=1): 200% is further from 100% than 10%.
+        assert " 200.0 " in table and " 10.0 " not in table
+
+
+class TestBetweenSteps:
+    """Timers main() prints between steps are not part of any step."""
+
+    def _scan(self, synthetic_db, tmp_path, dump_from_repartition=False):
+        inner = (
+            "[00001.4] task_dump_stats: took 50.000 ms.\n"
+            "[00001.4] engine_repartition: took 60.000 ms.\n"
+            if dump_from_repartition
+            else ""
+        )
+        log = tmp_path / "log.txt"
+        log.write_text(
+            ROW.format(n=0, wall="100.000")
+            + inner
+            + "[00001.5] engine_launch: (tasks) took 900.000 ms.\n"
+            + "[00001.6] task_dump_all: took 300.000 ms.\n"
+            + "[00001.7] task_dump_stats: took 200.000 ms.\n"
+            + ROW.format(n=1, wall="1000.000")
+        )
+        return scan_log(log, synthetic_db)
+
+    def test_task_dumps_between_steps(self, synthetic_db, tmp_path):
+        """task_dump_* after a step leave the step tree and its coverage."""
+        scan = self._scan(synthetic_db, tmp_path)
+        (tree,) = build_step_trees(
+            select_steps(scan.steps, None), 0, synthetic_db
+        )
+        assert [r.record.key for r in tree.roots] == ["engine_launch (tasks)"]
+        assert [r.key for r in tree.between] == [
+            "task_dump_all",
+            "task_dump_stats",
+        ]
+        assert tree.coverage == pytest.approx(90.0)
+        h = aggregate([tree], 0, 1000.0)
+        assert h.between["task_dump_all"].inclusive == 300.0
+        assert "task_dump_all" not in {p[-1] for p in h.paths}
+        table = between_steps_table(h, 5)
+        assert "BETWEEN STEPS" in table and "300.0" in table
+
+    def test_dump_inside_repartition_stays(self, synthetic_db, tmp_path):
+        """task_dump_stats under engine_repartition belongs to the step."""
+        scan = self._scan(synthetic_db, tmp_path, dump_from_repartition=True)
+        (tree,) = build_step_trees(
+            select_steps(scan.steps, None), 0, synthetic_db
+        )
+        rep = next(
+            r for r in tree.roots if r.record.key == "engine_repartition"
+        )
+        assert [c.record.key for c in rep.children] == ["task_dump_stats"]
+        assert [r.key for r in tree.between] == [
+            "task_dump_all",
+            "task_dump_stats",
+        ]
+
+    def test_db_rules(self, synthetic_db):
+        """in_step / outside_step_root follow the static call graph."""
+        db = synthetic_db
+        assert db.in_step("engine_prepare")
+        assert db.in_step("task_dump_stats")  # via engine_repartition
+        assert not db.in_step("task_dump_all")
+        assert db.in_step("not_in_source")
+        assert db.outside_step_root("task_dump_stats")
+        assert not db.outside_step_root("engine_launch")
+        assert not db.outside_step_root("engine_step")
+
+    def test_no_engine_step(self, tmp_path):
+        """Without engine_step in the source nothing is between steps."""
+        (tmp_path / "a.c").write_text(
+            "void main(void) { f(); }\n"
+            'void f(void) { message("took %f ms"); }\n'
+        )
+        db = TimerDB(build_timer_db(tmp_path))
+        assert db.in_step("f") and not db.outside_step_root("f")
