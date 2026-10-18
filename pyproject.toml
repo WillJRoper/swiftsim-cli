@@ -14,7 +14,7 @@ readme = "README.md"
 requires-python = ">=3.10"
 
 # The licence (SPDX expression, PEP 639)
-license = "GPL-3.0-only"
+license = "GPL-3.0-or-later"
 license-files = ["LICENSE"]
 
 # Project keywords

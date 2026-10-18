@@ -28,7 +28,15 @@ def mock_cosmo(mocker):
     mocker.patch("swiftsim_cli.cosmology.get_cosmology", return_value=cosmo)
     mocker.patch(
         "swiftsim_cli.modes.output_times.load_parameters",
-        return_value={"Cosmology": {"a_begin": 0.01, "a_end": 1.0}},
+        return_value={
+            "Cosmology": {"a_begin": 0.01, "a_end": 1.0},
+            # One internal time unit = 1 Gyr (3.15576e16 s), so the dummy
+            # time values below come out unchanged
+            "InternalUnitSystem": {
+                "UnitLength_in_cgs": 3.15576e16,
+                "UnitVelocity_in_cgs": 1.0,
+            },
+        },
     )
     return cosmo
 

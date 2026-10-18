@@ -152,3 +152,35 @@ def convert_redshift_to_scale_factor(
         The scale factor(s) corresponding to the given redshift(s).
     """
     return 1.0 / (1.0 + redshift)
+
+
+def internal_time_unit_in_gyr(params: dict | None = None) -> float:
+    """Return SWIFT's internal time unit in Gyr.
+
+    SWIFT derives its time unit from the internal length and velocity units
+    (U_t = U_L / U_V), so this is read from the parameter file's
+    InternalUnitSystem section.
+
+    Args:
+        params: The parameters to read. Defaults to the loaded parameters.
+
+    Returns:
+        The length of one internal time unit in Gyr.
+
+    Raises:
+        ValueError: If the InternalUnitSystem section or either unit is
+            missing.
+    """
+    if params is None:
+        params = load_parameters()
+    units = params.get("InternalUnitSystem") or {}
+    try:
+        length_cgs = float(units["UnitLength_in_cgs"])
+        velocity_cgs = float(units["UnitVelocity_in_cgs"])
+    except KeyError as e:
+        raise ValueError(
+            "The parameter file needs InternalUnitSystem:UnitLength_in_cgs "
+            "and UnitVelocity_in_cgs to write a time-based output list "
+            "for a cosmological run."
+        ) from e
+    return float((length_cgs / velocity_cgs * u.s).to(u.Gyr).value)

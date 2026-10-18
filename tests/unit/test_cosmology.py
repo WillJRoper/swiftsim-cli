@@ -202,3 +202,18 @@ def test_convert_time_to_redshift_too_early_raises(mocker):
 
     with pytest.raises(ValueError, match="Cannot convert time"):
         convert_time_to_redshift(1e-6)
+
+
+def test_internal_time_unit_in_gyr():
+    """Mpc / (km/s) is ~977.8 Gyr; missing units give a clear error."""
+    from swiftsim_cli.cosmology import internal_time_unit_in_gyr
+
+    params = {
+        "InternalUnitSystem": {
+            "UnitLength_in_cgs": 3.08567758e24,
+            "UnitVelocity_in_cgs": 1e5,
+        }
+    }
+    assert internal_time_unit_in_gyr(params) == pytest.approx(977.79, 1e-4)
+    with pytest.raises(ValueError, match="InternalUnitSystem"):
+        internal_time_unit_in_gyr({"InternalUnitSystem": {}})

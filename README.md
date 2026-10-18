@@ -257,10 +257,11 @@ swift-cli output-times --first-snap-time 0 --delta-time 0.1 --final-snap-time 2
 
 The interval (`--delta-*`) chooses the units of the list; `--list-units`
 overrides them. With snipshots the list gets a `Select Output` column.
-With a cosmology, `--*-time` values are ages of the Universe in Gyr. Note
-that SWIFT reads the values of a `# Time` list in a cosmological run as ages
-in its *internal* time units, so for cosmological runs prefer redshift or
-scale-factor lists (`--list-units redshift` or `scale-factor`).
+With a cosmology, `--*-time` values are given as ages of the Universe in
+Gyr, and the list is written as ages in SWIFT's *internal* time units
+(UnitLength_in_cgs / UnitVelocity_in_cgs from the parameter file's
+`InternalUnitSystem`), which is what SWIFT expects for a `# Time` list in a
+cosmological run.
 
 ### `utils`
 

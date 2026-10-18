@@ -39,7 +39,16 @@ Cosmology:
   Omega_cdm: 0.2587481
   Omega_lambda: 0.693
   Omega_b: 0.0482519
+InternalUnitSystem:
+  UnitMass_in_cgs: 1.98841e43
+  UnitLength_in_cgs: 3.08567758e24
+  UnitVelocity_in_cgs: 1e5
+  UnitCurrent_in_cgs: 1
+  UnitTemp_in_cgs: 1
 """
+
+# Mpc / (km/s) in Gyr: SWIFT's internal time unit for the units above
+MPC_PER_KMS_IN_GYR = 977.79
 
 
 def _run_cli(tmp_path, mocker, extra_args):
@@ -61,12 +70,29 @@ def test_cli_output_times_uses_cosmology_from_params(tmp_path, mocker):
     lines = _run_cli(tmp_path, mocker, ["-fz", "10", "-dt", "0.5"])
 
     assert lines[0] == "# Time"
-    times = [float(line) for line in lines[1:]]
+    # SWIFT reads cosmological time lists as ages in internal units
+    times = [float(line) * MPC_PER_KMS_IN_GYR for line in lines[1:]]
     # Age at z=10 is ~0.47 Gyr, the final output is bounded by a_end=0.5
     # (age ~5.9 Gyr at z=1)
     assert times[0] == pytest.approx(0.47, abs=0.02)
-    assert np.allclose(np.diff(times), 0.5)
+    assert np.allclose(np.diff(times), 0.5, rtol=1e-4)
     assert 5.4 < times[-1] < 6.0
+
+
+def test_cli_output_times_time_list_needs_internal_units(tmp_path, mocker):
+    """A cosmological time list can't be written without the unit system."""
+    from swiftsim_cli.cli import main
+
+    params = tmp_path / "params.yml"
+    params.write_text(COSMO_PARAMS_YML.split("InternalUnitSystem:")[0])
+    out = tmp_path / "output_list.txt"
+    with pytest.raises(SystemExit) as exc:
+        main(
+            ["output-times", "-P", str(params), "-o", str(out)]
+            + ["-fz", "10", "-dt", "0.5"]
+        )
+    assert exc.value.code == 1
+    assert not out.exists()
 
 
 def test_cli_output_times_final_defaults_to_params_a_end(tmp_path, mocker):

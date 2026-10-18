@@ -12,15 +12,19 @@ from swiftsim_cli.cosmology import (
     convert_scale_factor_to_redshift,
     convert_time_to_redshift,
     get_cosmology,
+    internal_time_unit_in_gyr,
 )
 from swiftsim_cli.modes.common_args import add_params_argument
 from swiftsim_cli.params import load_parameters
 
 # Times are ages of the Universe in Gyr when a cosmology is available (the
-# conversions go through astropy), otherwise they are taken as given.
+# conversions go through astropy), otherwise they are taken as given. A
+# cosmological time list is written in SWIFT's internal time units, which is
+# what SWIFT's output_list.c expects for a "# Time" list.
 TIME_UNITS_HELP = (
-    "in Gyr if the parameter file has a Cosmology section, otherwise in "
-    "internal units"
+    "as the age of the Universe in Gyr if the parameter file has a "
+    "Cosmology section (written to the list in internal units), otherwise "
+    "in internal units"
 )
 
 
@@ -1064,6 +1068,13 @@ def _generate_output_list_with_cosmo(args: dict, cosmo: FlatLambdaCDM) -> None:
             doing_z = False
             doing_time = False
             doing_scale_factor = True
+    # SWIFT reads a cosmological "# Time" list as the age of the Universe
+    # in internal time units, so convert from Gyr before writing
+    if doing_time:
+        time_unit_gyr = internal_time_unit_in_gyr(params)
+        snapshot_times = np.asarray(snapshot_times) / time_unit_gyr
+        snipshot_times = np.asarray(snipshot_times) / time_unit_gyr
+
     # Write the output list to the file
     write_output_list(
         out_file,

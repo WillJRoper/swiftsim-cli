@@ -87,6 +87,9 @@ Command-line flags (old → new):
 
 ### Fixed
 
+- `output-times`: cosmological `# Time` lists are now written as ages in
+  SWIFT's internal time units (they were written in Gyr, which SWIFT
+  misread). Times on the command line are still given in Gyr.
 - Cosmology: a parameter file without a `Cosmology` section no longer
   crashes; ages before z=140 raise a clear error instead of silently
   becoming z=0; time/redshift conversions consistently use Gyr.
