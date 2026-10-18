@@ -20,10 +20,16 @@ repos:
       # Run the formatter.
       - id: ruff-format
 
-  # Type checking with mypy.
-  - repo: https://github.com/pre-commit/mirrors-mypy
-    rev: v1.13.0
+  # Type checking with mypy, using the [tool.mypy] config in pyproject.toml.
+  # It runs the mypy from your dev environment (pip install -e ".[dev,test]")
+  # over src and tests, exactly as CI does, so both see the same third-party
+  # type information.
+  - repo: local
     hooks:
       - id: mypy
-        additional_dependencies: [types-PyYAML, types-tqdm]
-        args: [--ignore-missing-imports, --no-strict-optional]
+        name: mypy
+        entry: mypy
+        language: system
+        types_or: [python, toml]
+        pass_filenames: false
+        require_serial: true
