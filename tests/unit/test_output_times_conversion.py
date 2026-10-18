@@ -84,7 +84,7 @@ def test_no_cosmo_raises_on_list_units(tmp_path):
     """Test that providing list-units without cosmology raises ValueError."""
     out_file = tmp_path / "output.txt"
     args = {
-        "out": out_file,
+        "output_list": out_file,
         "first_snap_z": 1.0,
         "delta_z": 0.5,
         "final_snap_z": 0.0,
@@ -199,7 +199,7 @@ def test_list_units_redshift_conversion(
     out_file = tmp_path / "out_z.txt"
     # Start in time: 0.9 -> z=1.0, 1.0 -> z=0.0
     args = {
-        "out": out_file,
+        "output_list": out_file,
         "first_snap_time": 0.9,
         "final_snap_time": 1.0,
         "delta_time": 0.1,
@@ -220,7 +220,7 @@ def test_list_units_scale_factor_conversion(
     out_file = tmp_path / "out_a.txt"
     # Start in z: 1.0 -> a=0.5
     args = {
-        "out": out_file,
+        "output_list": out_file,
         "first_snap_z": 1.0,
         "final_snap_z": 0.0,
         "delta_z": 1.0,
@@ -239,7 +239,7 @@ def test_list_units_time_conversion(mock_cosmo, mock_conversions, tmp_path):
     out_file = tmp_path / "out_t.txt"
     # Start in a: 0.5 -> z=1.0 -> t=0.9
     args = {
-        "out": out_file,
+        "output_list": out_file,
         "first_snap_scale_factor": 0.5,
         "final_snap_scale_factor": 1.0,
         "delta_scale_factor": 0.5,
@@ -259,7 +259,7 @@ def test_snipshot_conversion_logic(mock_cosmo, mock_conversions, tmp_path):
     # Snap: z=1.0 -> t=0.9
     # Snip: z=0.5 -> t=0.95
     args = {
-        "out": out_file,
+        "output_list": out_file,
         "first_snap_z": 1.0,
         "final_snap_z": 0.0,
         "delta_z": 1.0,
@@ -371,7 +371,7 @@ def test_mixed_snipshot_units_coverage(
 ):
     """Test various combinations of snapshot and snipshot units."""
     out_file = tmp_path / f"out_mix_{main_type}_{snip_type}.txt"
-    args = {"out": out_file, **main_arg, **snip_arg}
+    args = {"output_list": out_file, **main_arg, **snip_arg}
 
     # Just ensure it runs without error
     _generate_output_list_with_cosmo(args, mock_cosmo)
@@ -384,7 +384,7 @@ def test_mixed_snipshot_units_logic(mock_cosmo, mock_conversions, tmp_path):
     # Snap in Z: 1.0 to 0.0
     # Snip in Time: 0.95 (which is z=0.5)
     args = {
-        "out": out_file,
+        "output_list": out_file,
         "first_snap_z": 1.0,
         "final_snap_z": 0.0,
         "delta_z": 1.0,
@@ -407,7 +407,7 @@ def test_list_units_conversion_permutations(
     # We need Scale Factor -> Redshift.
     out_file = tmp_path / "out_a_to_z.txt"
     args = {
-        "out": out_file,
+        "output_list": out_file,
         "first_snap_scale_factor": 0.5,  # z=1.0
         "final_snap_scale_factor": 1.0,  # z=0.0
         "delta_scale_factor": 0.5,
@@ -445,7 +445,7 @@ def test_list_units_conversion_permutations(
     # Case: Z -> Time
     out_file_z_t = tmp_path / "out_z_to_t.txt"
     args_z_t = {
-        "out": out_file_z_t,
+        "output_list": out_file_z_t,
         "first_snap_z": 1.0,
         "final_snap_z": 0.0,
         "delta_z": 1.0,
@@ -462,7 +462,7 @@ def test_list_units_conversion_permutations(
     # We need Time -> Scale Factor test explicitly here just to be sure
     out_file_t_a = tmp_path / "out_t_to_a.txt"
     args_t_a = {
-        "out": out_file_t_a,
+        "output_list": out_file_t_a,
         "first_snap_time": 0.0,  # z=1 -> a=0.5
         "final_snap_time": 1.0,  # z=0 -> a=1
         "delta_time": 1.0,
@@ -475,7 +475,7 @@ def test_regression_log_scale_factor(mock_cosmo, mock_conversions, tmp_path):
     """Regression test for the log scale factor bug."""
     out_file = tmp_path / "out_log.txt"
     args = {
-        "out": out_file,
+        "output_list": out_file,
         "first_snap_scale_factor": 0.1,
         "final_snap_scale_factor": 1.0,
         "delta_log_scale_factor": 0.1,

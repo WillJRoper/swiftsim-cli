@@ -14,12 +14,9 @@ import textwrap
 from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Literal, cast
+from typing import TYPE_CHECKING, Any, Literal, cast
 
-import matplotlib.pyplot as plt
 import numpy as np
-from matplotlib.axes import Axes
-from matplotlib.figure import Figure
 
 from swiftsim_cli.modes.common_args import (
     add_output_arguments,
@@ -29,12 +26,17 @@ from swiftsim_cli.timing.log_scan import read_log_revision, scan_log
 from swiftsim_cli.timing.timer_db import resolve_timer_db
 from swiftsim_cli.timing.timing_hierarchy import hierarchy_for
 from swiftsim_cli.utilities.io import create_output_path, slugify
+from swiftsim_cli.utilities.messages import plural, warn
 from swiftsim_cli.utilities.plotting import save_figure, should_use_log_scale
 from swiftsim_cli.utilities.step_table import (
     StepTableReader,
     step_wallclock_ms,
 )
 from swiftsim_cli.utilities.tables import create_ascii_table
+
+if TYPE_CHECKING:
+    from matplotlib.axes import Axes
+    from matplotlib.figure import Figure
 
 MPI_RANKS_RE = re.compile(
     r"MPI is up and running with\s+(?P<ranks>\d+)\s+node\(s\)"
@@ -92,6 +94,7 @@ def add_scaling_arguments(
     )
     scaling_subparsers = parser.add_subparsers(
         dest="scaling_type",
+        metavar="KIND",
         help="Type of scaling analysis to perform.",
         required=True,
     )
@@ -110,10 +113,12 @@ def add_timer_scaling_arguments(
             "different MPI rank counts."
         ),
     )
+    scaling_parser.set_defaults(func=run_swift_scaling)
     _add_common_scaling_arguments(scaling_parser, TIMERS_OUT_SUBDIR)
     scaling_parser.add_argument(
         "--min-percent-threshold",
         type=float,
+        metavar="PCT",
         default=5.0,
         help=(
             "Minimum share of the step time (the timer's exclusive time, "
@@ -144,6 +149,7 @@ def add_runtime_scaling_arguments(
             "totals in SWIFT logs."
         ),
     )
+    runtime_parser.set_defaults(func=run_swift_runtime_scaling)
     _add_common_scaling_arguments(runtime_parser, RUNTIME_OUT_SUBDIR)
 
 
@@ -155,28 +161,16 @@ def _add_common_scaling_arguments(
         "log_files",
         nargs="+",
         type=Path,
+        metavar="FILE",
         help="SWIFT log files (or glob patterns) to analyse together.",
     )
     add_output_arguments(parser, subdir)
     add_steps_argument(parser)
 
 
-def run_scaling(args: argparse.Namespace) -> None:
-    """Run the requested scaling analysis."""
-    if args.scaling_type == "timers":
-        run_swift_scaling(args)
-    elif args.scaling_type == "runtime":
-        run_swift_runtime_scaling(args)
-    else:
-        raise ValueError(f"Unknown scaling type: {args.scaling_type}")
-
-
 def run_swift_scaling(args: argparse.Namespace) -> None:
     """Entry point for ``analyse scaling timers``."""
-    step_range = None
-    if args.steps is not None:
-        step_range = (args.steps[0], args.steps[1])
-
+    step_range = tuple(args.steps) if args.steps is not None else None
     rank_source = cast(Literal["root", "all"], args.rank_source)
 
     analyse_swift_scaling(
@@ -192,10 +186,7 @@ def run_swift_scaling(args: argparse.Namespace) -> None:
 
 def run_swift_runtime_scaling(args: argparse.Namespace) -> None:
     """Entry point for ``analyse scaling runtime``."""
-    step_range = None
-    if args.steps is not None:
-        step_range = (args.steps[0], args.steps[1])
-
+    step_range = tuple(args.steps) if args.steps is not None else None
     analyse_swift_runtime_scaling(
         log_files=_resolve_log_files(args.log_files),
         output_path=args.out,
@@ -217,11 +208,9 @@ def _resolve_log_files(log_files: list[Path]) -> list[str]:
             continue
 
         matches = sorted(glob.glob(raw_path))
-        if matches:
-            resolved.extend(matches)
-            continue
-
-        resolved.append(raw_path)
+        if not matches:
+            raise ValueError(f"no log file matches '{raw_path}'")
+        resolved.extend(matches)
 
     return resolved
 
@@ -245,7 +234,9 @@ def analyse_swift_scaling(
     if rank_source not in {"root", "all"}:
         raise ValueError("rank_source must be one of 'root' or 'all'")
 
-    print(f"Analyzing timer scaling across {len(log_files)} log files")
+    print(
+        f"Analysing timer scaling across {plural(len(log_files), 'log file')}"
+    )
 
     out_dir = TIMERS_OUT_SUBDIR
 
@@ -288,11 +279,10 @@ def analyse_swift_scaling(
         )
 
         if len(per_rank_totals) < rank_count:
-            print(
-                "Warning: only "
-                f"{len(per_rank_totals)}/{rank_count} ranks emitted timer "
-                f"lines in {Path(log_file).name}. This often indicates a "
-                "log written with -v 1 rather than -v 2."
+            warn(
+                f"only {len(per_rank_totals)}/{rank_count} ranks emitted "
+                f"timer lines in {Path(log_file).name}. This often indicates "
+                "a log written with -v 1 rather than -v 2."
             )
 
     scaling_data.sort(key=lambda item: (item.rank_count, item.label))
@@ -444,7 +434,10 @@ def analyse_swift_runtime_scaling(
     if step_range is not None and step_range[0] > step_range[1]:
         raise ValueError("Step range must be ordered as START END")
 
-    print(f"Analyzing runtime scaling across {len(log_files)} log files")
+    print(
+        "Analysing runtime scaling across "
+        f"{plural(len(log_files), 'log file')}"
+    )
 
     out_dir = RUNTIME_OUT_SUBDIR
     scaling_data: list[RuntimeScalingLogData] = []
@@ -630,6 +623,8 @@ def _create_scaling_plot(
     rank_source: Literal["root", "all"] = "root",
 ) -> Path | None:
     """Create a scaling line plot for the selected timers."""
+    import matplotlib.pyplot as plt
+
     include_total_reference = run_statistic == "sum"
     legend_labels = _build_legend_labels(timer_ids, include_total_reference)
     series_count = len(legend_labels)
@@ -787,6 +782,8 @@ def _make_scaling_axes(
     Returns:
         The figure, main axes, speedup axes and (hidden) legend axes.
     """
+    import matplotlib.pyplot as plt
+
     fig = plt.figure(figsize=(_SCALING_PLOT_SIZE, fig_height))
     grid = fig.add_gridspec(
         3,
@@ -849,6 +846,8 @@ def _style_scaling_axes(
     plotted_values: list[float],
 ) -> None:
     """Apply the shared grid, tick and scale styling to a scaling plot."""
+    import matplotlib.pyplot as plt
+
     ax.grid(True, alpha=0.3, linestyle="--")
     speedup_ax.set_xlabel("Number of Ranks")
     speedup_ax.set_ylabel("Relative Speedup")
@@ -975,9 +974,10 @@ def _build_scaling_analysis(
             [
                 (
                     f"- Total measured timer time changes from "
-                    f"{_format_time(total_times[0])} at {rank_counts[0]} "
-                    f"ranks to {_format_time(total_times[-1])} at "
-                    f"{rank_counts[-1]} ranks."
+                    f"{_format_time(total_times[0])} at "
+                    f"{plural(rank_counts[0], 'rank')} to "
+                    f"{_format_time(total_times[-1])} at "
+                    f"{plural(rank_counts[-1], 'rank')}."
                 ),
                 (
                     "- Overall strong-scaling slope: "
@@ -1101,6 +1101,8 @@ def _create_timer_rank_scaling_plot(
     filename: str,
 ) -> Path | None:
     """Create one scaling plot for a single timer with one line per rank."""
+    import matplotlib.pyplot as plt
+
     fig, ax, speedup_ax, legend_ax = _make_scaling_axes(14.0, 1.0)
 
     all_values: list[float] = []
@@ -1391,8 +1393,9 @@ def _build_runtime_scaling_summary(
         (
             "- Total measured runtime changes from "
             f"{_format_time(runtimes[0])} "
-            f"at {rank_counts[0]} ranks to {_format_time(runtimes[-1])} "
-            f"at {rank_counts[-1]} ranks."
+            f"at {plural(rank_counts[0], 'rank')} to "
+            f"{_format_time(runtimes[-1])} at "
+            f"{plural(rank_counts[-1], 'rank')}."
         ),
         f"- Overall strong-scaling slope: {_format_slope(slope)}.",
         (

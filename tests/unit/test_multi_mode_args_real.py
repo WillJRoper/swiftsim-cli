@@ -7,7 +7,10 @@ from unittest.mock import patch
 import pytest
 
 from swiftsim_cli import __version__
-from swiftsim_cli.multi_mode_args import MultiModeCLIArgs
+from swiftsim_cli.multi_mode_args import MultiModeCLIArgs, top_level_help
+
+# Input paths are checked at parse time; run in a directory that has them
+pytestmark = pytest.mark.usefixtures("in_inputs_dir")
 
 
 def test_single_mode_make():
@@ -47,11 +50,11 @@ def test_global_args():
     assert mode_args.nr_threads == 8
 
 
-def test_debug_after_mode_belongs_to_the_mode():
-    """--debug after a mode is that mode's option (config's preset)."""
+def test_debug_after_mode_is_not_global():
+    """--debug after a mode is not the global flag (config passes it on)."""
     parser = MultiModeCLIArgs(["config", "--debug"])
     assert parser.global_args.debug is False
-    assert parser.modes[0][1].debug is True
+    assert parser.modes[0][1].options == ["--debug"]
 
 
 def test_help_arg(capsys):
@@ -59,9 +62,7 @@ def test_help_arg(capsys):
     with pytest.raises(SystemExit):
         MultiModeCLIArgs(["--help"])
     captured = capsys.readouterr()
-    assert (
-        "swift-cli: Utilities for SWIFT development workflows" in captured.out
-    )
+    assert captured.out == top_level_help() + "\n"
 
     with pytest.raises(SystemExit):
         MultiModeCLIArgs(["make", "--help"])
@@ -118,11 +119,11 @@ def _modes(argv):
 def test_mode_name_as_option_value():
     """A mode name given as an option's value does not start a mode."""
     (name, args), (name2, args2) = _modes(
-        ["new", "--path", "make", "--ics", "y", "make", "-j", "2"]
+        ["new", "--out", "make", "--ics", "ics.hdf5", "make", "-j", "2"]
     )
     assert name == "new"
-    assert args.path == Path("make")
-    assert args.ics == Path("y")
+    assert args.out == Path("make")
+    assert args.ics == Path("ics.hdf5")
     assert (name2, args2.nr_threads) == ("make", 2)
 
 
@@ -134,8 +135,8 @@ def test_mode_name_as_positional_value():
 
 def test_mode_name_as_short_option_value():
     """Short options with values are recognised too."""
-    ((name, args),) = _modes(["output-times", "-o", "new"])
-    assert (name, args.out) == ("output-times", Path("new"))
+    ((name, args),) = _modes(["new", "-o", "new", "--ics", "ics.hdf5"])
+    assert (name, args.out) == ("new", Path("new"))
 
 
 def test_mode_name_as_equals_value_and_profile_value():
@@ -163,25 +164,36 @@ def test_real_chain_still_splits():
             "-j",
             "4",
             "new",
-            "--path",
+            "-o",
             "x",
             "--ics",
-            "y",
+            "ics.hdf5",
         ]
     )
     assert [name for name, _ in modes] == ["config", "make", "new"]
     assert modes[0][1].options == ["--enable-debug"]
     assert modes[1][1].nr_threads == 4
-    assert (modes[2][1].path, modes[2][1].ics) == (Path("x"), Path("y"))
+    assert (modes[2][1].out, modes[2][1].ics) == (Path("x"), Path("ics.hdf5"))
 
 
 def test_mode_name_ends_variable_length_arguments():
     """A mode name after nargs='+' values starts the next mode."""
     modes = _modes(
-        ["analyse", "timesteps", "a", "b", "-l", "x", "y", "make", "-j", "2"]
+        [
+            "analyse",
+            "timesteps",
+            "a.txt",
+            "b.txt",
+            "-l",
+            "x",
+            "y",
+            "make",
+            "-j",
+            "2",
+        ]
     )
     assert [name for name, _ in modes] == ["analyse", "make"]
-    assert modes[0][1].files == [Path("a"), Path("b")]
+    assert modes[0][1].files == [Path("a.txt"), Path("b.txt")]
     assert modes[0][1].labels == ["x", "y"]
 
 
@@ -195,8 +207,48 @@ def test_mode_name_ends_optional_value():
 def test_nested_subcommands_are_followed():
     """Subcommands of analyse (and scaling) are scanned with their parser."""
     modes = _modes(
-        ["analyse", "scaling", "timers", "a", "b", "-o", "show", "show"]
+        [
+            "analyse",
+            "scaling",
+            "timers",
+            "a.log",
+            "b.log",
+            "-o",
+            "show",
+            "show",
+        ]
     )
     assert [name for name, _ in modes] == ["analyse", "show"]
     assert modes[0][1].scaling_type == "timers"
     assert modes[0][1].out == Path("show")
+
+
+def test_terminator_ends_a_mode():
+    """'--' ends the current mode's arguments explicitly."""
+    modes = _modes(["config", "--enable-debug", "--", "make", "-j", "2"])
+    assert [name for name, _ in modes] == ["config", "make"]
+    assert modes[0][1].options == ["--enable-debug"]
+    assert modes[1][1].nr_threads == 2
+
+
+def test_terminator_must_be_followed_by_a_mode(capsys):
+    """A non-mode token after '--' is a usage error."""
+    with pytest.raises(SystemExit) as excinfo:
+        MultiModeCLIArgs(["make", "--", "-j", "2"])
+    assert excinfo.value.code == 2
+    assert "expected a mode after '--', got '-j'" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["analyse", "gravity-error-maps", "a.dat", "--res", "5"],
+        ["make", "--nr", "2"],
+        ["analyse", "log", "swift.log", "--top", "5"],
+    ],
+)
+def test_abbreviated_options_are_rejected(argv):
+    """Long options must be spelled out (allow_abbrev=False everywhere)."""
+    with pytest.raises(SystemExit) as excinfo:
+        MultiModeCLIArgs(argv)
+    assert excinfo.value.code == 2

@@ -6,14 +6,18 @@ import re
 from pathlib import Path
 from typing import Optional, Union
 
-import matplotlib.pyplot as plt
 import numpy as np
 
 from swiftsim_cli.modes.common_args import (
     add_labels_argument,
     add_output_arguments,
+    existing_file,
+    positive_float,
+    positive_int,
+    resolve_labels,
 )
 from swiftsim_cli.utilities.io import create_output_path
+from swiftsim_cli.utilities.messages import reading, warn
 from swiftsim_cli.utilities.plotting import save_figure
 
 # Subdirectory of --out that the outputs are written to
@@ -67,10 +71,10 @@ def _find_counterpart_file(filepath: str) -> tuple[str, str]:
         # Pick deterministically if several multipole orders exist
         swift_file = swift_files[0]
         if len(swift_files) > 1:
-            print(
-                f"Warning: {len(swift_files)} SWIFT files found for step "
-                f"{step_num}; using {swift_file}. Pass the SWIFT file "
-                "directly to choose another multipole order."
+            warn(
+                f"{len(swift_files)} SWIFT files found for step {step_num}; "
+                f"using {swift_file}. Pass the SWIFT file directly to choose "
+                "another multipole order."
             )
 
     else:
@@ -114,8 +118,10 @@ def _load_force_pair(
     Raises:
         ValueError: If the files share no particle IDs.
     """
-    exact_data = np.loadtxt(exact_file, ndmin=2)
-    swift_data = np.loadtxt(swift_file, ndmin=2)
+    with reading(exact_file):
+        exact_data = np.loadtxt(exact_file, ndmin=2)
+    with reading(swift_file):
+        swift_data = np.loadtxt(swift_file, ndmin=2)
 
     common_ids, exact_index, swift_index = np.intersect1d(
         exact_data[:, 0], swift_data[:, 0], return_indices=True
@@ -127,8 +133,8 @@ def _load_force_pair(
     if common_ids.size != len(exact_data) or common_ids.size != len(
         swift_data
     ):
-        print(
-            f"Warning: particle IDs differ between {exact_file} "
+        warn(
+            f"particle IDs differ between {exact_file} "
             f"({len(exact_data)} particles) and {swift_file} "
             f"({len(swift_data)} particles); using the "
             f"{common_ids.size} common particles."
@@ -175,9 +181,11 @@ def analyse_force_checks(
         max_error: Maximum error for binning (default: 3e-1).
         num_bins: Number of bins for histogram (default: 64).
 
+    Inputs that cannot be processed are reported as warnings and skipped.
+
     Raises:
-        ValueError: If the number of files and labels do not match.
-        FileNotFoundError: If counterpart files cannot be found.
+        ValueError: If the number of files and labels do not match, the
+            error range is invalid, or no input could be processed.
 
     Note:
         The function expects gravity check files in the format produced by
@@ -185,9 +193,16 @@ def analyse_force_checks(
         identifiers. Files should contain columns for:
         [ID, x, y, z, ax, ay, az, potential]
     """
+    import matplotlib.pyplot as plt
+
     # Make sure the number of files and labels match
     if len(files) != len(labels):
         raise ValueError("Number of files and labels must match.")
+    if not 0 < min_error < max_error:
+        raise ValueError(
+            f"need 0 < --min-error < --max-error, got {min_error:g} and "
+            f"{max_error:g}"
+        )
 
     # Plot styling, scoped so it does not leak into later modes
     plot_style = {
@@ -234,6 +249,7 @@ def analyse_force_checks(
         )
 
         # Process each file and find its counterpart
+        processed = 0
         for i, (input_file, label) in enumerate(zip(files, labels)):
             try:
                 exact_file, swift_file = _find_counterpart_file(
@@ -243,8 +259,9 @@ def analyse_force_checks(
                     _load_force_pair(exact_file, swift_file)
                 )
             except (ValueError, FileNotFoundError) as e:
-                print(f"Error processing {input_file}: {e}")
+                warn(f"skipping {input_file}: {e}")
                 continue
+            processed += 1
 
             exact_a_norm = np.sqrt(
                 exact_a[:, 0] ** 2 + exact_a[:, 1] ** 2 + exact_a[:, 2] ** 2
@@ -306,6 +323,12 @@ def analyse_force_checks(
             )
             print()
 
+        if not processed:
+            plt.close(fig)
+            raise ValueError(
+                "none of the gravity check inputs could be processed"
+            )
+
         # Set up axes labels and limits
         for ax, xlabel, ymax in panels:
             ax.set_xlabel(xlabel)
@@ -335,34 +358,43 @@ def add_gravity_checks_arguments(
     gravity_parser = subparsers.add_parser(
         "gravity-checks",
         help="Compare SWIFT gravity forces with exact gravity checks.",
+        description="Compare SWIFT gravity forces with exact gravity "
+        "checks. Give either file of each pair (gravity_checks_exact_* or "
+        "gravity_checks_swift_*); its counterpart is found next to it. "
+        "Requires SWIFT configured with --enable-gravity-force-checks=N.",
     )
+    gravity_parser.set_defaults(func=run_gravity_checks)
 
     gravity_parser.add_argument(
         "files",
         nargs="+",
+        metavar="FILE",
         help="Gravity check files to analyse (either exact or SWIFT files).",
-        type=Path,
+        type=existing_file,
     )
-    add_labels_argument(gravity_parser, required=True)
+    add_labels_argument(gravity_parser)
     add_output_arguments(gravity_parser, OUT_SUBDIR)
 
     gravity_parser.add_argument(
         "--min-error",
-        type=float,
+        type=positive_float,
+        metavar="ERR",
         help="Minimum error for binning (default: 1e-7).",
         default=1e-7,
     )
 
     gravity_parser.add_argument(
         "--max-error",
-        type=float,
+        type=positive_float,
+        metavar="ERR",
         help="Maximum error for binning (default: 3e-1).",
         default=3e-1,
     )
 
     gravity_parser.add_argument(
         "--num-bins",
-        type=int,
+        type=positive_int,
+        metavar="N",
         help="Number of bins for histogram (default: 64).",
         default=64,
     )
@@ -378,7 +410,7 @@ def run_gravity_checks(args: argparse.Namespace) -> None:
     """
     analyse_force_checks(
         files=args.files,
-        labels=args.labels,
+        labels=resolve_labels(args.files, args.labels),
         output_path=args.out,
         prefix=args.prefix,
         show_plot=args.show,

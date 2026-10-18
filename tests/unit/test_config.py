@@ -17,7 +17,7 @@ class TestConfigMode:
         # Test default values
         args = parser.parse_args([])
         assert args.list_options is False
-        assert args.debug is False
+        assert args.debug_build is False
         assert args.gravity is False
         assert args.eagle is False
         assert args.eaglexl is False
@@ -26,9 +26,9 @@ class TestConfigMode:
         args = parser.parse_args(["--list-options"])
         assert args.list_options is True
 
-        # Test --debug flag
-        args = parser.parse_args(["--debug"])
-        assert args.debug is True
+        # Test --debug-build flag
+        args = parser.parse_args(["--debug-build"])
+        assert args.debug_build is True
 
         # Test --gravity flag
         args = parser.parse_args(["--gravity"])
@@ -42,18 +42,12 @@ class TestConfigMode:
         args = parser.parse_args(["--eaglexl"])
         assert args.eaglexl is True
 
-        # Test short forms
-        args = parser.parse_args(["-d"])
-        assert args.debug is True
-
-        args = parser.parse_args(["-g"])
-        assert args.gravity is True
-
-        args = parser.parse_args(["-e"])
-        assert args.eagle is True
-
-        args = parser.parse_args(["-x"])
-        assert args.eaglexl is True
+        # The presets have no short forms (and --debug is the global flag;
+        # swift-cli builds every mode parser with allow_abbrev=False)
+        parser.allow_abbrev = False
+        for flag in ("-d", "-g", "-e", "-x", "--debug"):
+            _, unknown = parser.parse_known_args([flag])
+            assert unknown == [flag]
 
     @patch("swiftsim_cli.modes.config.show_config_options")
     def test_run_with_show(self, mock_show, tmp_path):
@@ -70,11 +64,11 @@ class TestConfigMode:
 
     @patch("swiftsim_cli.modes.config.config_swiftsim")
     def test_run_with_debug(self, mock_config, tmp_path):
-        """Test the run function with --debug flag."""
+        """Test the run function with --debug-build flag."""
         # Create mock args
         args = Mock()
         args.list_options = False
-        args.debug = True
+        args.debug_build = True
         args.gravity = False
         args.eagle = False
         args.eaglexl = False
@@ -97,7 +91,7 @@ class TestConfigMode:
         # Create mock args
         args = Mock()
         args.list_options = False
-        args.debug = False
+        args.debug_build = False
         args.gravity = True
         args.eagle = False
         args.eaglexl = False
@@ -120,7 +114,7 @@ class TestConfigMode:
         # Create mock args
         args = Mock()
         args.list_options = False
-        args.debug = False
+        args.debug_build = False
         args.gravity = False
         args.eagle = True
         args.eaglexl = False
@@ -143,7 +137,7 @@ class TestConfigMode:
         # Create mock args
         args = Mock()
         args.list_options = False
-        args.debug = False
+        args.debug_build = False
         args.gravity = False
         args.eagle = False
         args.eaglexl = True
@@ -166,7 +160,7 @@ class TestConfigMode:
         # Create mock args
         args = Mock()
         args.list_options = False
-        args.debug = True
+        args.debug_build = True
         args.gravity = True
         args.eagle = False
         args.eaglexl = False
@@ -194,7 +188,7 @@ class TestConfigMode:
         # Create mock args with presets that have overlapping options
         args = Mock()
         args.list_options = False
-        args.debug = False
+        args.debug_build = False
         args.gravity = True
         args.eagle = (
             True  # EAGLE also has --enable-ipo, --with-tbbmalloc, etc.
@@ -221,7 +215,7 @@ class TestConfigMode:
         # Create mock args
         args = Mock()
         args.list_options = False
-        args.debug = False
+        args.debug_build = False
         args.gravity = False
         args.eagle = False
         args.eaglexl = False

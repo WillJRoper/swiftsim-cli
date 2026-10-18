@@ -167,7 +167,7 @@ def _write_threadpool_file(path):
 class TestTaskPlotsMode:
     """Tests for the task-plots analysis mode."""
 
-    def test_add_arguments(self):
+    def test_add_arguments(self, in_inputs_dir):
         """The task-plots subparser accepts the expected switches."""
         parser = argparse.ArgumentParser()
         subparsers = parser.add_subparsers(dest="analysis_type", required=True)
@@ -190,6 +190,9 @@ class TestTaskPlotsMode:
                 "background",
                 "--c-subtype",
                 "void",
+                "--tasks",
+                "pair/force",
+                "sort",
             ]
         )
 
@@ -201,6 +204,7 @@ class TestTaskPlotsMode:
         assert args.ci_type == 1
         assert args.cj_type == 2
         assert args.c_subtype == 2
+        assert args.tasks == ["pair/force", "sort"]
 
     def test_task_debug_data_filters_tasks(self, tmp_path):
         """Position-specific task filters select exact ci and cj values."""
@@ -210,7 +214,7 @@ class TestTaskPlotsMode:
         data = TaskDebugData(task_file)
         records = data.get_rank_records(
             0,
-            TaskFilter(task="pair/density", ci_type=1, cj_type=2),
+            TaskFilter(tasks=("pair/density",), ci_type=1, cj_type=2),
         )
 
         assert len(records) == 1

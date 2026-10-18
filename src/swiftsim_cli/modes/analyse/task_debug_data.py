@@ -8,6 +8,8 @@ from pathlib import Path
 import numpy as np
 from tqdm.auto import tqdm
 
+from swiftsim_cli.utilities.messages import reading
+
 from .task_plot_metadata import (
     subtype_name,
     task_colour,
@@ -40,7 +42,7 @@ class TaskRecord:
 class TaskFilter:
     """Filter options for selecting task-debug intervals."""
 
-    task: str | None = None
+    tasks: tuple[str, ...] | None = None
     c_type: int | None = None
     ci_type: int | None = None
     cj_type: int | None = None
@@ -62,7 +64,8 @@ class TaskDebugData:
         """Read and parse a SWIFT task-debug file."""
         self.file_path = Path(file_path)
         print(f"Loading task-debug data from {self.file_path}...", flush=True)
-        self.data = np.loadtxt(self.file_path)
+        with reading(self.file_path):
+            self.data = np.loadtxt(self.file_path)
         if self.data.ndim != 2:
             raise ValueError(
                 "Task-debug file "
@@ -253,7 +256,7 @@ class TaskDebugData:
 
 def _matches_filter(record: TaskRecord, task_filter: TaskFilter) -> bool:
     """Return whether a task record passes the provided task filter."""
-    if task_filter.task is not None and record.label != task_filter.task:
+    if task_filter.tasks is not None and record.label not in task_filter.tasks:
         return False
 
     if task_filter.ci_type is not None and (

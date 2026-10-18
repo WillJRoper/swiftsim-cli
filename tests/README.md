@@ -63,7 +63,11 @@ skipped unless `SWIFT_SRC` is set.
 
 - **test_cli.py**, **test_multi_mode_args_real.py**,
   **test_flag_conventions.py**: the entry point, multi-mode parsing, error
-  handling and the flag conventions shared by every mode
+  handling, start-up imports and the flag conventions shared by every mode
+- **test_cli_chains.py**: end-to-end chains of real modes through
+  `cli.main` (outputs written, a failing mode stopping the chain)
+- **test_readme.py**: the help text quoted in the top-level README matches
+  the real output
 - **test_profile.py**, **test_profile_worktrees.py**: profile storage and the
   worktree-based profile commands against temporary git repositories
 - **test_config.py**, **test_modes_new.py**, **test_output_times*.py**,
@@ -93,6 +97,9 @@ The test suite uses pytest fixtures defined in `conftest.py`:
 - `isolated_profile_file` (autouse): points the profile file at a temporary
   directory so no test touches `~/.swiftsim-utils`
 - `temp_dir`: Temporary directory for file operations
+- `in_inputs_dir`: runs the test in a directory holding empty input files
+  (`a.txt`, `swift.log`, `ics.hdf5`, ...) and a `reports/` directory, for
+  parse-only tests (input paths are checked at parse time)
 - `write_tiny_ics`: writes a tiny gas-only HDF5 initial conditions file
 - `gitsetup` (in `unit/conftest.py`): a fresh bare remote, main clone and
   worktree root, with git isolated from your global configuration
@@ -117,9 +124,9 @@ The run fails below 85% coverage (`--cov-fail-under` in `pyproject.toml`).
 ## CI/CD Integration
 
 GitHub Actions (`.github/workflows/ci.yml`) runs ruff, mypy and the test
-suite on Ubuntu for Python 3.10 to 3.14 on pushes and pull requests to
-`main`/`develop`. The release workflow runs the suite against the built
-wheel before publishing.
+suite on Ubuntu for Python 3.10 to 3.14, plus macOS for Python 3.12, on
+pushes and pull requests to `main`/`develop`. The release workflow runs
+ruff and mypy, then the suite against the built wheel before publishing.
 
 ## Adding New Tests
 
@@ -129,16 +136,15 @@ When adding new functionality:
 2. Use the existing fixtures where possible
 3. Follow the naming convention `test_<functionality>`
 4. Add docstrings explaining what the test verifies
-5. Use appropriate test markers if needed (slow, integration, etc.)
 
 Example test structure:
 ```python
-def test_new_functionality(self, fixture_name):
+def test_new_functionality(tmp_path):
     """Test description of what this verifies."""
     # Arrange
     input_data = "test input"
-    
-    # Act  
+
+    # Act
     result = function_under_test(input_data)
     
     # Assert
@@ -149,8 +155,8 @@ def test_new_functionality(self, fixture_name):
 
 Test configuration is in `pyproject.toml`:
 - Coverage settings
-- Test markers
 - Output formats
 - Failure thresholds
 
-Security scanning and code quality checks are also integrated into the test pipeline.
+Lint (ruff) and type checks (mypy) run alongside the tests in CI and in the
+pre-commit hooks.

@@ -5,10 +5,12 @@ from pathlib import Path
 from typing import Any, cast
 
 import numpy as np
-from swiftsimio import load
-from swiftsimio.metadata import particle_types
 
-from swiftsim_cli.modes.common_args import add_params_argument
+from swiftsim_cli.modes.common_args import (
+    add_params_argument,
+    existing_file,
+    positive_float,
+)
 from swiftsim_cli.params import load_parameters
 from swiftsim_cli.profile import load_swift_profile
 
@@ -33,6 +35,7 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     """Add arguments for the 'utils' mode."""
     subparsers = parser.add_subparsers(
         dest="utils_type",
+        metavar="UTILITY",
         help="Utility calculation to run.",
         required=True,
     )
@@ -41,17 +44,20 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         "softenings",
         help="Compute per-species softenings from an IC file.",
     )
+    softenings.set_defaults(func=run_softenings)
     softenings.add_argument(
         "--ics",
-        type=Path,
+        type=existing_file,
         required=True,
-        help="Path to the SWIFT initial conditions file.",
+        metavar="FILE",
+        help="SWIFT initial conditions file.",
     )
     add_params_argument(softenings, required=True)
     softenings.add_argument(
         "--softening-coeff",
-        type=float,
+        type=positive_float,
         default=None,
+        metavar="COEFF",
         help="Softening coefficient in units of the mean separation "
         "(default: from the profile).",
     )
@@ -59,6 +65,7 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         "--pivot-redshift",
         type=float,
         default=None,
+        metavar="Z",
         help="Pivot redshift for the maximal physical softening "
         "(default: from the profile).",
     )
@@ -87,6 +94,9 @@ def compute_softening_rows(
     pivot_redshift: float,
 ) -> tuple[Any, list[dict[str, Any]]]:
     """Compute softening values for each populated particle species."""
+    from swiftsimio import load
+    from swiftsimio.metadata import particle_types
+
     dataset = load(ics_file)
     box_size = _get_cubic_box_size(dataset.metadata.boxsize)
 
@@ -222,7 +232,4 @@ def run_softenings(args: argparse.Namespace) -> None:
 
 def run(args: argparse.Namespace) -> None:
     """Run the requested utility command."""
-    if args.utils_type == "softenings":
-        run_softenings(args)
-    else:
-        raise ValueError(f"Unknown utility type: {args.utils_type}")
+    args.func(args)

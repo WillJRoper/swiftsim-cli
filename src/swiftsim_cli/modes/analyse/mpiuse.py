@@ -5,23 +5,24 @@ from __future__ import annotations
 import argparse
 import re
 from pathlib import Path
-from typing import Any, TypedDict
+from typing import TYPE_CHECKING, Any, Sequence, TypedDict
 
-import matplotlib
-import matplotlib.pyplot as plt
 import numpy as np
-import pandas as pd
-from matplotlib.axes import Axes
-from pandas.errors import EmptyDataError
 
 from swiftsim_cli.modes.common_args import (
     add_labels_argument,
     add_output_arguments,
     add_steps_argument,
+    resolve_labels,
 )
 from swiftsim_cli.utilities.io import create_output_path, slugify
+from swiftsim_cli.utilities.messages import plural, warn
 from swiftsim_cli.utilities.plotting import save_figure, should_use_log_scale
 from swiftsim_cli.utilities.tables import create_ascii_table
+
+if TYPE_CHECKING:
+    import pandas as pd
+    from matplotlib.axes import Axes
 
 MPIUSE_COLUMNS = [
     "stic",
@@ -84,11 +85,16 @@ def add_mpiuse_arguments(
             "Analyse SWIFT mpiuse_report-rank*-step*.dat files and compare "
             "communication volume across inputs."
         ),
+        description="Analyse SWIFT mpiuse_report-rank*-step*.dat files and "
+        "compare communication volume across inputs. Requires an MPI "
+        "build of SWIFT configured with --enable-mpiuse-reports.",
     )
+    mpiuse_parser.set_defaults(func=run_swift_mpiuse)
 
     mpiuse_parser.add_argument(
         "inputs",
         nargs="+",
+        metavar="INPUT",
         help=(
             "Input directories, glob patterns, or individual "
             "mpiuse_report files to analyse."
@@ -101,6 +107,7 @@ def add_mpiuse_arguments(
         "--subtypes",
         nargs="+",
         type=str,
+        metavar="NAME",
         help="Subtypes to include, e.g. gpart grav_counts (default: all).",
         default=None,
     )
@@ -121,10 +128,6 @@ def add_mpiuse_arguments(
 
 def run_swift_mpiuse(args: argparse.Namespace) -> None:
     """Entry point for the ``mpiuse`` CLI subcommand."""
-    step_range = None
-    if args.steps is not None:
-        step_range = (args.steps[0], args.steps[1])
-
     analyse_swift_mpiuse(
         inputs=args.inputs,
         labels=args.labels,
@@ -132,7 +135,7 @@ def run_swift_mpiuse(args: argparse.Namespace) -> None:
         prefix=args.prefix,
         show_plot=args.show,
         subtype_filter=args.subtypes,
-        step_range=step_range,
+        step_range=args.steps,
         per_rank=args.per_rank,
         output_format=args.format,
     )
@@ -145,7 +148,7 @@ def analyse_swift_mpiuse(
     prefix: str | None = None,
     show_plot: bool = False,
     subtype_filter: list[str] | None = None,
-    step_range: tuple[int, int] | None = None,
+    step_range: Sequence[int] | None = None,
     per_rank: bool = False,
     output_format: str = "ascii",
 ) -> None:
@@ -163,19 +166,14 @@ def analyse_swift_mpiuse(
         per_rank: Whether to produce per-rank summaries and plots.
         output_format: ``ascii``, ``csv``, or ``both``.
     """
-    print(f"Analyzing mpiuse reports from {len(inputs)} input(s)")
+    import matplotlib
 
-    if labels is not None and len(labels) != len(inputs):
-        raise ValueError(
-            f"Number of labels ({len(labels)}) must match number of "
-            f"inputs ({len(inputs)})"
-        )
+    print(f"Analysing mpiuse reports from {plural(len(inputs), 'input')}")
 
     if step_range is not None and step_range[0] > step_range[1]:
         raise ValueError("Step range must be ordered as START END")
 
-    if labels is None:
-        labels = [_derive_label(input_path) for input_path in inputs]
+    labels = resolve_labels(inputs, labels)
 
     out_dir = OUT_SUBDIR
     markers = ["o", "s", "^", "D", "v", "<", ">", "p", "*", "h"]
@@ -187,7 +185,7 @@ def analyse_swift_mpiuse(
     for input_path, label in zip(inputs, labels):
         files = _discover_files(input_path)
         if not files:
-            print(f"Warning: no mpiuse files matched input '{input_path}'")
+            warn(f"no mpiuse_report files matched '{input_path}'; skipping it")
             continue
 
         aggregated = _aggregate(
@@ -197,9 +195,9 @@ def analyse_swift_mpiuse(
             per_rank=per_rank,
         )
         if aggregated is None:
-            print(
-                f"Warning: no usable mpiuse data remained for '{label}' "
-                "after filtering"
+            warn(
+                f"no usable mpiuse data remained for '{label}' after "
+                "filtering; skipping it"
             )
             continue
 
@@ -255,8 +253,10 @@ def analyse_swift_mpiuse(
             rank_path.write_text(rank_table + "\n", encoding="utf-8")
 
     if not all_data:
-        print("No usable mpiuse data found in any input")
-        return
+        raise ValueError(
+            "no usable mpiuse data found in any input (expected "
+            "mpiuse_report-rank*-step*.dat files)"
+        )
 
     if len(all_data) >= 2:
         comparison_table = _format_comparison_table(all_data)
@@ -349,17 +349,6 @@ def analyse_swift_mpiuse(
         )
 
 
-def _derive_label(input_path: str) -> str:
-    path = Path(input_path)
-    if path.exists() and path.is_dir():
-        return path.name
-    if path.exists() and path.is_file():
-        return path.stem
-    if path.name:
-        return path.name
-    return input_path
-
-
 def _discover_files(input_path: str | Path) -> list[Path]:
     path = Path(input_path)
     pattern = str(input_path)
@@ -392,6 +381,9 @@ def _parse_rank_step(path: Path) -> tuple[int, int]:
 
 
 def _read_mpiuse_raw_file(path: Path) -> pd.DataFrame:
+    import pandas as pd
+    from pandas.errors import EmptyDataError
+
     try:
         data = pd.read_csv(
             path,
@@ -418,6 +410,8 @@ def _read_mpiuse_raw_file(path: Path) -> pd.DataFrame:
         )
     except EmptyDataError:
         data = pd.DataFrame(columns=MPIUSE_COLUMNS)
+    except ValueError as e:
+        raise ValueError(f"{path}: {e}") from e
 
     if data.empty:
         return pd.DataFrame(columns=MPIUSE_COLUMNS)
@@ -426,45 +420,14 @@ def _read_mpiuse_raw_file(path: Path) -> pd.DataFrame:
     return data
 
 
-def _read_mpiuse_file(path: Path) -> pd.DataFrame:
-    raw = _read_mpiuse_raw_file(path)
-    if raw.empty:
-        return pd.DataFrame(
-            columns=[
-                "step",
-                "rank",
-                "otherrank",
-                "type",
-                "subtype",
-                "tag",
-                "size",
-                "dtic",
-            ]
-        )
-
-    # Each request is logged once at activation and once at handoff/free.
-    # Keep activation rows only for volume statistics to avoid cancellation.
-    return raw.loc[
-        raw["activation"] == 1,
-        [
-            "step",
-            "rank",
-            "otherrank",
-            "type",
-            "subtype",
-            "tag",
-            "size",
-            "dtic",
-        ],
-    ].copy()
-
-
 def _aggregate(
     files: list[Path],
-    step_range: tuple[int, int] | None,
+    step_range: Sequence[int] | None,
     subtype_filter: list[str] | None,
     per_rank: bool,
 ) -> dict[str, Any] | None:
+    import pandas as pd
+
     activation_frames: list[pd.DataFrame] = []
     inflight_frames: list[pd.DataFrame] = []
     used_files: list[Path] = []
@@ -730,6 +693,8 @@ def _write_csv(
     prefix: str | None,
     out_dir: str,
 ) -> None:
+    import pandas as pd
+
     if not rows:
         return
     csv_data = pd.concat(rows, ignore_index=True)
@@ -761,6 +726,8 @@ def _plot_step_series(
     force_log: bool = False,
 ) -> None:
     """Plot one per-step line per input, from ``step_frames[i]``."""
+    import matplotlib.pyplot as plt
+
     fig, ax = plt.subplots(figsize=(10, 6))
     values: list[float] = []
 
@@ -805,6 +772,8 @@ def _plot_subtype_bars(
     ylabel: str,
     title: str,
 ) -> None:
+    import matplotlib.pyplot as plt
+
     subtype_keys = sorted(
         {
             (str(row.type), str(row.subtype))
@@ -891,6 +860,9 @@ def _plot_per_rank_totals(
     out_dir: str,
     show_plot: bool,
 ) -> None:
+    import matplotlib
+    import matplotlib.pyplot as plt
+
     with_rank_data = [
         data for data in all_data if data["per_rank_detail"] is not None
     ]

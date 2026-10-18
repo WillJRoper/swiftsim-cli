@@ -7,6 +7,8 @@ from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
 
+from swiftsim_cli.utilities.messages import reading
+
 from .task_plot_metadata import COLOURS
 
 
@@ -32,7 +34,8 @@ class ThreadpoolData:
         self.cpu_clock_khz: float | None = None
         self.thread_count = 0
         self.records: list[ThreadpoolRecord] = []
-        self._parse()
+        with reading(self.file_path):
+            self._parse()
 
     def _parse(self) -> None:
         """Parse the threadpool file into structured records."""

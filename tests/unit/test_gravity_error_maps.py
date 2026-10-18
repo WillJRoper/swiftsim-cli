@@ -5,8 +5,8 @@ from unittest.mock import patch
 
 import matplotlib.pyplot as plt
 import numpy as np
+import pytest
 
-from swiftsim_cli.modes.analyse import gravity_error_maps
 from swiftsim_cli.modes.analyse.gravity_error_maps import (
     _create_continuous_error_map,
     analyse_gravity_error_maps,
@@ -21,7 +21,7 @@ def test_distance_panel_autoscales_counts_and_uses_box_centre(tmp_path):
     pos = rng.uniform(0.0, 10.0, size=(500, 3))
     errors = rng.uniform(1e-6, 1e-2, size=500)
 
-    with patch.object(gravity_error_maps.plt, "close"):
+    with patch("matplotlib.pyplot.close"):
         _create_continuous_error_map(
             exact_pos=pos,
             norm_error=errors,
@@ -60,3 +60,15 @@ def test_analyse_gravity_error_maps_with_shuffled_ids(tmp_path):
     out_dir = tmp_path / "gravity_error_maps_analysis"
     assert (out_dir / "gravity_error_map_my_run.png").exists()
     assert (out_dir / "gravity_binary_error_map_my_run.png").exists()
+
+
+def test_error_maps_fail_when_no_input_is_usable(tmp_path, capsys):
+    """Every input failing is an error, and no maps are written."""
+    lonely = tmp_path / "gravity_checks_exact_step0001.dat"
+    write_force_file(lonely, [1, 2, 3])
+
+    with pytest.raises(ValueError, match="none of the gravity check inputs"):
+        analyse_gravity_error_maps([lonely], ["run"], output_path=tmp_path)
+
+    assert "warning: skipping" in capsys.readouterr().err
+    assert not (tmp_path / "gravity_error_maps_analysis").exists()

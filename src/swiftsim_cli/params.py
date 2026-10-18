@@ -3,6 +3,9 @@
 from pathlib import Path
 
 from ruamel.yaml import YAML
+from ruamel.yaml.constructor import DuplicateKeyError
+
+from swiftsim_cli.utilities.messages import warn
 
 PARAMS: dict | None = None
 PARAMS_SOURCE: Path | None = None
@@ -66,12 +69,33 @@ def _parse_parameters(param_file: Path) -> dict:
     # Clean leading tabs
     cleaned = _clean_yaml_text(raw)
 
-    # Parse YAML safely
+    # Parse the YAML. SWIFT rejects duplicate keys, but we may be reading
+    # someone else's file (SWIFT's own parameter_example.yml has one), so
+    # a duplicate is a warning and the first value is kept.
     try:
-        return yaml.load(cleaned) or {}
+        try:
+            params = yaml.load(cleaned)
+        except DuplicateKeyError as e:
+            line = e.problem_mark.line + 1 if e.problem_mark else "?"
+            warn(
+                f"{param_file}:{line}: {e.problem}; using the first value "
+                "(SWIFT itself rejects duplicate keys)"
+            )
+            lenient = round_trip_yaml()
+            lenient.allow_duplicate_keys = True
+            params = lenient.load(cleaned)
     except Exception as e:
-        # Add context and re-raise
         raise ValueError(f"Error parsing YAML in '{param_file}': {e}") from e
+
+    if params is None:
+        return {}
+    if not isinstance(params, dict):
+        kind = "list" if isinstance(params, list) else "single value"
+        raise ValueError(
+            f"Parameter file '{param_file}' must contain a YAML mapping of "
+            f"sections, not a {kind}"
+        )
+    return params
 
 
 def load_parameters(param_file: Path | None = None) -> dict:

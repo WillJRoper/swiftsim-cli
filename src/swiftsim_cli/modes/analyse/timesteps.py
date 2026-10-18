@@ -1,6 +1,6 @@
 """Timestep analysis for SWIFT simulations.
 
-This module analyzes timestep evolution files from SWIFT simulations,
+This module analyses timestep evolution files from SWIFT simulations,
 providing insights into simulation dynamics and timestep behavior over time.
 
 Key functions:
@@ -14,16 +14,18 @@ import math
 from pathlib import Path
 from typing import Any, Sequence
 
-import matplotlib
-import matplotlib.pyplot as plt
 import numpy as np
-from matplotlib.lines import Line2D
 
 from swiftsim_cli.modes.common_args import (
     add_labels_argument,
     add_output_arguments,
+    add_steps_argument,
+    existing_file,
+    positive_int,
+    resolve_labels,
 )
 from swiftsim_cli.utilities.io import create_output_path
+from swiftsim_cli.utilities.messages import warn
 from swiftsim_cli.utilities.plotting import save_figure
 from swiftsim_cli.utilities.step_table import (
     DEAD_TIME_COLUMN,
@@ -32,10 +34,16 @@ from swiftsim_cli.utilities.step_table import (
 )
 from swiftsim_cli.utilities.tables import create_ascii_table
 
-tab10 = matplotlib.colormaps["tab10"]
-
 # Subdirectory of --out that the outputs are written to
 OUT_SUBDIR = "timesteps_analysis"
+
+# --time-column choices and the step-table columns they select
+TIME_COLUMNS = {
+    "step": "Step",
+    "time": "Time",
+    "scale-factor": "Scale-factor",
+    "redshift": "Redshift",
+}
 
 _TIMESTEP_LABEL_ALIASES = {
     "Time": "Time [Internal Units]",
@@ -48,26 +56,31 @@ def add_timestep_arguments(
 ) -> None:
     """Add timestep analysis arguments to the subparser."""
     timestep_parser = subparsers.add_parser(
-        "timesteps", help="Plot the timestep files of one or more runs."
+        "timesteps",
+        help="Plot the timestep files of one or more runs.",
+        description="Plot the cumulative runtime and dead time of one or "
+        "more runs from their timesteps files (or SWIFT logs, which "
+        "contain the same step table).",
     )
+    timestep_parser.set_defaults(func=run_timestep)
 
     timestep_parser.add_argument(
         "files",
         nargs="+",
+        metavar="FILE",
         help="Timestep files to analyse.",
-        type=Path,
+        type=existing_file,
     )
-    add_labels_argument(timestep_parser, required=True)
+    add_labels_argument(timestep_parser)
 
     timestep_parser.add_argument(
         "--time-column",
-        help=(
-            "Zero-based column index to use for the x-axis. "
-            "Use 1 for internal time, 2 for scale factor (default: 2)."
-        ),
-        type=int,
-        default=2,
+        choices=tuple(TIME_COLUMNS),
+        default="scale-factor",
+        help="Step-table column to use for the x-axis (default: "
+        "scale-factor).",
     )
+    add_steps_argument(timestep_parser)
 
     add_output_arguments(timestep_parser, OUT_SUBDIR)
 
@@ -86,7 +99,7 @@ def add_timestep_arguments(
             "Number of threads used by each run, in the same order as files. "
             "When given, wall-clock and dead time are converted to CPU time."
         ),
-        type=int,
+        type=positive_int,
         default=None,
     )
 
@@ -95,24 +108,15 @@ def run_timestep(args: argparse.Namespace) -> None:
     """Run timestep analysis."""
     analyse_timestep_files(
         args.files,
-        args.labels,
+        resolve_labels(args.files, args.labels),
         output_path=args.out,
         prefix=args.prefix,
         show_plot=args.show,
         time_column=args.time_column,
         match_runtimes=args.match_runtimes,
         nthreads=args.threads_per_run,
+        step_range=args.steps,
     )
-
-
-def _get_x_axis_label(time_column: int) -> str:
-    """Return the x-axis label for a selected timestep file column."""
-    if time_column == 1:
-        return "Time [Internal Units]"
-    if time_column == 2:
-        return "Scale factor"
-
-    return f"Column {time_column + 1}"
 
 
 def _normalise_timestep_label(label: str) -> str:
@@ -123,37 +127,39 @@ def _normalise_timestep_label(label: str) -> str:
 def analyse_timestep_files(
     files: Sequence[str | Path],
     labels: list[str],
-    plot_time: bool | None = None,
     output_path: str | Path | None = None,
     prefix: str | None = None,
     show_plot: bool = False,
-    time_column: int | None = None,
+    time_column: str = "scale-factor",
     match_runtimes: bool = False,
     nthreads: list[int] | None = None,
+    step_range: Sequence[int] | None = None,
 ) -> None:
     """Plot the timestep files of one or more SWIFT runs.
 
     Args:
         files: List of file paths to the timestep files.
         labels: List of labels for the runs.
-        plot_time: Deprecated compatibility flag. If provided, True selects the
-            internal-time column and False selects the scale-factor column.
         output_path: Directory whose ``timesteps_analysis`` subdirectory
             receives the plot. If None, the current directory is used.
         prefix: Optional prefix to add to the output filename.
         show_plot: Whether to display the plot.
-        time_column: Zero-based column index to use for the x-axis. Defaults
-            to 2, which is the scale-factor column in the timestep table.
+        time_column: The x-axis column, one of the `TIME_COLUMNS` keys.
         match_runtimes: Whether to trim all plotted datasets to the shortest
             x-axis extent found in the inputs.
         nthreads: Optional number of threads used by each run. If provided,
             cumulative wall-clock and dead time are multiplied by these values
             to show CPU time.
+        step_range: Optional inclusive ``(start, end)`` step range.
 
     Raises:
         ValueError: If the number of files and labels do not match, or if a
             file contains no step-table rows.
     """
+    import matplotlib
+    import matplotlib.pyplot as plt
+    from matplotlib.lines import Line2D
+
     # Make sure the number of files and labels match
     if len(files) != len(labels):
         raise ValueError("Number of files and labels must match.")
@@ -168,11 +174,12 @@ def analyse_timestep_files(
                 "threads-per-run entries must be positive integers."
             )
 
-    if time_column is None:
-        time_column = 1 if plot_time is True else 2
-
-    if time_column < 0:
-        raise ValueError("time_column must be non-negative.")
+    if time_column not in TIME_COLUMNS:
+        raise ValueError(
+            f"time_column must be one of {', '.join(TIME_COLUMNS)}, got "
+            f"{time_column!r}."
+        )
+    column = TIME_COLUMNS[time_column]
 
     place_legend_below = len(labels) > 3
     figure_height = 8.0
@@ -185,7 +192,7 @@ def analyse_timestep_files(
     x: list[np.ndarray[Any, Any]] = []
     y: list[np.ndarray[Any, Any]] = []
     deadtime: list[np.ndarray[Any, Any]] = []
-    x_label: str | None = None
+    x_label = _normalise_timestep_label(column)
     runtime_comparison = None
     for file_index, file in enumerate(files):
         xi_values: list[float] = []
@@ -198,27 +205,25 @@ def analyse_timestep_files(
                 if row is None:
                     continue
 
-                columns = step_table.columns
-                if time_column >= len(columns):
-                    raise ValueError(
-                        f"time_column {time_column} is out of range for "
-                        f"'{file}', which has {len(columns)} columns."
-                    )
-                if WALLCLOCK_COLUMN not in row or DEAD_TIME_COLUMN not in row:
-                    raise ValueError(
-                        f"'{file}' has no '{WALLCLOCK_COLUMN}' or "
-                        f"'{DEAD_TIME_COLUMN}' column."
-                    )
-                if x_label is None and step_table.header_seen:
-                    x_label = _normalise_timestep_label(columns[time_column])
-
-                xi_values.append(row[columns[time_column]])
+                if step_range is not None and not (
+                    step_range[0] <= row["Step"] <= step_range[1]
+                ):
+                    continue
+                for name in (column, WALLCLOCK_COLUMN, DEAD_TIME_COLUMN):
+                    if name not in row:
+                        raise ValueError(f"'{file}' has no '{name}' column.")
+                xi_values.append(row[column])
                 yi_values.append(row[WALLCLOCK_COLUMN])
                 dti_values.append(row[DEAD_TIME_COLUMN])
 
         if not xi_values:
+            where = (
+                f" in steps {step_range[0]}-{step_range[1]}"
+                if step_range is not None
+                else ""
+            )
             raise ValueError(
-                f"No step-table rows could be parsed from '{file}'."
+                f"No step-table rows could be parsed from '{file}'{where}."
             )
 
         time_scale = nthreads[file_index] if nthreads is not None else 1
@@ -237,9 +242,9 @@ def analyse_timestep_files(
     # monotonically (e.g. not for redshift).
     x_is_monotonic = all(np.all(np.diff(series) >= 0) for series in x)
     if max_x_values and not x_is_monotonic:
-        print(
-            "Warning: x-axis column is not monotonically increasing; "
-            "skipping the runtime comparison and --match-runtimes."
+        warn(
+            "x-axis column is not monotonically increasing; skipping the "
+            "runtime comparison and --match-runtimes."
         )
     elif max_x_values:
         runtime_limit = min(max_x_values)
@@ -272,7 +277,7 @@ def analyse_timestep_files(
     ax2.grid(True, alpha=0.3)
 
     # Colors for the plots
-    colors = tab10(np.linspace(0, 1, len(files)))
+    colors = matplotlib.colormaps["tab10"](np.linspace(0, 1, len(files)))
 
     # Main plot - absolute times
     for i, (xi, yi, dt, label, color) in enumerate(
@@ -290,8 +295,6 @@ def analyse_timestep_files(
         ax1.plot(xi, dt, "--", color=color, alpha=0.6, linewidth=2)
 
     # Set labels and title for main plot
-    if x_label is None:
-        x_label = _get_x_axis_label(time_column)
     y_label = "CPU hrs" if nthreads is not None else "Time [hrs]"
     ax1.set_ylabel(y_label)
 

@@ -18,7 +18,11 @@ from pathlib import Path
 
 from swiftsim_cli.modes.common_args import (
     add_output_arguments,
+    add_rank_argument,
     add_steps_argument,
+    existing_dir,
+    existing_file,
+    positive_int,
 )
 from swiftsim_cli.timing.log_scan import (
     LogScan,
@@ -42,6 +46,7 @@ from swiftsim_cli.timing.timing_hierarchy import (
 )
 from swiftsim_cli.timing.timing_plots import make_plots
 from swiftsim_cli.utilities.io import create_output_path
+from swiftsim_cli.utilities.messages import plural, reading, warn
 from swiftsim_cli.utilities.tables import create_ascii_table
 
 # Subdirectory of --out that the outputs are written to
@@ -56,18 +61,6 @@ DEFAULT_HIERARCHY_FUNCTIONS = (
 )
 
 
-def _rank_arg(value: str) -> int | str:
-    """Parse ``--rank``: a rank number or "all"."""
-    if value == "all":
-        return value
-    try:
-        return int(value)
-    except ValueError:
-        raise argparse.ArgumentTypeError(
-            f"expected a rank number or 'all', got {value!r}"
-        ) from None
-
-
 def add_log_arguments(
     subparsers: argparse._SubParsersAction,
 ) -> None:
@@ -76,14 +69,22 @@ def add_log_arguments(
         "log",
         help="Analyse the timers in a SWIFT log file (run SWIFT with -v 1 "
         "for rank 0 timers, -v 2 for every rank).",
+        description="Analyse where the step time goes from the timers in a "
+        "SWIFT log, matched against the timers in the SWIFT source. "
+        "Requires SWIFT run with -v 1 (rank 0 timers) or -v 2 (every "
+        "rank).",
     )
-    parser.add_argument("log_file", type=Path, help="SWIFT log file.")
+    parser.set_defaults(func=run_swift_log_timing)
+    parser.add_argument(
+        "log_file", type=existing_file, metavar="FILE", help="SWIFT log file."
+    )
     add_output_arguments(parser, OUT_SUBDIR)
     add_steps_argument(parser)
     parser.add_argument(
         "--top-n",
-        type=int,
+        type=positive_int,
         default=20,
+        metavar="N",
         help="Rows per table, children per node in call trees and bars per "
         "chart (default: 20).",
     )
@@ -91,21 +92,22 @@ def add_log_arguments(
         "--hierarchy-functions",
         nargs="+",
         default=None,
+        metavar="FUNC",
         help="Timers (function names or timer keys) whose subtrees are "
         "shown merged over all their callers, with a breakdown by caller "
         f"(default: {', '.join(DEFAULT_HIERARCHY_FUNCTIONS)}).",
     )
-    parser.add_argument(
-        "--rank",
-        type=_rank_arg,
+    add_rank_argument(
+        parser,
         default=0,
-        help="MPI rank to analyse, or 'all' for one analysis per rank plus "
-        "an imbalance table (default: 0). Ranks are never summed.",
+        help="MPI rank to analyse; 'all' gives one analysis per rank plus "
+        "an imbalance table (ranks are never summed).",
     )
     parser.add_argument(
         "--swift-src",
-        type=Path,
+        type=existing_dir,
         default=None,
+        metavar="DIR",
         help="SWIFT source tree to read the timers from (default: the "
         "active profile's checkout, at the log's revision).",
     )
@@ -296,7 +298,19 @@ def analyse_swift_log_timings(
     db, db_status = resolve_timer_db(
         read_log_revision(log_file), swift_src, match_revision, regenerate_db
     )
-    scan = scan_log(log_file, db)
+    with reading(log_file):
+        scan = scan_log(log_file, db)
+    if not scan.matched:
+        if not scan.unmatched:
+            raise ValueError(
+                f"no timer lines in '{log_file}'; run SWIFT with -v 1 (rank "
+                "0 timers) or -v 2 (every rank)"
+            )
+        raise ValueError(
+            f"none of the {sum(scan.unmatched.values())} timer lines in "
+            f"'{log_file}' match the timers in the SWIFT source "
+            f"({db_status}); check --swift-src"
+        )
 
     if rank == "all":
         ranks = sorted(scan.timer_ranks) or [0]
@@ -309,8 +323,8 @@ def analyse_swift_log_timings(
             )
         ranks = [rank]
         if len(scan.timer_ranks) > 1:
-            print(
-                f"Warning: {len(scan.timer_ranks)} ranks printed timers; "
+            warn(
+                f"{plural(len(scan.timer_ranks), 'rank')} printed timers; "
                 f"showing rank {rank} only (use --rank N or --rank all)."
             )
 
@@ -324,11 +338,7 @@ def analyse_swift_log_timings(
     names = list(hierarchy_functions or DEFAULT_HIERARCHY_FUNCTIONS)
     unknown = [n for n in names if not h.known(n)]
     if hierarchy_functions and unknown:
-        print(
-            "Warning: no timers named "
-            + ", ".join(unknown)
-            + " in the analysed steps."
-        )
+        warn(f"no timers named {', '.join(unknown)} in the analysed steps.")
     names = [n for n in names if n not in unknown]
 
     summary = _run_summary(scan, steps)

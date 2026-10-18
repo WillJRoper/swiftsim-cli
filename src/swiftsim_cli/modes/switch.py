@@ -13,6 +13,7 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "name",
         type=str,
+        metavar="NAME",
         help="The profile to make current (see 'swift-cli profile --list').",
     )
 

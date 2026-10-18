@@ -141,7 +141,7 @@ def test_generate_output_list_no_cosmo(tmp_path):
 
     # Test with redshift
     args_redshift = {
-        "out": out_file,
+        "output_list": out_file,
         "first_snap_z": 1.0,
         "delta_z": 0.5,
         "final_snap_z": 0.0,
@@ -156,7 +156,7 @@ def test_generate_output_list_no_cosmo(tmp_path):
 
     # Test with time
     args_time = {
-        "out": out_file,
+        "output_list": out_file,
         "first_snap_time": 0.0,
         "delta_time": 0.5,
         "final_snap_time": 1.0,
@@ -171,7 +171,7 @@ def test_generate_output_list_no_cosmo(tmp_path):
 
     # Test with scale factor
     args_scale_factor = {
-        "out": out_file,
+        "output_list": out_file,
         "first_snap_scale_factor": 0.1,
         "delta_scale_factor": 0.1,
         "final_snap_scale_factor": 0.3,
@@ -186,7 +186,7 @@ def test_generate_output_list_no_cosmo(tmp_path):
 
     # Test with log scale factor
     args_log_scale_factor = {
-        "out": out_file,
+        "output_list": out_file,
         "first_snap_scale_factor": 0.1,
         "delta_log_scale_factor": 0.1,
         "final_snap_scale_factor": 0.3,
@@ -213,7 +213,7 @@ def test_generate_output_list_with_cosmo(mocker, tmp_path):
 
     out_file = tmp_path / "output.txt"
     args = {
-        "out": out_file,
+        "output_list": out_file,
         "first_snap_z": 10.0,
         "final_snap_z": 0.0,
         "delta_z": 1.0,
@@ -237,7 +237,7 @@ def test_generate_output_list_without_cosmo(mocker, tmp_path):
 
     out_file = tmp_path / "output.txt"
     args = {
-        "out": out_file,
+        "output_list": out_file,
         "first_snap_scale_factor": 0.1,
         "final_snap_scale_factor": 1.0,
         "delta_scale_factor": 0.1,
@@ -254,7 +254,7 @@ def test_generate_output_list_no_cosmo_error_no_first_snap(tmp_path):
     """Test error when no first snapshot is specified."""
     out_file = tmp_path / "output.txt"
     args = {
-        "out": out_file,
+        "output_list": out_file,
         "delta_z": 1.0,
         "final_snap_z": 0.0,
     }
@@ -268,7 +268,7 @@ def test_generate_output_list_no_cosmo_error_no_delta(tmp_path):
     """Test error when no delta is specified."""
     out_file = tmp_path / "output.txt"
     args = {
-        "out": out_file,
+        "output_list": out_file,
         "first_snap_z": 10.0,
         "final_snap_z": 0.0,
     }
@@ -280,7 +280,7 @@ def test_generate_output_list_no_cosmo_error_z_without_delta_z(tmp_path):
     """Test error when first snap is z but delta_z not specified."""
     out_file = tmp_path / "output.txt"
     args = {
-        "out": out_file,
+        "output_list": out_file,
         "first_snap_z": 10.0,
         "delta_time": 1.0,
         "final_snap_z": 0.0,
@@ -296,7 +296,7 @@ def test_generate_output_list_no_cosmo_error_time_without_delta_time(tmp_path):
     """Test error when first snap is time but delta_time not specified."""
     out_file = tmp_path / "output.txt"
     args = {
-        "out": out_file,
+        "output_list": out_file,
         "first_snap_time": 0.0,
         "delta_z": 1.0,
         "final_snap_time": 1.0,
@@ -313,7 +313,7 @@ def test_generate_output_list_no_cosmo_error_scale_factor_without_delta(
     """Test error when first snap is scale factor but no delta specified."""
     out_file = tmp_path / "output.txt"
     args = {
-        "out": out_file,
+        "output_list": out_file,
         "first_snap_scale_factor": 0.1,
         "delta_z": 1.0,
         "final_snap_scale_factor": 1.0,
@@ -329,7 +329,7 @@ def test_generate_output_list_no_cosmo_error_no_final_snap(tmp_path):
     """Test error when no final snapshot is specified."""
     out_file = tmp_path / "output.txt"
     args = {
-        "out": out_file,
+        "output_list": out_file,
         "first_snap_time": 1.0,
         "delta_time": 1.0,
     }
@@ -343,7 +343,7 @@ def test_generate_output_list_no_cosmo_snipshot_z_mismatch(tmp_path):
     """Test error when snipshot delta type doesn't match snapshot type."""
     out_file = tmp_path / "output.txt"
     args = {
-        "out": out_file,
+        "output_list": out_file,
         "first_snap_z": 10.0,
         "delta_z": 1.0,
         "final_snap_z": 0.0,
@@ -359,7 +359,7 @@ def test_generate_output_list_no_cosmo_snipshot_time_mismatch(tmp_path):
     """Test error when snipshot delta type doesn't match (time)."""
     out_file = tmp_path / "output.txt"
     args = {
-        "out": out_file,
+        "output_list": out_file,
         "first_snap_time": 0.0,
         "delta_time": 0.5,
         "final_snap_time": 1.0,
@@ -377,7 +377,7 @@ def test_generate_output_list_no_cosmo_snipshot_scale_factor_mismatch(
     """Test error when snipshot delta type doesn't match for scale factor."""
     out_file = tmp_path / "output.txt"
     args = {
-        "out": out_file,
+        "output_list": out_file,
         "first_snap_scale_factor": 0.1,
         "delta_scale_factor": 0.1,
         "final_snap_scale_factor": 0.3,
@@ -394,7 +394,7 @@ def test_generate_output_list_no_cosmo_with_snipshots(tmp_path):
     """Test generating output list with snipshots."""
     out_file = tmp_path / "output.txt"
     args = {
-        "out": out_file,
+        "output_list": out_file,
         "first_snap_z": 2.0,
         "delta_z": 1.0,
         "final_snap_z": 0.0,
@@ -422,7 +422,7 @@ def test_generate_output_list_no_cosmo_time_with_snipshots(tmp_path):
     """Test generating output list with time and snipshots."""
     out_file = tmp_path / "output.txt"
     args = {
-        "out": out_file,
+        "output_list": out_file,
         "first_snap_time": 0.0,
         "delta_time": 0.5,
         "final_snap_time": 1.5,
@@ -448,7 +448,7 @@ def test_generate_output_list_no_cosmo_log_scale_factor(tmp_path):
     """Test generating output list with logarithmic scale factor."""
     out_file = tmp_path / "output.txt"
     args = {
-        "out": out_file,
+        "output_list": out_file,
         "first_snap_scale_factor": 0.1,
         "delta_log_scale_factor": 0.1,
         "final_snap_scale_factor": 0.3,
@@ -473,7 +473,7 @@ def test_generate_output_list_no_cosmo_scale_factor_with_snipshots(tmp_path):
     """Test generating output list with scale factor and snipshots."""
     out_file = tmp_path / "output.txt"
     args = {
-        "out": out_file,
+        "output_list": out_file,
         "first_snap_scale_factor": 0.1,
         "delta_scale_factor": 0.1,
         "final_snap_scale_factor": 0.3,
@@ -502,13 +502,15 @@ def test_add_arguments():
 
     # Test with defaults
     args = parser.parse_args([])
-    assert args.out == Path("output_list.txt")
+    assert args.output_list == Path("output_list.txt")
     assert args.params is None
     assert args.first_snap_z is None
 
     # Test with some arguments
-    args = parser.parse_args(["--out", "test.txt", "--first-snap-z", "10.0"])
-    assert args.out == Path("test.txt")
+    args = parser.parse_args(
+        ["--output-list", "test.txt", "--first-snap-z", "10.0"]
+    )
+    assert args.output_list == Path("test.txt")
     assert args.first_snap_z == 10.0
 
 
@@ -521,7 +523,7 @@ def test_run(mocker, tmp_path):
     )
 
     args = Mock()
-    args.out = tmp_path / "output.txt"
+    args.output_list = tmp_path / "output.txt"
     args.first_snap_z = 10.0
     args.final_snap_z = 0.0
     args.delta_z = 1.0

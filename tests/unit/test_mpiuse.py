@@ -8,11 +8,12 @@ from unittest.mock import Mock, patch
 
 import numpy as np
 import pandas as pd
+import pytest
 
 from swiftsim_cli.modes.analyse.mpiuse import (
     _aggregate,
     _discover_files,
-    _read_mpiuse_file,
+    _read_mpiuse_raw_file,
     add_mpiuse_arguments,
     analyse_swift_mpiuse,
     run_swift_mpiuse,
@@ -170,7 +171,7 @@ class TestRunSwiftMpiuse:
             prefix="cmp",
             show_plot=True,
             subtype_filter=["gpart"],
-            step_range=(1, 4),
+            step_range=[1, 4],
             per_rank=True,
             output_format="both",
         )
@@ -191,8 +192,8 @@ class TestMpiuseHelpers:
         assert len(from_dir) == 3
         assert from_dir == from_glob
 
-    def test_read_mpiuse_file_filters_activation_rows(self, tmp_path):
-        """Test that only activation rows are retained."""
+    def test_read_mpiuse_raw_file_types_columns(self, tmp_path):
+        """Rows are read with integer columns; activation rows are flagged."""
         path = _write_mpiuse_file(
             tmp_path,
             rank=0,
@@ -205,21 +206,12 @@ class TestMpiuseHelpers:
             ],
         )
 
-        data = _read_mpiuse_file(path)
+        data = _read_mpiuse_raw_file(path)
+        activation = data.loc[data["activation"] == 1]
 
-        assert list(data.columns) == [
-            "step",
-            "rank",
-            "otherrank",
-            "type",
-            "subtype",
-            "tag",
-            "size",
-            "dtic",
-        ]
-        assert len(data) == 2
-        assert set(data["subtype"].tolist()) == {"gpart", "rho"}
-        assert data["size"].tolist() == [64, 32]
+        assert len(data) == 4
+        assert set(activation["subtype"].tolist()) == {"gpart", "rho"}
+        assert activation["size"].tolist() == [64, 32]
         assert np.issubdtype(data["step"].dtype, np.integer)
         assert np.issubdtype(data["size"].dtype, np.integer)
 
@@ -263,7 +255,7 @@ class TestAnalyseSwiftMpiuse:
         """Test that labels must match the number of inputs."""
         import pytest
 
-        with pytest.raises(ValueError, match="must match"):
+        with pytest.raises(ValueError, match="one label per input"):
             analyse_swift_mpiuse(
                 inputs=["a", "b"],
                 labels=["only-one"],
@@ -338,18 +330,32 @@ class TestAnalyseSwiftMpiuse:
         assert "Δ % (branch)" in comparison
 
     def test_step_filter_excludes_everything(self, tmp_path, capsys):
-        """Test clean exit when the step filter removes all data."""
+        """A step filter removing all data is an error, not empty output."""
+        run_dir = _make_sample_input(tmp_path / "run_a")
+
+        with pytest.raises(ValueError, match="no usable mpiuse data found"):
+            analyse_swift_mpiuse(
+                inputs=[str(run_dir)],
+                labels=["a"],
+                output_path=str(tmp_path),
+                prefix="empty",
+                show_plot=False,
+                step_range=(100, 200),
+            )
+
+        captured = capsys.readouterr()
+        assert "warning: no usable mpiuse data remained" in captured.err
+        assert not (tmp_path / "mpiuse_analysis").exists()
+
+    def test_unmatched_input_is_a_warning(self, tmp_path, capsys):
+        """An input matching nothing is skipped when others work."""
         run_dir = _make_sample_input(tmp_path / "run_a")
 
         analyse_swift_mpiuse(
-            inputs=[str(run_dir)],
-            labels=["a"],
+            inputs=[str(run_dir), str(tmp_path / "nothing*")],
             output_path=str(tmp_path),
-            prefix="empty",
-            show_plot=False,
-            step_range=(100, 200),
         )
 
-        captured = capsys.readouterr()
-        assert "no usable mpiuse data remained" in captured.out.lower()
-        assert "No usable mpiuse data found in any input" in captured.out
+        assert "warning: no mpiuse_report files matched" in (
+            capsys.readouterr().err
+        )

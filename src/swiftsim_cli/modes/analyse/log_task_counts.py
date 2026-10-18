@@ -22,19 +22,21 @@ from __future__ import annotations
 
 import argparse
 from pathlib import Path
-from typing import TypedDict
+from typing import Sequence, TypedDict
 
-import matplotlib
-import matplotlib.pyplot as plt
 import numpy as np
 from numpy.typing import NDArray
 
 from swiftsim_cli.modes.common_args import (
     add_labels_argument,
     add_output_arguments,
+    add_steps_argument,
+    existing_file,
+    resolve_labels,
 )
 from swiftsim_cli.timing.log_scan import scan_log
 from swiftsim_cli.utilities.io import create_output_path
+from swiftsim_cli.utilities.messages import plural, reading, warn
 from swiftsim_cli.utilities.plotting import save_figure
 
 
@@ -79,22 +81,28 @@ def add_task_counts_arguments(
             "Plot the engine_print_task_counts output of SWIFT log files "
             "per step and cumulatively."
         ),
+        description="Plot the engine_print_task_counts output of SWIFT log "
+        "files per step and cumulatively. Requires SWIFT run with -v 1 "
+        "(the counts are printed at each rebuild).",
     )
+    task_parser.set_defaults(func=run_swift_task_counts)
 
     task_parser.add_argument(
         "log_files",
         nargs="+",
+        metavar="FILE",
         help="SWIFT log files to analyse (plotted together).",
-        type=Path,
+        type=existing_file,
     )
     add_labels_argument(task_parser)
     add_output_arguments(task_parser, OUT_SUBDIR)
+    add_steps_argument(task_parser)
 
     task_parser.add_argument(
         "--tasks",
-        "-t",
         type=str,
         nargs="+",
+        metavar="NAME",
         help="Task names to include, as written in the log (e.g. 'sort', "
         "'self', 'pair') (default: all tasks).",
         default=None,
@@ -102,22 +110,22 @@ def add_task_counts_arguments(
 
 
 def run_swift_task_counts(args: argparse.Namespace) -> None:
-    """Entry point for the 'task-counts' CLI subcommand.
-
-    This mirrors run_swift_log_timing() and simply forwards args.
-    """
+    """Entry point for the 'task-counts' CLI subcommand."""
     analyse_swift_task_counts(
         log_files=[str(f) for f in args.log_files],
-        labels=args.labels,
+        labels=resolve_labels(args.log_files, args.labels),
         output_path=args.out,
         prefix=args.prefix,
         show_plot=args.show,
         task_filter=args.tasks,
+        step_range=args.steps,
     )
 
 
 def task_count_series(
-    log_file: str, task_filter: list[str] | None = None
+    log_file: str,
+    task_filter: list[str] | None = None,
+    step_range: Sequence[int] | None = None,
 ) -> tuple[list[int], list[float], list[int], dict[str, NDArray[np.float64]]]:
     """Per-step task counts of one log.
 
@@ -126,6 +134,7 @@ def task_count_series(
     Args:
         log_file: The SWIFT log.
         task_filter: If given, the totals only count these tasks.
+        step_range: Optional inclusive ``(start, end)`` step range.
 
     Returns:
         (steps, simulation times, totals, per-task series); every series
@@ -133,7 +142,8 @@ def task_count_series(
     """
     # Parse the log. Steps without a simulation time (an incomplete
     # last step) cannot be placed on the time axis.
-    scan = scan_log(log_file)
+    with reading(log_file):
+        scan = scan_log(log_file)
     steps: list[int] = []
     sim_times: list[float] = []
     totals: list[int] = []
@@ -141,6 +151,10 @@ def task_count_series(
 
     for step in scan.steps:
         if step.sim_time is None or not step.task_counts:
+            continue
+        if step_range is not None and not (
+            step_range[0] <= step.number <= step_range[1]
+        ):
             continue
         # The last block each rank printed in this step
         snaps = list({s.rank: s for s in step.task_counts}.values())
@@ -194,6 +208,7 @@ def analyse_swift_task_counts(
     prefix: str | None = None,
     show_plot: bool = False,
     task_filter: list[str] | None = None,
+    step_range: Sequence[int] | None = None,
 ) -> None:
     """Analyse engine_print_task_counts blocks in SWIFT log files.
 
@@ -224,21 +239,22 @@ def analyse_swift_task_counts(
         task_filter:
             Optional list of task names to include. If None, all tasks
             are included.
-    """
-    print(
-        f"Analyzing engine_print_task_counts in {len(log_files)} log file(s)"
-    )
+        step_range:
+            Optional inclusive ``(start, end)`` step range.
 
-    # Validate labels if provided
-    if labels is not None:
-        if len(labels) != len(log_files):
-            raise ValueError(
-                f"Number of labels ({len(labels)}) must match "
-                f"number of log files ({len(log_files)})"
-            )
-    else:
-        # Use filenames as labels
-        labels = [Path(f).name for f in log_files]
+    Logs without task counts are reported as warnings and skipped.
+
+    Raises:
+        ValueError: If no log has any task counts.
+    """
+    import matplotlib
+    import matplotlib.pyplot as plt
+
+    print(
+        "Analysing engine_print_task_counts in "
+        f"{plural(len(log_files), 'log file')}"
+    )
+    labels = resolve_labels(log_files, labels)
 
     if task_filter:
         print(f"Filtering for specific tasks: {', '.join(task_filter)}")
@@ -257,12 +273,12 @@ def analyse_swift_task_counts(
         print(f"\nLog {log_idx + 1}/{len(log_files)}: {log_file}")
 
         steps, sim_times, totals, task_series = task_count_series(
-            log_file, task_filter
+            log_file, task_filter, step_range
         )
-        print(f"  Found task counts for {len(steps)} steps")
+        print(f"  Found task counts for {plural(len(steps), 'step')}")
 
         if not steps:
-            print("  WARNING: No usable data found in this log")
+            warn(f"no task counts found in {log_file}; skipping it")
             continue
 
         steps_arr = np.asarray(steps, dtype=int)
@@ -326,8 +342,11 @@ def analyse_swift_task_counts(
         )
 
     if not all_data:
-        print("\nNo usable data found in any log files!")
-        return
+        raise ValueError(
+            "no engine_print_task_counts output found in any log"
+            + (" in the requested steps" if step_range is not None else "")
+            + "; run SWIFT with -v 1"
+        )
 
     # ------------------------------------------------------------------
     # Plot 1: Scatter of total tasks vs simulation time

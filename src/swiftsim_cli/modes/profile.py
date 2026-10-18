@@ -10,7 +10,10 @@ from typing import Any
 from ruamel.yaml import YAML
 
 from swiftsim_cli import profile as profile_mod
-from swiftsim_cli.modes.common_args import add_nr_threads_argument
+from swiftsim_cli.modes.common_args import (
+    add_nr_threads_argument,
+    existing_dir,
+)
 from swiftsim_cli.profile import (
     ProfileError,
     ProfileStore,
@@ -30,6 +33,7 @@ from swiftsim_cli.profile import (
 )
 from swiftsim_cli.swiftsim_dir import build_profile, update_profile
 from swiftsim_cli.utilities.io import ascii_art
+from swiftsim_cli.utilities.messages import note, warn
 from swiftsim_cli.utilities.tables import create_ascii_table
 
 DEFAULT_UPSTREAM = "origin/master"
@@ -39,38 +43,38 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     """Add arguments for the profile mode."""
     action = parser.add_mutually_exclusive_group()
     action.add_argument(
-        "--init",
         "-i",
+        "--init",
         action="store_true",
         help="Interactively set up the main SWIFT clone and first profile.",
     )
     action.add_argument(
-        "--new",
         "-n",
+        "--new",
         metavar="NAME",
         help="Create a profile with its own worktree and branch.",
     )
     action.add_argument(
-        "--switch",
         "-s",
+        "--switch",
         metavar="NAME",
         help="Make NAME the current profile.",
     )
     action.add_argument(
-        "--edit",
         "-e",
+        "--edit",
         metavar="NAME",
         help="Interactively edit a profile.",
     )
     action.add_argument(
-        "--remove",
         "-r",
+        "--remove",
         metavar="NAME",
         help="Remove a profile and its worktree.",
     )
     action.add_argument(
-        "--list",
         "-l",
+        "--list",
         action="store_true",
         help="List all profiles (the default action).",
     )
@@ -82,8 +86,8 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         help="Print the settings of profile NAME (default: the current one).",
     )
     action.add_argument(
-        "--update",
         "-u",
+        "--update",
         nargs="?",
         const="",
         metavar="NAME",
@@ -103,7 +107,8 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     )
     action.add_argument(
         "--adopt",
-        metavar="PATH",
+        type=existing_dir,
+        metavar="DIR",
         help="Register an existing worktree of the SWIFT clone as a profile "
         "(requires --name).",
     )
@@ -111,16 +116,19 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     # Options modifying the actions above
     parser.add_argument(
         "--name",
+        metavar="NAME",
         help="Profile name for --adopt.",
     )
     parser.add_argument(
         "--upstream",
         default=DEFAULT_UPSTREAM,
+        metavar="BRANCH",
         help=f"Upstream branch for --new (default: {DEFAULT_UPSTREAM}).",
     )
     parser.add_argument(
         "--configure-flags",
         default="",
+        metavar="FLAGS",
         help="Configure flags for --new, as one string, e.g. "
         '--configure-flags="--enable-debug --with-hydro=sphenix".',
     )
@@ -631,8 +639,8 @@ def migrate_profiles() -> None:
         entry.get("branch") == old_current.get("branch")
         for entry in named.values()
     ):
-        print(
-            f"Note: the old 'Current' profile (branch "
+        note(
+            f"the old 'Current' profile (branch "
             f"{old_current.get('branch')}) matches no named profile and will "
             "not be migrated; add it later with 'swift-cli profile --new'."
         )
@@ -679,7 +687,7 @@ def migrate_profiles() -> None:
                 softening_pivot_z=float(entry.get("softening_pivot_z", 2.7)),
             )
         except ProfileError as e:
-            print(f"Could not migrate '{name}': {e}")
+            warn(f"could not migrate '{name}': {e}")
             failed.append(name)
     store.current = (
         current

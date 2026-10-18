@@ -39,13 +39,41 @@ Command-line flags (old → new):
 | `config --show/-s` (list configure options) | `config --list-options` |
 | `profile -S` | `profile --show [NAME]` (long form only) |
 | global `-v/--verbose` | removed (use `--debug` for tracebacks) |
+| `output-times -o/--out FILE` | `output-times --output-list FILE` (`-o/--out` always names an output directory) |
+| `output-times -fz`, `-ft`, `-fa`, `-dz`, `-dt`, `-da`, `-dla`, `-sdz`, `-sdt`, `-sda`, `-sdla`, `-fzf`, `-ftf`, `-faf` | the long options only (`--first-snap-z`, `--delta-time`, ...) |
+| `output-times -u/--list-units` | `output-times --list-units` |
+| `new --path DIR` | `new -o/--out DIR` |
+| `new --param ROOT:KEY=VALUE` | `new --set ROOT:KEY=VALUE` (repeatable) |
+| `config --debug/-d` (preset) | `config --debug-build` (`--debug` is only the global option) |
+| `config -g`, `-e`, `-x` | `config --gravity`, `--eagle`, `--eaglexl` |
+| `analyse gravity-error-maps -r N`, `--gridsize N` | `analyse gravity-error-maps --resolution N` |
+| `analyse task-plots --task NAME` | `analyse task-plots --tasks NAME [NAME ...]` |
+| `analyse task-counts -t NAME ...` | `analyse task-counts --tasks NAME [NAME ...]` |
+| `analyse task-plots --rank N` | `analyse task-plots --rank N\|all` (default `all`) |
+| `analyse timesteps --time-column 1\|2\|...` (column index) | `analyse timesteps --time-column step\|time\|scale-factor\|redshift` |
+| required `-l/--labels` (`timesteps`, `gravity-checks`, `gravity-error-maps`) | optional everywhere, defaulting to the file stems |
+| abbreviated long options (e.g. `--res` for `--resolution`) | rejected: spell options out in full |
 
 - Every analysis now writes into `<out>/<analysis>_analysis/` (for example
   `timesteps_analysis/`, `scaling_timers_analysis/`) with `-p/--prefix`
   prepended once to each filename.
 - `analyse scaling timers --min-percent-threshold` defaults to 5 (was 10)
   and applies to exclusive timer time.
-- Python 3.10 or newer is required.
+- Analyses that find no usable data in any input (`gravity-checks`,
+  `gravity-error-maps`, `mpiuse`, `task-counts`, `log` with no timer lines,
+  `timesteps`) now fail with exit code 1 and stop the chain; they used to
+  print a message and exit 0. An input that cannot be used while others can
+  is skipped with a warning.
+- Input files and directories are checked while parsing, so a missing input
+  is a usage error (exit code 2) before any mode runs; invalid numbers
+  (e.g. `-j 0`, `--steps 9 2`, `--rank -1`, `--width -5`) are rejected the
+  same way.
+- Warnings are printed to stderr as `warning: ...` (they used to go to
+  stdout).
+- Dependency floors: numpy >= 2.1 and swiftsimio >= 10.0 (swiftsimio needs
+  numpy 2), with matching floors for astropy (6.1), scipy (1.13), h5py
+  (3.11), matplotlib (3.9), pandas (2.2.2), ruamel.yaml (0.17.21) and
+  prompt_toolkit (3.0.29).
 
 ### Added
 
@@ -60,7 +88,12 @@ Command-line flags (old → new):
 - `config` validates every `--<option>` flag against `./configure --help`
   of the profile's worktree, with close-match suggestions.
 - `-j/--nr-threads` for `make`, `update` and `profile`.
-- `new --force` to replace an existing `params.yml`; `new --param` values are
+- `--steps START END` for `analyse timesteps` and `analyse task-counts`.
+- `--` ends a mode's arguments explicitly
+  (`swift-cli config --enable-debug -- make -j 8`).
+- Every `analyse`/`utils` subcommand's `--help` starts with a description
+  (including what SWIFT must be built or run with).
+- `new --force` to replace an existing `params.yml`; `new --set` values are
   parsed as numbers where possible.
 - `analyse log`: `--rank N|all`, `--swift-src DIR`,
   `--no-match-revision`, `--regenerate-db`.
@@ -84,14 +117,24 @@ Command-line flags (old → new):
   layouts (with or without sink/BH columns, with MPI rank prefixes) parse.
 - Shared helpers for plotting, tables and I/O replace duplicated code.
 - Strict type checking (mypy with strict optional) across src and tests.
+- The licence is GPL-3.0-or-later (it was GPL-3.0-only).
+- Start-up is much faster (`swift-cli --help` takes ~0.4 s instead of
+  ~2.2 s): mode modules and the heavy libraries (matplotlib, astropy, pandas,
+  h5py, swiftsimio, tree-sitter) are imported only when a mode needs them.
+- Error messages for parse errors in input files name the file, and
+  one-line errors suggest `--debug` for the traceback; reading from a closed
+  stdin at a prompt is reported as `error: no input`.
 
 ### Fixed
 
 - `output-times`: cosmological `# Time` lists are now written as ages in
   SWIFT's internal time units (they were written in Gyr, which SWIFT
   misread). Times on the command line are still given in Gyr.
+- Parameter files that are not a YAML mapping, or are not valid YAML, give a
+  one-line error naming the file; duplicate keys (as in SWIFT's own
+  `parameter_example.yml`) are a warning and the first value is used.
 - Cosmology: a parameter file without a `Cosmology` section no longer
-  crashes; ages before z=140 raise a clear error instead of silently
+  crashes, and an incomplete one names the missing parameter; ages before z=140 raise a clear error instead of silently
   becoming z=0; time/redshift conversions consistently use Gyr.
 - `output-times`: a redshift start with a time interval uses the parameter
   file's cosmology; `a_end` from the parameter file is the default end.

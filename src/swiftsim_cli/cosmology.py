@@ -1,17 +1,24 @@
-"""A module defining machinery related to cosmology in SWIFT."""
+"""A module defining machinery related to cosmology in SWIFT.
 
+astropy is imported inside the functions that need it, keeping it off the
+CLI's start-up path.
+"""
+
+from __future__ import annotations
+
+import warnings
 from functools import lru_cache
-from typing import Union
+from typing import TYPE_CHECKING, Union
 
-import astropy.units as u
 import numpy as np
-from astropy.cosmology import (
-    CosmologyError,
-    FlatLambdaCDM,
-    z_at_value,
-)
 
 from swiftsim_cli.params import get_parameter_cache_version, load_parameters
+
+if TYPE_CHECKING:
+    from astropy.cosmology import FlatLambdaCDM
+
+# One Gyr in seconds (Julian years, as astropy's u.Gyr)
+_GYR_IN_S = 365.25 * 86400.0 * 1e9
 
 
 def _get_cosmology() -> FlatLambdaCDM | None:
@@ -30,18 +37,23 @@ def _get_cosmology() -> FlatLambdaCDM | None:
     if not cosmo_params:
         return None
 
-    # Calculate Omega_m if not provided (Omega_m = Omega_cdm + Omega_b)
-    if "Omega_m" in cosmo_params:
-        omega_m = cosmo_params["Omega_m"]
-    else:
-        omega_m = cosmo_params["Omega_cdm"] + cosmo_params["Omega_b"]
+    from astropy.cosmology import FlatLambdaCDM
 
-    # Create a FlatLambdaCDM cosmology object
-    cosmo = FlatLambdaCDM(
-        H0=cosmo_params["h"] * 100,
-        Om0=omega_m,
-        Ob0=cosmo_params["Omega_b"],
-    )
+    try:
+        # Omega_m = Omega_cdm + Omega_b unless given directly
+        if "Omega_m" in cosmo_params:
+            omega_m = cosmo_params["Omega_m"]
+        else:
+            omega_m = cosmo_params["Omega_cdm"] + cosmo_params["Omega_b"]
+        cosmo = FlatLambdaCDM(
+            H0=cosmo_params["h"] * 100,
+            Om0=omega_m,
+            Ob0=cosmo_params["Omega_b"],
+        )
+    except KeyError as e:
+        raise ValueError(
+            f"The parameter file's Cosmology section has no {e.args[0]}"
+        ) from e
 
     return cosmo
 
@@ -106,6 +118,9 @@ def convert_time_to_redshift(
         ValueError: If no cosmology is available or an age cannot be
             converted (e.g. it is earlier than the age at z=140).
     """
+    import astropy.units as u
+    from astropy.cosmology import CosmologyError, z_at_value
+
     cosmo = get_cosmology()
     if cosmo is None:
         raise ValueError("Cosmology not initialized")
@@ -115,7 +130,14 @@ def convert_time_to_redshift(
         if t >= age_now:
             return 0.0
         try:
-            return z_at_value(cosmo.age, t * u.Gyr, zmax=140, zmin=0.0).value
+            with warnings.catch_warnings():
+                # Emitted just before the CosmologyError reported below
+                warnings.filterwarnings(
+                    "ignore", message="fval is not bracketed"
+                )
+                return z_at_value(
+                    cosmo.age, t * u.Gyr, zmax=140, zmin=0.0
+                ).value
         except CosmologyError as e:
             raise ValueError(
                 f"Cannot convert time {t} Gyr to a redshift: {e}"
@@ -183,4 +205,4 @@ def internal_time_unit_in_gyr(params: dict | None = None) -> float:
             "and UnitVelocity_in_cgs to write a time-based output list "
             "for a cosmological run."
         ) from e
-    return float((length_cgs / velocity_cgs * u.s).to(u.Gyr).value)
+    return length_cgs / velocity_cgs / _GYR_IN_S

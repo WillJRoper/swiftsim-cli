@@ -1,10 +1,12 @@
 """Matplotlib helpers shared by the plotting modes."""
 
-from pathlib import Path
-from typing import Iterable
+from __future__ import annotations
 
-import matplotlib.pyplot as plt
-from matplotlib.figure import Figure
+from pathlib import Path
+from typing import TYPE_CHECKING, Iterable
+
+if TYPE_CHECKING:
+    from matplotlib.figure import Figure
 
 
 def save_figure(
@@ -21,6 +23,8 @@ def save_figure(
     Returns:
         The path the figure was saved to.
     """
+    import matplotlib.pyplot as plt
+
     fig.savefig(path, dpi=dpi, bbox_inches="tight")
     if show:
         plt.show()

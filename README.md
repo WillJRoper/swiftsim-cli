@@ -17,7 +17,7 @@ lists and analyses the logs and diagnostics SWIFT writes.
 ## Features
 
 - **Multi-mode execution**: chain modes in one command, e.g.
-  `swift-cli update config --debug make -j 32`.
+  `swift-cli config --debug-build make -j 32`.
 - **Profiles**: every profile is its own git worktree, branch, set of
   configure flags and build, so switching never needs a rebuild.
 - **Simulation setup**: create a run directory with a ready-to-run
@@ -67,11 +67,11 @@ swift-cli profile --update -j 16        # same as: swift-cli update -j 16
 swift-cli make -j 16
 
 # 5. Create a run directory with a params.yml for your ICs
-swift-cli new --path runs/test --ics ics.hdf5 --param Snapshots:basename=snap
+swift-cli new -o runs/test --ics ics.hdf5 --set Snapshots:basename=snap
 
 # 6. Generate an output list from the run's cosmology
 swift-cli output-times -P runs/test/params.yml --first-snap-z 10 --delta-z 0.5 \
-    -o runs/test/output_list.txt
+    --output-list runs/test/output_list.txt
 
 # 7. After running SWIFT with -v 1, analyse where the time went
 swift-cli analyse log runs/test/swift.log -o runs/test
@@ -102,7 +102,7 @@ swift-cli --profile zoom make -j 16   # build another profile without switching
 
 Updating a profile runs `git pull --rebase --autostash` in its worktree (your local commits are replayed on top of the upstream, and any uncommitted changes are stashed and re-applied afterwards). If the rebase hits conflicts nothing is built and you're told how to resolve them. Otherwise `./autogen.sh` is run if `./configure` is missing, `./configure` is (re)run only if the profile has never been configured or its configure flags changed, and then `make` is run.
 
-`swift-cli config` sets the current profile's configure flags (from presets such as `--debug` and/or any `--<option>` flags) and reconfigures. Flags are validated against the options listed by `./configure --help` in that profile's worktree, with suggestions for typos.
+`swift-cli config` sets the current profile's configure flags (from presets such as `--debug-build` and/or any `--<option>` flags) and reconfigures. Flags are validated against the options listed by `./configure --help` in that profile's worktree, with suggestions for typos.
 
 Already have worktrees made by hand? Register them with:
 
@@ -146,7 +146,7 @@ Global options (must come before the first mode):
                   SWIFT_CLI_DEBUG=1).
 
 Available modes:
-  profile         Manage SWIFT profiles (one git worktree, branch and build each).
+  profile         Manage SWIFT profiles (one worktree, branch and build each).
   config          Set the current profile's configure flags and reconfigure.
   output-times    Generate a list of snapshot (and snipshot) output times.
   update          Pull and rebuild the current profile.
@@ -157,11 +157,15 @@ Available modes:
   show            Show the current profile (and optionally its cosmology).
   utils           Run small helper calculations (e.g. softenings).
 
+Modes run in order and the chain stops at the first error. A mode name
+starts the next mode unless the current mode expects a value there; use
+'--' to end a mode's arguments explicitly.
+
 Examples:
   swift-cli config --enable-debug
   swift-cli make -j 8
   swift-cli config --enable-debug make -j 32
-  swift-cli update config --enable-debug make -j 8
+  swift-cli config --enable-debug -- make -j 32
   swift-cli --profile zoom make -j 16
 
 For mode-specific help: swift-cli <mode> --help
@@ -173,22 +177,44 @@ Every mode has its own help: `swift-cli <mode> --help` (and
 ### Chaining modes
 
 ```bash
-# Update SWIFT, configure with the debug preset, and compile
-swift-cli update config --debug make -j 16
+# Configure with the debug preset, then compile
+swift-cli config --debug-build make -j 16
 
 # Compile and create a new simulation in the test_run directory
-swift-cli make -j 32 new --path test_run --ics initial_conditions.hdf5
+swift-cli make -j 32 new -o test_run --ics initial_conditions.hdf5
+
+# Analyse a log, then show the profile
+swift-cli analyse log run/swift.log -o run show
 ```
 
-A word that names a mode starts the next mode, unless the current mode
-expects it as a value: `new --path make ...` creates a run directory called
-`make`, and `switch show` switches to a profile called `show`.
+Modes run in order and the chain stops at the first error. A word that
+names a mode starts the next mode, unless the current mode expects it as a
+value: `new -o make ...` creates a run directory called `make`, and
+`switch show` switches to a profile called `show`. A `--` always ends the
+current mode's arguments, so the next word must name a mode
+(`config --enable-debug -- make -j 8`).
+
+Every mode parses its arguments before the first one runs, so a typo in
+the last mode fails before anything is built. Input files and directories
+are checked at that point too, except the parameter file (`-P/--params`),
+which is checked when its mode runs because an earlier `new` may create
+it. Long options must be spelled out in full (no abbreviations).
 
 ### Errors
 
-Errors such as a missing file or an invalid option value are reported as a
-single `error: ...` line (exit code 1; a failed external command exits with
-its own code). Use `--debug` or `SWIFT_CLI_DEBUG=1` for the traceback.
+Errors are reported as a single `error: ...` line on stderr; use `--debug`
+or `SWIFT_CLI_DEBUG=1` for the traceback. Exit codes:
+
+- `0`: success (also for `--help` and `--version`).
+- `1`: an error while running a mode (e.g. an unreadable input or an
+  analysis that found no usable data), or no mode given (the help is
+  printed).
+- `2`: a usage error (unknown option, invalid value, missing input file).
+- A failed external command (`configure`, `make`, `git`) exits with its own
+  code; an interrupt exits with 130.
+
+Warnings (e.g. one of several inputs that could not be used) go to stderr
+as `warning: ...` lines and do not stop the chain.
 
 ## Modes
 
@@ -209,12 +235,12 @@ its own code). Use `--debug` or `SWIFT_CLI_DEBUG=1` for the traceback.
 
 ```bash
 swift-cli config --list-options                    # ./configure --help
-swift-cli config --debug                           # preset flags
+swift-cli config --debug-build                     # preset flags
 swift-cli config --eagle --with-cooling=COLIBRE    # preset + any --<option>
 swift-cli config                                   # reconfigure with stored flags
 ```
 
-Presets: `--debug/-d`, `--gravity/-g`, `--eagle/-e`, `--eaglexl/-x`. Any other
+Presets: `--debug-build`, `--gravity`, `--eagle`, `--eaglexl`. Any other
 `--<option>` flag is validated against `./configure --help` in the profile's
 worktree (with suggestions for typos) and passed on. The resulting flags
 replace the profile's stored configure flags.
@@ -231,15 +257,15 @@ swift-cli show --all             # profile and its parameter file's cosmology
 ### `new`
 
 ```bash
-swift-cli new --path runs/L100 --ics ics/L100.hdf5 \
-    --param Cosmology:a_end=1.0 --param Snapshots:basename=L100
+swift-cli new -o runs/L100 --ics ics/L100.hdf5 \
+    --set Cosmology:a_end=1.0 --set Snapshots:basename=L100
 ```
 
 Writes `runs/L100/params.yml` from the profile's
 `examples/parameter_example.yml`, with absolute paths to the ICs and to
 `restart/` and `snapshots/` subdirectories, the units, softenings and start
-time (`a_begin` or `time_begin`) derived from the ICs, and your `--param ROOT:KEY=VALUE`
-overrides. An existing `params.yml` is only replaced with `--force`.
+time (`a_begin` or `time_begin`) derived from the ICs, and your
+`--set ROOT:KEY=VALUE` overrides. An existing `params.yml` is only replaced with `--force`.
 
 ### `output-times`
 
@@ -255,8 +281,9 @@ swift-cli output-times -P params.yml --first-snap-scale-factor 0.1 \
 swift-cli output-times --first-snap-time 0 --delta-time 0.1 --final-snap-time 2
 ```
 
-The interval (`--delta-*`) chooses the units of the list; `--list-units`
-overrides them. With snipshots the list gets a `Select Output` column.
+The list is written to `--output-list FILE` (default: `output_list.txt` in
+the current directory). The interval (`--delta-*`) chooses the units of the
+list; `--list-units` overrides them. With snipshots the list gets a `Select Output` column.
 With a cosmology, `--*-time` values are given as ages of the Universe in
 Gyr, and the list is written as ages in SWIFT's *internal* time units
 (UnitLength_in_cgs / UnitVelocity_in_cgs from the parameter file's
@@ -276,32 +303,29 @@ to the profile's values).
 ## Analysis (`analyse`)
 
 ```text
-usage: swift-cli analyse [-h]
-                         {timesteps,gravity-checks,gravity-error-maps,log,task-counts,mpiuse,task-plots,scaling}
-                         ...
+usage: swift-cli analyse [-h] ANALYSIS ...
 
 Analyse SWIFT logs and diagnostic outputs.
 
 positional arguments:
-  {timesteps,gravity-checks,gravity-error-maps,log,task-counts,mpiuse,task-plots,scaling}
-                        Type of analysis to perform.
-    timesteps           Plot the timestep files of one or more runs.
-    gravity-checks      Compare SWIFT gravity forces with exact gravity
-                        checks.
-    gravity-error-maps  Create hexbin error maps for gravity check files.
-    log                 Analyse the timers in a SWIFT log file (run SWIFT with
-                        -v 1 for rank 0 timers, -v 2 for every rank).
-    task-counts         Plot the engine_print_task_counts output of SWIFT log
-                        files per step and cumulatively.
-    mpiuse              Analyse SWIFT mpiuse_report-rank*-step*.dat files and
-                        compare communication volume across inputs.
-    task-plots          Plot SWIFT task-debug and threadpool timings on a
-                        shared wall-clock axis.
-    scaling             Analyse how SWIFT scales across runs with different
-                        MPI rank counts.
+  ANALYSIS            Type of analysis to perform.
+    timesteps         Plot the timestep files of one or more runs.
+    gravity-checks    Compare SWIFT gravity forces with exact gravity checks.
+    gravity-error-maps
+                      Create hexbin error maps for gravity check files.
+    log               Analyse the timers in a SWIFT log file (run SWIFT with
+                      -v 1 for rank 0 timers, -v 2 for every rank).
+    task-counts       Plot the engine_print_task_counts output of SWIFT log
+                      files per step and cumulatively.
+    mpiuse            Analyse SWIFT mpiuse_report-rank*-step*.dat files and
+                      compare communication volume across inputs.
+    task-plots        Plot SWIFT task-debug and threadpool timings on a shared
+                      wall-clock axis.
+    scaling           Analyse how SWIFT scales across runs with different MPI
+                      rank counts.
 
 options:
-  -h, --help            show this help message and exit
+  -h, --help          show this help message and exit
 
 Each analysis writes its files into <out>/<analysis>_analysis/ (-o/--out,
 default: the current directory), with -p/--prefix prepended to each filename.
@@ -318,6 +342,15 @@ All `analyse` subcommands share the same output options:
   (`PREFIX_<name>`).
 - `--show`: also show the plots interactively.
 
+Analyses that compare several inputs take optional `-l/--labels LABEL ...`
+(one per input; default: the file stems, with `_1`, `_2`, ... added to
+stems shared by several inputs). Put the inputs before `-l`. Step-based
+analyses take `--steps START END`, and those that can pick an MPI rank take
+`--rank N|all`.
+
+An analysis that finds no usable data in any input fails (exit code 1);
+inputs that cannot be used while others can are skipped with a warning.
+
 Parameter files are always given with `-P/--params` and initial conditions
 with `--ics`.
 
@@ -326,18 +359,19 @@ with `--ics`.
 ```bash
 # Timestep files of two runs, CPU time from the threads each run used
 swift-cli analyse timesteps run1/timesteps.txt run2/timesteps.txt \
-    -l run1 run2 --threads-per-run 64 128
+    -l run1 run2 --threads-per-run 64 128 --time-column redshift
 
 # Gravity accuracy: SWIFT forces vs the exact gravity checks
-swift-cli analyse gravity-checks gravity_checks_exact_step0000.dat -l run1
-swift-cli analyse gravity-error-maps gravity_checks_exact_step0000.dat -l run1
+swift-cli analyse gravity-checks gravity_checks_exact_step0000.dat
+swift-cli analyse gravity-error-maps gravity_checks_exact_step0000.dat \
+    --resolution 50
 
 # Task counts printed by engine_print_task_counts
-swift-cli analyse task-counts swift.log --tasks self pair
+swift-cli analyse task-counts swift.log --tasks self pair --steps 10 100
 
 # Task-debug (-y) and threadpool (-Y) timings on a shared axis
 swift-cli analyse task-plots thread_info-step64.dat threadpool_info-step64.dat \
-    --activity-plot
+    --tasks pair/force self/force --activity-plot
 
 # Scaling across runs with different MPI rank counts
 swift-cli analyse scaling timers logs/*.log --steps 10 100 -p zoom
@@ -435,9 +469,10 @@ Useful filters include `--subtypes gpart grav_counts` and
   detected automatically; run `swift-cli profile --migrate` to convert them
   (a backup is kept as `profiles.yaml.bak`; old timer databases are
   deleted).
-- **Flags**: several flags were renamed for v1.0 (e.g. `-p` is now
-  `--prefix` and parameter files use `-P/--params`). See
-  [CHANGELOG.md](CHANGELOG.md) for the full list.
+- **Flags**: many flags were renamed for v1.0 (e.g. `-o/--out` is always
+  an output directory, `new --path`/`--param` are now `-o/--out`/`--set`,
+  and parameter files use `-P/--params`). See
+  [CHANGELOG.md](https://github.com/WillJRoper/swiftsim-cli/blob/main/CHANGELOG.md) for the full list.
 
 ## Development
 
@@ -453,8 +488,8 @@ SWIFT_SRC=/path/to/swiftsim pytest tests/unit/test_timer_db_archetypes.py -k rea
 
 The last command is an optional smoke test of the timer parser against a
 real SWIFT checkout (it is skipped unless `SWIFT_SRC` is set). See
-[tests/README.md](tests/README.md) for the test layout and
-[CONTRIBUTING.md](CONTRIBUTING.md) for the contribution and release
+[tests/README.md](https://github.com/WillJRoper/swiftsim-cli/blob/main/tests/README.md) for the test layout and
+[CONTRIBUTING.md](https://github.com/WillJRoper/swiftsim-cli/blob/main/CONTRIBUTING.md) for the contribution and release
 process.
 
 Project layout:
@@ -471,7 +506,8 @@ Project layout:
 
 ## License
 
-GNU General Public License v3.0; see [LICENSE](LICENSE).
+GNU General Public License v3.0 or later (GPL-3.0-or-later); see
+[LICENSE](https://github.com/WillJRoper/swiftsim-cli/blob/main/LICENSE).
 
 ## Citation
 

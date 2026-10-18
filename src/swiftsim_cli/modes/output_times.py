@@ -1,10 +1,12 @@
 """Output-times mode for generating output time lists."""
 
+from __future__ import annotations
+
 import argparse
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import numpy as np
-from astropy.cosmology import FlatLambdaCDM
 
 from swiftsim_cli.cosmology import (
     convert_redshift_to_scale_factor,
@@ -16,6 +18,9 @@ from swiftsim_cli.cosmology import (
 )
 from swiftsim_cli.modes.common_args import add_params_argument
 from swiftsim_cli.params import load_parameters
+
+if TYPE_CHECKING:
+    from astropy.cosmology import FlatLambdaCDM
 
 # Times are ages of the Universe in Gyr when a cosmology is available (the
 # conversions go through astropy), otherwise they are taken as given. A
@@ -32,10 +37,10 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     """Add arguments for the 'output-times' mode."""
     # We always need the output file
     parser.add_argument(
-        "-o",
-        "--out",
+        "--output-list",
         type=Path,
         default=Path("output_list.txt"),
+        metavar="FILE",
         help="File to write the list of times to (default: output_list.txt).",
     )
 
@@ -47,22 +52,22 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     # defined in terms of redshift, time, or scale factor.
     parser.add_argument(
         "--first-snap-z",
-        "-fz",
         type=float,
+        metavar="Z",
         default=None,
         help="Redshift of the first snapshot to include.",
     )
     parser.add_argument(
         "--first-snap-time",
-        "-ft",
         type=float,
+        metavar="T",
         default=None,
         help=f"Time of the first snapshot ({TIME_UNITS_HELP}).",
     )
     parser.add_argument(
         "--first-snap-scale-factor",
-        "-fa",
         type=float,
+        metavar="A",
         default=None,
         help="Scale factor of the first snapshot to include.",
     )
@@ -71,29 +76,29 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     # of redshift, time, scale factor, or logarithmic scale factor.
     parser.add_argument(
         "--delta-z",
-        "-dz",
         type=float,
+        metavar="DZ",
         default=None,
         help="Redshift interval between snapshots.",
     )
     parser.add_argument(
         "--delta-time",
-        "-dt",
         type=float,
+        metavar="DT",
         default=None,
         help=f"Time interval between snapshots ({TIME_UNITS_HELP}).",
     )
     parser.add_argument(
         "--delta-scale-factor",
-        "-da",
         type=float,
+        metavar="DA",
         default=None,
         help="Scale factor interval between snapshots.",
     )
     parser.add_argument(
         "--delta-log-scale-factor",
-        "-dla",
         type=float,
+        metavar="DLNA",
         default=None,
         help="Logarithmic scale factor interval between snapshots.",
     )
@@ -103,29 +108,29 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     # logarithmic scale factor).
     parser.add_argument(
         "--snipshot-delta-z",
-        "-sdz",
         type=float,
+        metavar="DZ",
         default=None,
         help="Redshift interval between snipshots.",
     )
     parser.add_argument(
         "--snipshot-delta-time",
-        "-sdt",
         type=float,
+        metavar="DT",
         default=None,
         help=f"Time interval between snipshots ({TIME_UNITS_HELP}).",
     )
     parser.add_argument(
         "--snipshot-delta-scale-factor",
-        "-sda",
         type=float,
+        metavar="DA",
         default=None,
         help="Scale factor interval between snipshots.",
     )
     parser.add_argument(
         "--snipshot-delta-log-scale-factor",
-        "-sdla",
         type=float,
+        metavar="DLNA",
         default=None,
         help="Logarithmic scale factor interval between snipshots.",
     )
@@ -134,8 +139,8 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     # can fall back to a_end from the parameter file (or z=0 / a=1).
     parser.add_argument(
         "--final-snap-z",
-        "-fzf",
         type=float,
+        metavar="Z",
         default=None,
         help=(
             "Redshift of the final snapshot to include (default: a_end from "
@@ -144,15 +149,15 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     )
     parser.add_argument(
         "--final-snap-time",
-        "-ftf",
         type=float,
+        metavar="T",
         default=None,
         help=f"Time of the final snapshot ({TIME_UNITS_HELP}).",
     )
     parser.add_argument(
         "--final-snap-scale-factor",
-        "-faf",
         type=float,
+        metavar="A",
         default=None,
         help=(
             "Scale factor of the final snapshot to include (default: a_end "
@@ -161,10 +166,10 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     )
     parser.add_argument(
         "--list-units",
-        "-u",
         type=str,
         default=None,
         choices=["redshift", "time", "scale-factor"],
+        metavar="UNITS",
         help=(
             "Override the units of the output file (redshift, time, or "
             "scale-factor)."
@@ -311,7 +316,7 @@ def _generate_output_list_no_cosmo(args: dict) -> None:
                 output list generation.
     """
     # Unpack the arguments
-    out_file = args.get("out", "output_list.txt")
+    out_file = args.get("output_list", "output_list.txt")
     first_snap_z = args.get("first_snap_z", None)
     first_snap_time = args.get("first_snap_time", None)
     first_snap_scale_factor = args.get("first_snap_scale_factor", None)
@@ -334,7 +339,7 @@ def _generate_output_list_no_cosmo(args: dict) -> None:
     if args.get("list_units") is not None:
         raise ValueError(
             "Cannot convert output units without cosmology parameters. "
-            "Please provide a parameter file with -p."
+            "Please provide a parameter file with -P/--params."
         )
 
     # Are we doing redshift, time, or scale factor?
@@ -731,7 +736,7 @@ def _generate_output_list_with_cosmo(args: dict, cosmo: FlatLambdaCDM) -> None:
     params = load_parameters()
 
     # Unpack the arguments
-    out_file = args.get("out", "output_list.txt")
+    out_file = args.get("output_list", "output_list.txt")
     first_snap_z = args.get("first_snap_z", None)
     first_snap_time = args.get("first_snap_time", None)
     first_snap_scale_factor = args.get("first_snap_scale_factor", None)

@@ -1,5 +1,7 @@
 """Tests for the cosmology module."""
 
+import warnings
+
 import numpy as np
 import pytest
 
@@ -183,6 +185,18 @@ def test_get_cosmology_without_cosmology_section(mocker):
     assert get_cosmology() is None
 
 
+def test_incomplete_cosmology_section_is_a_value_error(mocker):
+    """A Cosmology section missing a parameter is a clear error."""
+    mocker.patch(
+        "swiftsim_cli.cosmology.load_parameters",
+        return_value={"Cosmology": {"a_begin": 0.01}},
+    )
+    clear_cosmology_cache()
+
+    with pytest.raises(ValueError, match="Cosmology section has no"):
+        get_cosmology()
+
+
 def test_convert_time_to_redshift_no_cosmology(mocker):
     """convert_time_to_redshift raises clearly without a cosmology."""
     mocker.patch("swiftsim_cli.cosmology.load_parameters", return_value={})
@@ -200,8 +214,10 @@ def test_convert_time_to_redshift_too_early_raises(mocker):
     )
     clear_cosmology_cache()
 
-    with pytest.raises(ValueError, match="Cannot convert time"):
-        convert_time_to_redshift(1e-6)
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")  # the astropy warning is suppressed
+        with pytest.raises(ValueError, match="Cannot convert time"):
+            convert_time_to_redshift(1e-6)
 
 
 def test_internal_time_unit_in_gyr():

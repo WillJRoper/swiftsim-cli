@@ -7,21 +7,9 @@ import numpy as np
 import pytest
 
 from swiftsim_cli.modes.analyse.timesteps import (
-    _get_x_axis_label,
     analyse_timestep_files,
     run_timestep,
 )
-
-
-def test_get_x_axis_label_for_standard_columns():
-    """Standard timestep columns get meaningful axis labels."""
-    assert _get_x_axis_label(1) == "Time [Internal Units]"
-    assert _get_x_axis_label(2) == "Scale factor"
-
-
-def test_get_x_axis_label_for_other_columns():
-    """Non-standard timestep columns fall back to a generic label."""
-    assert _get_x_axis_label(4) == "Column 5"
 
 
 @patch("swiftsim_cli.modes.analyse.timesteps.analyse_timestep_files")
@@ -33,9 +21,10 @@ def test_run_timestep_passes_time_column(mock_analyse_timestep_files):
         out="plot_dir",
         prefix="test",
         show=False,
-        time_column=1,
+        time_column="time",
         match_runtimes=True,
         threads_per_run=[4],
+        steps=[2, 5],
     )
 
     run_timestep(args)
@@ -46,16 +35,17 @@ def test_run_timestep_passes_time_column(mock_analyse_timestep_files):
         output_path="plot_dir",
         prefix="test",
         show_plot=False,
-        time_column=1,
+        time_column="time",
         match_runtimes=True,
         nthreads=[4],
+        step_range=[2, 5],
     )
 
 
-def test_time_column_must_be_non_negative():
-    """Negative x-axis column indices are rejected."""
-    with pytest.raises(ValueError, match="time_column must be non-negative"):
-        analyse_timestep_files([], [], time_column=-1)
+def test_time_column_must_be_known():
+    """Unknown x-axis columns are rejected."""
+    with pytest.raises(ValueError, match="time_column must be one of"):
+        analyse_timestep_files([], [], time_column="Column 5")
 
 
 def test_nthreads_must_match_files():
@@ -86,8 +76,8 @@ def _make_timestep_line(time_value: float, wallclock_ms: float) -> str:
 
 @patch("swiftsim_cli.modes.analyse.timesteps.create_output_path")
 @patch("swiftsim_cli.modes.analyse.timesteps.save_figure")
-@patch("swiftsim_cli.modes.analyse.timesteps.plt.tight_layout")
-@patch("swiftsim_cli.modes.analyse.timesteps.plt.subplots")
+@patch("matplotlib.pyplot.tight_layout")
+@patch("matplotlib.pyplot.subplots")
 def test_match_runtimes_trims_to_shortest_dataset(
     mock_subplots,
     mock_tight_layout,
@@ -134,8 +124,8 @@ def test_match_runtimes_trims_to_shortest_dataset(
 
 @patch("swiftsim_cli.modes.analyse.timesteps.create_output_path")
 @patch("swiftsim_cli.modes.analyse.timesteps.save_figure")
-@patch("swiftsim_cli.modes.analyse.timesteps.plt.tight_layout")
-@patch("swiftsim_cli.modes.analyse.timesteps.plt.subplots")
+@patch("matplotlib.pyplot.tight_layout")
+@patch("matplotlib.pyplot.subplots")
 def test_shared_extent_reports_speedup_without_trimming(
     mock_subplots,
     mock_tight_layout,
@@ -176,8 +166,8 @@ def test_shared_extent_reports_speedup_without_trimming(
 
 @patch("swiftsim_cli.modes.analyse.timesteps.create_output_path")
 @patch("swiftsim_cli.modes.analyse.timesteps.save_figure")
-@patch("swiftsim_cli.modes.analyse.timesteps.plt.tight_layout")
-@patch("swiftsim_cli.modes.analyse.timesteps.plt.subplots")
+@patch("matplotlib.pyplot.tight_layout")
+@patch("matplotlib.pyplot.subplots")
 def test_timestep_axis_label_is_inferred_from_header(
     mock_subplots,
     mock_tight_layout,
@@ -205,7 +195,7 @@ def test_timestep_axis_label_is_inferred_from_header(
         [str(timestep_file)],
         ["run"],
         show_plot=False,
-        time_column=2,
+        time_column="scale-factor",
     )
 
     ax2.set_xlabel.assert_called_once_with("Scale factor")
@@ -213,16 +203,16 @@ def test_timestep_axis_label_is_inferred_from_header(
 
 @patch("swiftsim_cli.modes.analyse.timesteps.create_output_path")
 @patch("swiftsim_cli.modes.analyse.timesteps.save_figure")
-@patch("swiftsim_cli.modes.analyse.timesteps.plt.tight_layout")
-@patch("swiftsim_cli.modes.analyse.timesteps.plt.subplots")
-def test_timestep_axis_label_falls_back_without_header(
+@patch("matplotlib.pyplot.tight_layout")
+@patch("matplotlib.pyplot.subplots")
+def test_timestep_axis_label_for_redshift(
     mock_subplots,
     mock_tight_layout,
     mock_save_figure,
     mock_create_output_path,
     tmp_path: Path,
 ):
-    """Files without a header keep the generic column-based label."""
+    """Files without a header still label the selected column."""
     timestep_file = tmp_path / "timesteps.txt"
     timestep_file.write_text(
         _make_timestep_line(1.0, 1000.0),
@@ -239,16 +229,16 @@ def test_timestep_axis_label_falls_back_without_header(
         [str(timestep_file)],
         ["run"],
         show_plot=False,
-        time_column=4,
+        time_column="redshift",
     )
 
-    ax2.set_xlabel.assert_called_once_with("Column 5")
+    ax2.set_xlabel.assert_called_once_with("Redshift")
 
 
 @patch("swiftsim_cli.modes.analyse.timesteps.create_output_path")
 @patch("swiftsim_cli.modes.analyse.timesteps.save_figure")
-@patch("swiftsim_cli.modes.analyse.timesteps.plt.tight_layout")
-@patch("swiftsim_cli.modes.analyse.timesteps.plt.subplots")
+@patch("matplotlib.pyplot.tight_layout")
+@patch("matplotlib.pyplot.subplots")
 def test_nthreads_converts_main_axis_to_cpu_time(
     mock_subplots,
     mock_tight_layout,
@@ -286,8 +276,8 @@ def test_nthreads_converts_main_axis_to_cpu_time(
 
 @patch("swiftsim_cli.modes.analyse.timesteps.create_output_path")
 @patch("swiftsim_cli.modes.analyse.timesteps.save_figure")
-@patch("swiftsim_cli.modes.analyse.timesteps.plt.tight_layout")
-@patch("swiftsim_cli.modes.analyse.timesteps.plt.subplots")
+@patch("matplotlib.pyplot.tight_layout")
+@patch("matplotlib.pyplot.subplots")
 def test_non_monotonic_x_skips_runtime_comparison(
     mock_subplots,
     mock_tight_layout,
@@ -312,15 +302,15 @@ def test_non_monotonic_x_skips_runtime_comparison(
 
     analyse_timestep_files(files, ["slow", "fast"], show_plot=False)
 
-    output = capsys.readouterr().out
-    assert "not monotonically increasing" in output
-    assert "RUNTIME COMPARISON" not in output
+    captured = capsys.readouterr()
+    assert "warning: x-axis column is not monotonically" in captured.err
+    assert "RUNTIME COMPARISON" not in captured.out
 
 
 @patch("swiftsim_cli.modes.analyse.timesteps.create_output_path")
 @patch("swiftsim_cli.modes.analyse.timesteps.save_figure")
-@patch("swiftsim_cli.modes.analyse.timesteps.plt.tight_layout")
-@patch("swiftsim_cli.modes.analyse.timesteps.plt.subplots")
+@patch("matplotlib.pyplot.tight_layout")
+@patch("matplotlib.pyplot.subplots")
 def test_older_13_column_table_uses_header_columns(
     mock_subplots,
     mock_tight_layout,
@@ -364,12 +354,49 @@ def test_no_parsable_rows_raises(tmp_path: Path):
         analyse_timestep_files([str(timestep_file)], ["run"], show_plot=False)
 
 
-def test_time_column_out_of_range_raises(tmp_path: Path):
-    """Selecting a column the table does not have is a clear error."""
-    timestep_file = tmp_path / "timesteps.txt"
-    timestep_file.write_text(_make_timestep_line(1.0, 1.0), encoding="utf-8")
+def _numbered_line(step: int, wallclock_ms: float) -> str:
+    """A step row for step number ``step``."""
+    return f"  {step}" + _make_timestep_line(float(step), wallclock_ms)[3:]
 
-    with pytest.raises(ValueError, match="out of range"):
+
+@patch("swiftsim_cli.modes.analyse.timesteps.create_output_path")
+@patch("swiftsim_cli.modes.analyse.timesteps.save_figure")
+@patch("matplotlib.pyplot.tight_layout")
+@patch("matplotlib.pyplot.subplots")
+def test_step_range_filters_rows(
+    mock_subplots,
+    mock_tight_layout,
+    mock_save_figure,
+    mock_create_output_path,
+    tmp_path: Path,
+):
+    """--steps keeps only the rows of the requested steps."""
+    timestep_file = tmp_path / "timesteps.txt"
+    timestep_file.write_text(
+        "".join(_numbered_line(step, 1000.0) for step in range(1, 6)),
+        encoding="utf-8",
+    )
+    ax1 = Mock()
+    mock_subplots.return_value = (Mock(), (ax1, Mock()))
+    mock_create_output_path.return_value = tmp_path / "plot.png"
+
+    analyse_timestep_files(
+        [str(timestep_file)],
+        ["run"],
+        time_column="step",
+        step_range=(2, 4),
+    )
+
+    x = np.asarray(ax1.plot.call_args_list[0].args[0])
+    assert np.array_equal(x, [2.0, 3.0, 4.0])
+
+
+def test_step_range_without_rows_raises(tmp_path: Path):
+    """A step range that selects nothing names the file and range."""
+    timestep_file = tmp_path / "timesteps.txt"
+    timestep_file.write_text(_numbered_line(1, 1.0), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="in steps 5-9"):
         analyse_timestep_files(
-            [str(timestep_file)], ["run"], show_plot=False, time_column=15
+            [str(timestep_file)], ["run"], step_range=(5, 9)
         )

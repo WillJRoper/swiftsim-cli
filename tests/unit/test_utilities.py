@@ -301,7 +301,7 @@ class TestSaveFigure:
         ax.plot([0, 1], [0, 1])
         path = temp_dir / "plot.png"
 
-        with patch("swiftsim_cli.utilities.plotting.plt.show") as mock_show:
+        with patch("matplotlib.pyplot.show") as mock_show:
             result = save_figure(fig, path, dpi=50)
 
         assert result == path
@@ -317,7 +317,7 @@ class TestSaveFigure:
             assert plt.fignum_exists(fig.number)
 
         with patch(
-            "swiftsim_cli.utilities.plotting.plt.show",
+            "matplotlib.pyplot.show",
             side_effect=check_open,
         ) as mock_show:
             save_figure(fig, temp_dir / "plot.png", show=True, dpi=50)

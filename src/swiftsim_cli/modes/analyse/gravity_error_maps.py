@@ -10,15 +10,18 @@ import argparse
 from pathlib import Path
 from typing import List, Optional, Union
 
-import matplotlib.pyplot as plt
 import numpy as np
-from matplotlib.colors import LogNorm
 
 from swiftsim_cli.modes.common_args import (
     add_labels_argument,
     add_output_arguments,
+    existing_file,
+    positive_float,
+    positive_int,
+    resolve_labels,
 )
 from swiftsim_cli.utilities.io import create_output_path
+from swiftsim_cli.utilities.messages import warn
 from swiftsim_cli.utilities.plotting import save_figure
 
 from .gravity_checks import _find_counterpart_file, _load_force_pair
@@ -38,29 +41,36 @@ def add_gravity_error_maps_arguments(
     error_map_parser = subparsers.add_parser(
         "gravity-error-maps",
         help="Create hexbin error maps for gravity check files.",
+        description="Create hexbin maps of the relative gravity force "
+        "error for gravity check files. Give either file of each pair "
+        "(gravity_checks_exact_* or gravity_checks_swift_*); its "
+        "counterpart is found next to it. Requires SWIFT configured with "
+        "--enable-gravity-force-checks=N.",
     )
+    error_map_parser.set_defaults(func=run_gravity_error_maps)
 
     error_map_parser.add_argument(
         "files",
         nargs="+",
+        metavar="FILE",
         help="Gravity check files to analyse (either exact or SWIFT files).",
-        type=Path,
+        type=existing_file,
     )
-    add_labels_argument(error_map_parser, required=True)
+    add_labels_argument(error_map_parser)
     add_output_arguments(error_map_parser, OUT_SUBDIR)
 
     error_map_parser.add_argument(
         "--resolution",
-        "--gridsize",
-        "-r",
-        type=int,
-        help="Resolution (gridsize) for hexbin plot (default: 100).",
+        type=positive_int,
+        metavar="N",
+        help="Hexbin grid size (default: 100).",
         default=100,
     )
 
     error_map_parser.add_argument(
         "--thresh",
-        type=float,
+        type=positive_float,
+        metavar="ERR",
         help="Error threshold for hexbin color scale (default: 1e-2).",
         default=1e-2,
     )
@@ -74,7 +84,7 @@ def run_gravity_error_maps(args: argparse.Namespace) -> None:
     """
     analyse_gravity_error_maps(
         files=args.files,
-        labels=args.labels,
+        labels=resolve_labels(args.files, args.labels),
         output_path=args.out,
         prefix=args.prefix,
         show_plot=args.show,
@@ -120,12 +130,14 @@ def analyse_gravity_error_maps(
         error_thresh: Error threshold for binary color scale. Errors above this
                      threshold are highlighted in red.
 
+    Inputs that cannot be processed are reported as warnings and skipped.
+
     Raises:
-        ValueError: If the number of files and labels do not match.
-        FileNotFoundError: If counterpart files cannot be found.
+        ValueError: If the number of files and labels do not match, or no
+            input could be processed.
 
     Examples:
-        >>> # Analyze a single gravity check file
+        >>> # Analyse a single gravity check file
         >>> analyse_gravity_error_maps(
         ...     files=["gravity_checks_exact_step0001.dat"],
         ...     labels=["Test Run"],
@@ -148,6 +160,7 @@ def analyse_gravity_error_maps(
         )
 
     # Process each file and create individual error maps
+    processed = 0
     for i, (input_file, label) in enumerate(zip(files, labels)):
         try:
             exact_file, swift_file = _find_counterpart_file(str(input_file))
@@ -155,8 +168,9 @@ def analyse_gravity_error_maps(
                 exact_file, swift_file
             )
         except (ValueError, FileNotFoundError) as e:
-            print(f"Error processing {input_file}: {e}")
+            warn(f"skipping {input_file}: {e}")
             continue
+        processed += 1
 
         print(f"Processing error maps for: {label}")
         print(f"  Exact file: {exact_file}")
@@ -203,6 +217,9 @@ def analyse_gravity_error_maps(
 
         print()  # Add spacing between files
 
+    if not processed:
+        raise ValueError("none of the gravity check inputs could be processed")
+
 
 def _create_continuous_error_map(
     exact_pos: np.ndarray,
@@ -224,6 +241,9 @@ def _create_continuous_error_map(
         prefix: Filename prefix.
         show_plot: Whether to show plot interactively.
     """
+    import matplotlib.pyplot as plt
+    from matplotlib.colors import LogNorm
+
     fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, figsize=(12, 10))
     fig.suptitle(f"Gravity Error Maps - {label}", fontsize=16)
 
@@ -334,6 +354,8 @@ def _create_threshold_error_map(
         prefix: Filename prefix.
         show_plot: Whether to show plot interactively.
     """
+    import matplotlib.pyplot as plt
+
     fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, figsize=(12, 10))
     fig.suptitle(
         f"Gravity Error Maps (Threshold: {error_thresh:.1e}) - {label}",

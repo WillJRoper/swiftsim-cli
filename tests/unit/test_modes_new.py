@@ -48,39 +48,41 @@ class TestAddArguments:
         add_arguments(parser)
 
         # Test that required arguments are present
-        # This should fail without --path and --ics
+        # This should fail without -o/--out and --ics
         with pytest.raises(SystemExit):
             parser.parse_args([])
 
-    def test_add_arguments_with_required_args(self):
+    def test_add_arguments_with_required_args(self, tmp_path):
         """Test parsing with required arguments."""
         parser = argparse.ArgumentParser()
         add_arguments(parser)
+        ics = tmp_path / "ic.hdf5"
+        ics.touch()
 
-        args = parser.parse_args(
-            ["--path", "/test/path", "--ics", "/test/ic.hdf5"]
-        )
-        assert str(args.path) == "/test/path"
-        assert str(args.ics) == "/test/ic.hdf5"
+        args = parser.parse_args(["-o", "/test/path", "--ics", str(ics)])
+        assert str(args.out) == "/test/path"
+        assert args.ics == ics
 
-    def test_add_arguments_with_param_override(self):
+    def test_add_arguments_with_param_override(self, tmp_path):
         """Test parsing with parameter overrides."""
         parser = argparse.ArgumentParser()
         add_arguments(parser)
+        ics = tmp_path / "ic.hdf5"
+        ics.touch()
 
         args = parser.parse_args(
             [
-                "--path",
+                "--out",
                 "/test/path",
                 "--ics",
-                "/test/ic.hdf5",
-                "--param",
+                str(ics),
+                "--set",
                 "Cosmology:h=0.7",
-                "--param",
+                "--set",
                 "TimeIntegration:dt_min=0.0001",
             ]
         )
-        assert args.param == [
+        assert args.set == [
             ("Cosmology:h", "0.7"),
             ("TimeIntegration:dt_min", "0.0001"),
         ]
@@ -175,7 +177,7 @@ class TestApplyOverrides:
 class TestDeriveParamsFromICs:
     """Regression tests for parameter derivation from IC files."""
 
-    @patch("swiftsim_cli.modes.new.h5py.File")
+    @patch("h5py.File")
     @patch("swiftsim_cli.modes.new.load_swift_profile")
     def test_redshift_only_header_does_not_require_time(
         self, mock_load_profile, mock_h5_file, tmp_path
@@ -275,13 +277,13 @@ class TestNewEndToEnd:
         main(
             [
                 "new",
-                "--path",
+                "-o",
                 "run",
                 "--ics",
                 "ics.hdf5",
-                "--param",
+                "--set",
                 "TimeIntegration:dt_max=0.5",
-                "--param",
+                "--set",
                 "Snapshots:basename=snap",
             ]
         )
@@ -329,7 +331,7 @@ class TestNewEndToEnd:
         """An existing params.yml is only replaced with --force."""
         from swiftsim_cli.cli import main
 
-        argv = ["new", "--path", "run", "--ics", "ics.hdf5"]
+        argv = ["new", "-o", "run", "--ics", "ics.hdf5"]
         main(argv)
         param_file = new_env / "run" / "params.yml"
         param_file.write_text("sentinel")
@@ -348,10 +350,51 @@ class TestNewEndToEnd:
         from swiftsim_cli.cli import main
 
         write_tiny_ics(new_env / "cosmo.hdf5", time=0.1)
-        main(["new", "--path", "run", "--ics", "cosmo.hdf5"])
+        main(["new", "-o", "run", "--ics", "cosmo.hdf5"])
 
         params = YAML(typ="safe").load(
             (new_env / "run" / "params.yml").read_text()
         )
         assert params["Cosmology"]["a_begin"] == pytest.approx(0.1)
         assert params["TimeIntegration"]["time_begin"] == 0.0
+
+
+def test_chain_new_then_output_times(new_env, write_tiny_ics):
+    """A later output-times in the chain reads the params.yml new writes.
+
+    R2 replaces new's template system: keep this chain working (only the
+    template set-up below should need updating).
+    """
+    from swiftsim_cli.cli import main
+
+    template = new_env / "swiftsim" / "examples" / "parameter_example.yml"
+    template.write_text(
+        TEMPLATE_YML.replace(
+            "Cosmology:\n",
+            "Cosmology:\n  h: 0.7\n  Omega_cdm: 0.25\n  Omega_b: 0.05\n",
+        )
+    )
+    write_tiny_ics(new_env / "cosmo.hdf5", time=0.1)
+
+    main(
+        [
+            "new",
+            "-o",
+            "run",
+            "--ics",
+            "cosmo.hdf5",
+            "output-times",
+            "-P",
+            "run/params.yml",
+            "--first-snap-scale-factor",
+            "0.2",
+            "--delta-scale-factor",
+            "0.2",
+            "--output-list",
+            "run/output_list.txt",
+        ]
+    )
+
+    lines = (new_env / "run" / "output_list.txt").read_text().splitlines()
+    values = [float(line) for line in lines[1:]]
+    assert values == pytest.approx([0.2, 0.4, 0.6, 0.8, 1.0])

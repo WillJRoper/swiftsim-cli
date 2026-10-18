@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from argparse import ArgumentParser, Namespace
+from argparse import ArgumentParser
 from pathlib import Path
 from unittest.mock import patch
 
@@ -58,33 +58,28 @@ class TestScalingArguments:
         assert args.steps is None
 
 
-class TestScalingRun:
-    """Tests for scaling subcommand dispatch."""
+@pytest.mark.parametrize(
+    ("kind", "target"),
+    [
+        ("timers", "run_swift_scaling"),
+        ("runtime", "run_swift_runtime_scaling"),
+    ],
+)
+def test_subcommands_bind_their_entry_points(kind, target, in_inputs_dir):
+    """Each scaling subcommand binds its entry point as ``func``."""
+    with patch(f"swiftsim_cli.modes.analyse.scaling.{target}") as mock_run:
+        args = _scaling_parser().parse_args(
+            ["scaling", kind, "a.log", "b.log"]
+        )
+        args.func(args)
 
-    @patch("swiftsim_cli.modes.analyse.scaling.run_swift_scaling")
-    def test_run_timers(self, mock_run_timers):
-        """Timer scaling dispatches to the detailed timer implementation."""
-        args = Namespace(scaling_type="timers")
+    mock_run.assert_called_once_with(args)
 
-        scaling.run_scaling(args)
 
-        mock_run_timers.assert_called_once_with(args)
-
-    @patch("swiftsim_cli.modes.analyse.scaling.run_swift_runtime_scaling")
-    def test_run_runtime(self, mock_run_runtime):
-        """Runtime scaling dispatches to the runtime implementation."""
-        args = Namespace(scaling_type="runtime")
-
-        scaling.run_scaling(args)
-
-        mock_run_runtime.assert_called_once_with(args)
-
-    def test_run_unknown_type(self):
-        """Unknown scaling subcommands are rejected."""
-        args = Namespace(scaling_type="unknown")
-
-        with pytest.raises(ValueError, match="Unknown scaling type"):
-            scaling.run_scaling(args)
+def test_unmatched_log_pattern_is_an_error(in_inputs_dir):
+    """A log file or pattern matching nothing is a clear error."""
+    with pytest.raises(ValueError, match="no log file matches 'c\\*.log'"):
+        scaling._resolve_log_files([Path("a.log"), Path("c*.log")])
 
 
 def test_extract_total_runtime_from_log(tmp_path: Path):

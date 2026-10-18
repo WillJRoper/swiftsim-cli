@@ -538,7 +538,12 @@ def test_scaling_plot_legend_survives_skipped_series(
 ):
     """A skipped series must not shift the labels of later series."""
     figures: list[Any] = []
-    monkeypatch.setattr(scaling.plt, "close", figures.append)
+
+    def capture(fig, path, show=False, dpi=300):
+        figures.append(fig)
+        return path
+
+    monkeypatch.setattr(scaling, "save_figure", capture)
     scaling._create_scaling_plot(
         scaling_data=_skipped_series_data(),
         timer_ids=["func_a", "func_b"],

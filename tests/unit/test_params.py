@@ -113,3 +113,31 @@ def test_load_parameters_no_arg_returns_cached(tmp_path):
 
     assert load_parameters() is loaded
     assert load_parameters()["Cosmology"]["a_begin"] == 0.1
+
+
+@pytest.mark.parametrize("text", ["- a\n- b\n", "just a string\n", "42\n"])
+def test_non_mapping_file_is_a_value_error(tmp_path, text):
+    """A parameter file must be a mapping of sections."""
+    param_file = tmp_path / "params.yml"
+    param_file.write_text(text)
+    with pytest.raises(ValueError, match="must contain a YAML mapping"):
+        load_parameters(param_file)
+
+
+def test_duplicate_keys_warn_and_keep_the_first(tmp_path, capsys):
+    """Duplicate keys (as in SWIFT's parameter_example.yml) are a warning."""
+    param_file = tmp_path / "params.yml"
+    param_file.write_text("Gravity:\n  eta: 0.1\n  eta: 0.2\nA:\n  b: 1\n")
+    loaded = load_parameters(param_file)
+    assert loaded["Gravity"]["eta"] == 0.1
+    assert loaded["A"]["b"] == 1
+    err = capsys.readouterr().err
+    assert err.startswith(f"warning: {param_file}:3: found duplicate key")
+    assert "SWIFT itself rejects duplicate keys" in err
+
+
+def test_empty_file_gives_no_parameters(tmp_path):
+    """An empty parameter file is an empty mapping."""
+    param_file = tmp_path / "params.yml"
+    param_file.write_text("")
+    assert load_parameters(param_file) == {}

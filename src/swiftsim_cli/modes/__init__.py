@@ -1,35 +1,15 @@
-"""Mode definitions and constants for swift-cli."""
+"""Mode definitions for swift-cli.
 
-from typing import Literal
+`Mode` is the single list of modes. Each mode lives in the module of the
+same name (dashes become underscores) and is only imported by `load_mode`
+when that mode is parsed or run, so ``swift-cli --help`` and friends never
+pay for the heavy imports of the analysis modes.
+"""
 
-from . import (
-    analyse,
-    config,
-    make,
-    new,
-    output_times,
-    profile,
-    show,
-    switch,
-    update,
-    utils,
-)
+import importlib
+from types import ModuleType
+from typing import Literal, get_args
 
-# Available modes for the swift-cli CLI
-AVAILABLE_MODES = [
-    "profile",
-    "config",
-    "output-times",
-    "update",
-    "switch",
-    "make",
-    "new",
-    "analyse",
-    "show",
-    "utils",
-]
-
-# Type hint for mode names
 Mode = Literal[
     "profile",
     "config",
@@ -43,11 +23,12 @@ Mode = Literal[
     "utils",
 ]
 
+AVAILABLE_MODES: tuple[Mode, ...] = get_args(Mode)
+
 # One-line description of each mode, shown by 'swift-cli --help' and at the
 # top of 'swift-cli <mode> --help'
-MODE_DESCRIPTIONS = {
-    "profile": "Manage SWIFT profiles (one git worktree, branch and build "
-    "each).",
+MODE_DESCRIPTIONS: dict[Mode, str] = {
+    "profile": "Manage SWIFT profiles (one worktree, branch and build each).",
     "config": "Set the current profile's configure flags and reconfigure.",
     "output-times": "Generate a list of snapshot (and snipshot) output times.",
     "update": "Pull and rebuild the current profile.",
@@ -59,16 +40,14 @@ MODE_DESCRIPTIONS = {
     "utils": "Run small helper calculations (e.g. softenings).",
 }
 
-# Mapping of mode names to their modules
-MODE_MODULES = {
-    "profile": profile,
-    "config": config,
-    "output-times": output_times,
-    "update": update,
-    "switch": switch,
-    "make": make,
-    "new": new,
-    "analyse": analyse,
-    "show": show,
-    "utils": utils,
-}
+
+def load_mode(name: Mode) -> ModuleType:
+    """Import and return the module implementing a mode.
+
+    Args:
+        name: The mode name.
+
+    Returns:
+        The mode's module (with ``add_arguments`` and ``run``).
+    """
+    return importlib.import_module(f"{__name__}.{name.replace('-', '_')}")

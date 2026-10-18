@@ -5,7 +5,6 @@ from __future__ import annotations
 from collections.abc import Callable
 from pathlib import Path
 
-import matplotlib.pyplot as plt
 import numpy as np
 
 from swiftsim_cli.timing.timing_hierarchy import UNTIMED, Hierarchy, StepTree
@@ -27,6 +26,8 @@ def _barh(
     cmap: str = "Blues_r",
 ) -> Path | None:
     """Horizontal bar chart, largest at the top."""
+    import matplotlib.pyplot as plt
+
     if not names:
         return None
     fig, ax = plt.subplots(figsize=(12, max(4.0, 0.45 * len(names) + 1.5)))
@@ -73,6 +74,8 @@ def step_breakdown_pie(
     h: Hierarchy, path: Path, show: bool, top: int = 6
 ) -> Path | None:
     """Top-level timers and the untimed remainder as shares of step time."""
+    import matplotlib.pyplot as plt
+
     kids = h.children(())
     names = [p[-1] for p in kids[:top]]
     values = [h.paths[p].inclusive for p in kids[:top]]
@@ -121,6 +124,8 @@ def mean_time_chart(
 
 def timer_total_histogram(h: Hierarchy, path: Path, show: bool) -> Path | None:
     """Distribution of the inclusive totals of all timers."""
+    import matplotlib.pyplot as plt
+
     totals = [outer for _, _, outer in h.flat() if outer > 0]
     if len(totals) < 2:
         return None
@@ -162,6 +167,8 @@ def calls_scatter(
     h: Hierarchy, path: Path, show: bool, top: int = 5
 ) -> Path | None:
     """Calls vs mean time per call, sized by total time."""
+    import matplotlib.pyplot as plt
+
     rows = [r for r in h.flat() if r[1].calls and r[2] > 1]
     if not rows:
         return None
@@ -202,6 +209,8 @@ def step_time_series(
     trees: list[StepTree], h: Hierarchy, path: Path, show: bool, top: int = 8
 ) -> Path | None:
     """Per-step time of the largest top-level timers and the wall-clock."""
+    import matplotlib.pyplot as plt
+
     if len(trees) < 2:
         return None
     keys = [p[-1] for p in h.children(())[:top]]

@@ -2,103 +2,11 @@
 
 import argparse
 from pathlib import Path
-from unittest.mock import Mock, patch
+from unittest.mock import patch
 
 import pytest
 
 from swiftsim_cli.modes.analyse import add_arguments, run
-
-
-class TestAnalyseMode:
-    """Tests for analyse mode."""
-
-    def test_add_arguments(self):
-        """Test that add_arguments adds analysis type argument."""
-        parser = argparse.ArgumentParser()
-        add_arguments(parser)
-
-        # Test that the subparser was created
-        # We can't parse without required args, so just verify structure
-        assert hasattr(parser, "_subparsers")
-
-    @patch("swiftsim_cli.modes.analyse.run_timestep")
-    def test_run_timesteps(self, mock_run_timestep):
-        """Test running timestep analysis."""
-        args = Mock()
-        args.analysis_type = "timesteps"
-
-        run(args)
-
-        mock_run_timestep.assert_called_once_with(args)
-
-    @patch("swiftsim_cli.modes.analyse.run_gravity_checks")
-    def test_run_gravity_checks(self, mock_run_gravity_checks):
-        """Test running gravity checks."""
-        args = Mock()
-        args.analysis_type = "gravity-checks"
-
-        run(args)
-
-        mock_run_gravity_checks.assert_called_once_with(args)
-
-    @patch("swiftsim_cli.modes.analyse.run_gravity_error_maps")
-    def test_run_gravity_error_maps(self, mock_run_gravity_error_maps):
-        """Test running gravity error maps."""
-        args = Mock()
-        args.analysis_type = "gravity-error-maps"
-
-        run(args)
-
-        mock_run_gravity_error_maps.assert_called_once_with(args)
-
-    @patch("swiftsim_cli.modes.analyse.run_swift_log_timing")
-    def test_run_log_timing(self, mock_run_swift_log_timing):
-        """Test running log timing analysis."""
-        args = Mock()
-        args.analysis_type = "log"
-
-        run(args)
-
-        mock_run_swift_log_timing.assert_called_once_with(args)
-
-    @patch("swiftsim_cli.modes.analyse.run_swift_task_counts")
-    def test_run_task_counts(self, mock_run_swift_task_counts):
-        """Test running task counts analysis."""
-        args = Mock()
-        args.analysis_type = "task-counts"
-
-        run(args)
-
-        mock_run_swift_task_counts.assert_called_once_with(args)
-
-    @patch("swiftsim_cli.modes.analyse.run_swift_task_plots")
-    def test_run_task_plots(self, mock_run_swift_task_plots):
-        """Test running combined task/threadpool plotting."""
-        args = Mock()
-        args.analysis_type = "task-plots"
-
-        run(args)
-
-        mock_run_swift_task_plots.assert_called_once_with(args)
-
-    @patch("swiftsim_cli.modes.analyse.run_scaling")
-    def test_run_scaling(self, mock_run_scaling):
-        """Test running scaling analysis."""
-        args = Mock()
-        args.analysis_type = "scaling"
-
-        run(args)
-
-        mock_run_scaling.assert_called_once_with(args)
-
-    def test_run_unknown_type(self):
-        """Test running with unknown analysis type."""
-        args = Mock()
-        args.analysis_type = "unknown"
-
-        with pytest.raises(ValueError, match="Unknown analysis type"):
-            run(args)
-
 
 # CLI argv and the heavy analysis function each subcommand must reach.
 _SUBCOMMAND_CASES = {
@@ -154,8 +62,8 @@ def test_every_registered_subcommand_has_a_dispatch_case():
 
 
 @pytest.mark.parametrize("name", sorted(_SUBCOMMAND_CASES))
-def test_parse_then_dispatch_reaches_analysis(name):
-    """Parsed subcommand names must match the real dispatch table."""
+def test_parse_then_dispatch_reaches_analysis(name, in_inputs_dir):
+    """Each subcommand's parser binds the entry point reaching its analysis."""
     argv, target = _SUBCOMMAND_CASES[name]
     args = _analyse_parser().parse_args(argv)
 
@@ -165,7 +73,7 @@ def test_parse_then_dispatch_reaches_analysis(name):
     mock_analysis.assert_called_once()
 
 
-def test_scaling_runtime_dispatch():
+def test_scaling_runtime_dispatch(in_inputs_dir):
     """The scaling runtime subcommand reaches its analysis."""
     args = _analyse_parser().parse_args(
         ["scaling", "runtime", "a.log", "b.log", "-o", "out", "-p", "x"]

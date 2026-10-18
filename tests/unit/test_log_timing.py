@@ -44,6 +44,13 @@ def fast_plots(monkeypatch):
 class TestArguments:
     """CLI flags of ``analyse log``."""
 
+    @pytest.fixture(autouse=True)
+    def _inputs(self, tmp_path, monkeypatch):
+        """Input paths are checked at parse time: provide them."""
+        (tmp_path / "run.log").touch()
+        (tmp_path / "swift").mkdir()
+        monkeypatch.chdir(tmp_path)
+
     def test_defaults(self):
         """Defaults: rank 0, revision matching on, cached DB."""
         args = _parse(["run.log"])
@@ -158,7 +165,7 @@ class TestEndToEnd:
         analyse_swift_log_timings(
             log, output_path=tmp_path, swift_src=swift_src_dir
         )
-        assert "2 ranks printed timers" in capsys.readouterr().out
+        assert "warning: 2 ranks printed timers" in capsys.readouterr().err
 
         analyse_swift_log_timings(
             log, output_path=tmp_path, swift_src=swift_src_dir, rank="all"
@@ -196,9 +203,9 @@ class TestEndToEnd:
             step_range=(2, 3),
             top_n=3,
         )
-        console = capsys.readouterr().out
-        assert "no timers named not_a_timer" in console
-        assert "Steps analysed: 2 (steps 2-3)" in console
+        console = capsys.readouterr()
+        assert "warning: no timers named not_a_timer" in console.err
+        assert "Steps analysed: 2 (steps 2-3)" in console.out
         tables = (
             tmp_path / "log_analysis" / "analysis_tables.txt"
         ).read_text()
@@ -229,6 +236,16 @@ class TestEndToEnd:
         console = capsys.readouterr().out
         assert "[restarted run]" in console
         assert "Steps analysed: 4 (steps 47242-47245)" in console
+
+    def test_log_without_timers_is_an_error(self, swift_src_dir, tmp_path):
+        """No timer lines at all points at -v 1."""
+        log = tmp_path / "quiet.log"
+        log.write_text("nothing to see\n")
+        with pytest.raises(ValueError, match="run SWIFT with -v 1"):
+            analyse_swift_log_timings(
+                str(log), output_path=tmp_path, swift_src=swift_src_dir
+            )
+        assert not (tmp_path / "log_analysis").exists()
 
     def test_top_n_validated(self, logs_dir, tmp_path):
         """--top-n must be positive."""

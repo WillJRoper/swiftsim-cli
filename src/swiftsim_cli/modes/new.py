@@ -2,22 +2,22 @@
 
 import argparse
 import os
-import warnings
 from pathlib import Path
 from typing import Any, Tuple
 
-import h5py
 import numpy as np
 from ruamel.yaml import YAML
 
+from swiftsim_cli.modes.common_args import existing_file
 from swiftsim_cli.modes.utils import _get_cubic_box_size
 from swiftsim_cli.params import round_trip_yaml
 from swiftsim_cli.profile import load_swift_profile
 from swiftsim_cli.swiftsim_dir import get_swiftsim_dir
+from swiftsim_cli.utilities.messages import warn
 
 yaml = round_trip_yaml()
 
-# Plain loader used to turn --param override strings into YAML scalars
+# Plain loader used to turn --set override strings into YAML scalars
 _scalar_yaml = YAML(typ="safe")
 
 
@@ -38,7 +38,7 @@ def _kv_pair(arg: str) -> Tuple[str, str]:
     """
     if "=" not in arg:
         raise argparse.ArgumentTypeError(
-            f"invalid parameter override '{arg}'; expected KEY=VALUE"
+            f"invalid parameter override '{arg}'; expected ROOT:KEY=VALUE"
         )
     key, val = arg.split("=", 1)
     return key, val
@@ -47,27 +47,29 @@ def _kv_pair(arg: str) -> Tuple[str, str]:
 def add_arguments(parser: argparse.ArgumentParser) -> None:
     """Add arguments for the 'new' mode."""
     parser.add_argument(
-        "--path",
+        "-o",
+        "--out",
         required=True,
-        help="Directory to create the new run in.",
         type=Path,
+        metavar="DIR",
+        help="Directory to create the new run in.",
     )
     parser.add_argument(
         "--ics",
         required=True,
-        help="Path to the initial conditions HDF5 file.",
-        type=Path,
+        type=existing_file,
+        metavar="FILE",
+        help="Initial conditions HDF5 file.",
     )
 
     # Add the ability to override internal parameters
     parser.add_argument(
-        "--param",
-        metavar="KEY=VALUE",
+        "--set",
+        metavar="ROOT:KEY=VALUE",
         type=_kv_pair,
         action="append",
-        help=(
-            "Override a SWIFT parameter as ROOTKEY:KEY=VALUE; can be repeated."
-        ),
+        help="Override a SWIFT parameter, e.g. --set "
+        "TimeIntegration:time_end=1.0; can be repeated.",
         default=[],
     )
     parser.add_argument(
@@ -80,9 +82,9 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
 def run(args: argparse.Namespace) -> None:
     """Execute the new mode."""
     make_new_run_dir(
-        output_dir=args.path,
+        output_dir=args.out,
         inicond_file=args.ics,
-        overide_params=dict(args.param),
+        overide_params=dict(args.set),
         force=args.force,
     )
 
@@ -100,6 +102,8 @@ def derive_params_from_ics(
     Returns:
         dict: The updated parameters dictionary with derived values.
     """
+    import h5py
+
     # Get the config
     config = load_swift_profile()
 
@@ -141,10 +145,9 @@ def derive_params_from_ics(
                 units[key] = _as_float(value)
         else:
             # Warn the user that they need to set the units manually
-            warnings.warn(
+            warn(
                 "No 'Units' group found in the initial conditions file. You "
-                "will need to set the units manually in the parameter file.",
-                UserWarning,
+                "will need to set the units manually in the parameter file."
             )
 
     # Compute the mean separation of each particle type (assuming a cubic
@@ -186,7 +189,7 @@ def derive_params_from_ics(
     # Otherwise Time is a scale factor only if the template has a Cosmology
     # section and 0 < Time <= 1; anything else is a plain start time.
     # ponytail: heuristic, a non-cosmological IC with 0 < Time <= 1 is
-    # misread as a scale factor; fix with --param TimeIntegration:time_begin.
+    # misread as a scale factor; fix with --set TimeIntegration:time_begin=....
     if redshift is not None and redshift > 0:
         params["Cosmology"]["a_begin"] = 1 / (1 + redshift)
     elif time is not None:
@@ -205,10 +208,9 @@ def derive_params_from_ics(
             if ic_name in units:
                 unit_params[param_name] = units[ic_name]
             else:
-                warnings.warn(
+                warn(
                     f"No '{ic_name}' found in the initial conditions file."
-                    f" Keeping the template value of {param_name}.",
-                    UserWarning,
+                    f" Keeping the template value of {param_name}."
                 )
 
         # SWIFT has no time unit parameter, ICs rarely store a velocity
@@ -222,10 +224,9 @@ def derive_params_from_ics(
         elif unit_length is not None and unit_time is not None:
             unit_params["UnitVelocity_in_cgs"] = unit_length / unit_time
         else:
-            warnings.warn(
+            warn(
                 "Cannot derive UnitVelocity_in_cgs from the initial "
-                "conditions file. Keeping the template value.",
-                UserWarning,
+                "conditions file. Keeping the template value."
             )
 
     return params

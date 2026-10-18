@@ -12,7 +12,12 @@ from swiftsim_cli.modes import show as show_mode
 from swiftsim_cli.modes import switch as switch_mode
 from swiftsim_cli.modes import update as update_mode
 from swiftsim_cli.multi_mode_args import MultiModeCLIArgs
-from swiftsim_cli.profile import ProfileError, get_profile, load_store
+from swiftsim_cli.profile import (
+    ProfileError,
+    get_profile,
+    load_store,
+    set_profile_override,
+)
 from swiftsim_cli.swiftsim_dir import (
     configure_profile,
     get_swiftsim_dir,
@@ -453,7 +458,7 @@ class TestConfig:
         pm.new_profile("dev")
         wt = gitsetup.root / "dev"
         args = MultiModeCLIArgs(
-            ["config", "--debug", "--with-hydro=sphenix"]
+            ["config", "--debug-build", "--with-hydro=sphenix"]
         ).modes[0][1]
         config_mode.run(args)
         expected = [
@@ -489,19 +494,24 @@ class TestOverride:
         assert get_swiftsim_dir() == gitsetup.root / "a"
         parsed = MultiModeCLIArgs(["--profile", "b", "make", "-j", "2"])
         assert parsed.modes[0][1].nr_threads == 2
+        # Parsing has no side effects; cli.main applies the override
+        assert get_swiftsim_dir() == gitsetup.root / "a"
+        set_profile_override(parsed.global_args.profile)
         assert get_swiftsim_dir() == gitsetup.root / "b"
         make_mode.run(parsed.modes[0][1])
         assert (gitsetup.root / "b" / "swift").exists()
         assert not (gitsetup.root / "a" / "swift").exists()
         assert load_store().current == "a"
-        MultiModeCLIArgs(["make"])
+        set_profile_override(MultiModeCLIArgs(["make"]).global_args.profile)
         assert get_swiftsim_dir() == gitsetup.root / "a"
 
     def test_unknown_override(self, gitsetup):
         """An unknown --profile is a clean error."""
         gitsetup.store()
         pm.new_profile("a")
-        MultiModeCLIArgs(["--profile", "zzz", "make"])
+        set_profile_override(
+            MultiModeCLIArgs(["--profile", "zzz", "make"]).global_args.profile
+        )
         with pytest.raises(ProfileError, match="Unknown profile 'zzz'"):
             get_swiftsim_dir()
 
@@ -627,7 +637,7 @@ class TestMigrate:
         self._write_legacy(gitsetup, current_branch="local-only")
         _confirm(monkeypatch, False)
         pm.migrate_profiles()
-        assert "matches no named profile" in capsys.readouterr().out
+        assert "matches no named profile" in capsys.readouterr().err
         assert not profile_mod.PROFILE_FILE.with_name(
             "profiles.yaml.bak"
         ).exists()

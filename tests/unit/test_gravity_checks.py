@@ -63,7 +63,7 @@ class TestFindCounterpartFile:
             _, swift_file = _find_counterpart_file(str(exact))
 
         assert swift_file.endswith("order3.dat")
-        assert "Warning: 2 SWIFT files" in capsys.readouterr().out
+        assert "warning: 2 SWIFT files" in capsys.readouterr().err
 
     def test_missing_counterpart_raises(self, tmp_path):
         """No SWIFT file for an exact file is an error."""
@@ -92,7 +92,7 @@ class TestLoadForcePair:
         np.testing.assert_array_equal(exact_a, swift_a)
         np.testing.assert_array_equal(exact_pot, swift_pot)
         np.testing.assert_array_equal(exact_pot, [-2.0, -4.0, -5.0])
-        assert "particle IDs differ" in capsys.readouterr().out
+        assert "particle IDs differ" in capsys.readouterr().err
 
     def test_no_common_ids_raises(self, tmp_path):
         """Disjoint files cannot be compared."""
@@ -140,3 +140,43 @@ def test_analyse_force_checks_does_not_leak_rcparams(tmp_path):
 
         assert plt.rcParams["axes.labelsize"] == 3
         assert plt.rcParams["lines.linewidth"] == 0.5
+
+
+def test_force_checks_skip_bad_inputs_and_fail_when_none_work(
+    tmp_path, capsys
+):
+    """Bad inputs are warnings; no usable input at all is an error."""
+    exact = tmp_path / "gravity_checks_exact_step0001.dat"
+    swift = tmp_path / "gravity_checks_swift_step0001_order3.dat"
+    write_force_file(exact, list(range(10)))
+    write_force_file(swift, list(range(10)))
+    lonely = tmp_path / "gravity_checks_exact_step0002.dat"
+    write_force_file(lonely, [1, 2])
+
+    analyse_force_checks(
+        [str(exact), str(lonely)], ["ok", "bad"], output_path=str(tmp_path)
+    )
+    assert "warning: skipping" in capsys.readouterr().err
+
+    png = tmp_path / "gravity_checks_analysis" / "gravity_checks.png"
+    png.unlink()
+    with pytest.raises(ValueError, match="none of the gravity check inputs"):
+        analyse_force_checks([str(lonely)], ["bad"], output_path=str(tmp_path))
+    assert not png.exists()
+
+
+def test_force_checks_reject_bad_error_range():
+    """--min-error must be below --max-error."""
+    with pytest.raises(ValueError, match="--min-error < --max-error"):
+        analyse_force_checks(["a"], ["a"], min_error=1.0, max_error=0.1)
+
+
+def test_unparsable_file_is_named_in_the_error(tmp_path):
+    """Parse errors say which input file was bad."""
+    exact = tmp_path / "exact.dat"
+    swift = tmp_path / "swift.dat"
+    exact.write_text("1 2 three\n")
+    write_force_file(swift, [1])
+
+    with pytest.raises(ValueError, match="exact.dat: "):
+        _load_force_pair(str(exact), str(swift))

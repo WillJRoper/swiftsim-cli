@@ -13,6 +13,7 @@ from swiftsim_cli.modes.analyse.log_task_counts import (
 )
 
 
+@pytest.mark.usefixtures("in_inputs_dir")
 class TestTaskCountsArguments:
     """Tests for task counts CLI argument setup."""
 
@@ -27,10 +28,10 @@ class TestTaskCountsArguments:
 
         # Parse test arguments
         args = parent_parser.parse_args(
-            ["task-counts", "test.log", "--prefix", "test"]
+            ["task-counts", "swift.log", "--prefix", "test"]
         )
 
-        assert args.log_files == [Path("test.log")]
+        assert args.log_files == [Path("swift.log")]
         assert args.prefix == "test"
         assert args.show is False
         assert args.tasks is None
@@ -46,10 +47,10 @@ class TestTaskCountsArguments:
 
         # Parse test arguments with tasks
         args = parent_parser.parse_args(
-            ["task-counts", "test.log", "--tasks", "sort", "self", "pair"]
+            ["task-counts", "swift.log", "--tasks", "sort", "self", "pair"]
         )
 
-        assert args.log_files == [Path("test.log")]
+        assert args.log_files == [Path("swift.log")]
         assert args.tasks == ["sort", "self", "pair"]
 
     def test_add_task_counts_arguments_multiple_logs(self):
@@ -63,14 +64,15 @@ class TestTaskCountsArguments:
 
         # Parse test arguments with multiple logs
         args = parent_parser.parse_args(
-            ["task-counts", "test1.log", "test2.log", "test3.log"]
+            ["task-counts", "swift.log", "a.log", "b.log", "--steps", "2", "5"]
         )
 
         assert args.log_files == [
-            Path("test1.log"),
-            Path("test2.log"),
-            Path("test3.log"),
+            Path("swift.log"),
+            Path("a.log"),
+            Path("b.log"),
         ]
+        assert args.steps == [2, 5]
 
 
 class TestRunSwiftTaskCounts:
@@ -88,6 +90,7 @@ class TestRunSwiftTaskCounts:
         args.prefix = "test"
         args.show = True
         args.tasks = ["sort", "self"]
+        args.steps = [1, 3]
 
         run_swift_task_counts(args)
 
@@ -98,6 +101,7 @@ class TestRunSwiftTaskCounts:
             prefix="test",
             show_plot=True,
             task_filter=["sort", "self"],
+            step_range=[1, 3],
         )
 
     @patch(
@@ -112,16 +116,18 @@ class TestRunSwiftTaskCounts:
         args.prefix = None
         args.show = False
         args.tasks = None
+        args.steps = None
 
         run_swift_task_counts(args)
 
         mock_analyse.assert_called_once_with(
             log_files=[str(args.log_files[0])],
-            labels=None,
+            labels=["test"],
             output_path=None,
             prefix=None,
             show_plot=False,
             task_filter=None,
+            step_range=None,
         )
 
     @patch(
@@ -139,6 +145,7 @@ class TestRunSwiftTaskCounts:
         args.prefix = "multi"
         args.show = False
         args.tasks = None
+        args.steps = None
 
         run_swift_task_counts(args)
 
@@ -152,6 +159,7 @@ class TestRunSwiftTaskCounts:
             prefix="multi",
             show_plot=False,
             task_filter=None,
+            step_range=None,
         )
 
 
@@ -162,7 +170,7 @@ class TestAnalyseSwiftTaskCounts:
         """Test that labels must match number of log files."""
         import pytest
 
-        with pytest.raises(ValueError, match="must match"):
+        with pytest.raises(ValueError, match="one label per input"):
             analyse_swift_task_counts(
                 log_files=["log1.txt", "log2.txt"],
                 labels=["Label 1"],  # Only one label for two files
@@ -240,12 +248,22 @@ class TestAnalyseSwiftTaskCounts:
         ]:
             assert (out / name).is_file()
 
+    def test_series_step_range(self, logs_dir):
+        """--steps keeps only the blocks of the requested steps."""
+        steps, *_ = task_count_series(
+            str(logs_dir / "sample.txt"), step_range=(1, 2)
+        )
+        assert steps == [1, 2]
+
     def test_no_data(self, tmp_path, capsys):
-        """A log without task counts makes no plots."""
+        """A log without task counts is an error and makes no plots."""
         log = tmp_path / "log.txt"
         log.write_text("nothing here\n")
-        analyse_swift_task_counts(log_files=[str(log)], output_path=tmp_path)
-        assert "No usable data" in capsys.readouterr().out
+        with pytest.raises(ValueError, match="run SWIFT with -v 1"):
+            analyse_swift_task_counts(
+                log_files=[str(log)], output_path=tmp_path
+            )
+        assert "warning: no task counts found" in capsys.readouterr().err
         assert not (tmp_path / "task_counts_analysis").exists() or not any(
             (tmp_path / "task_counts_analysis").iterdir()
         )

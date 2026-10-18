@@ -7,14 +7,19 @@ import re
 from collections import Counter, defaultdict
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Mapping, Sequence, TypeVar
+from typing import TYPE_CHECKING, Callable, Mapping, Sequence, TypeVar
 
-import matplotlib.patches as mpatches
-import matplotlib.pyplot as plt
 import numpy as np
 from tqdm.auto import tqdm
 
-from swiftsim_cli.modes.common_args import add_output_arguments
+from swiftsim_cli.modes.common_args import (
+    add_output_arguments,
+    add_rank_argument,
+    existing_file,
+    non_negative_int,
+    positive_float,
+    positive_int,
+)
 from swiftsim_cli.utilities.io import create_output_path
 from swiftsim_cli.utilities.plotting import save_figure
 from swiftsim_cli.utilities.tables import create_ascii_table
@@ -22,6 +27,10 @@ from swiftsim_cli.utilities.tables import create_ascii_table
 from .task_debug_data import TaskDebugData, TaskFilter, TaskRecord
 from .task_plot_metadata import CELL_SUBTYPES, CELL_TYPES
 from .threadpool_data import ThreadpoolData, ThreadpoolRecord
+
+if TYPE_CHECKING:
+    from matplotlib.axes import Axes
+    from matplotlib.figure import Figure
 
 __all__ = [
     "add_task_plots_arguments",
@@ -55,16 +64,23 @@ def add_task_plots_arguments(
             "Plot SWIFT task-debug and threadpool timings on a shared "
             "wall-clock axis."
         ),
+        description="Plot SWIFT task-debug and threadpool timings on a "
+        "shared wall-clock axis. Requires SWIFT configured with "
+        "--enable-task-debugging and --enable-threadpool-debugging and run "
+        "with -y N and -Y N.",
     )
+    parser.set_defaults(func=run_swift_task_plots)
 
     parser.add_argument(
         "task_file",
-        type=Path,
+        type=existing_file,
+        metavar="TASK_FILE",
         help="Task-debug file produced by SWIFT's -y output.",
     )
     parser.add_argument(
         "threadpool_file",
-        type=Path,
+        type=existing_file,
+        metavar="THREADPOOL_FILE",
         help=(
             "Threadpool dump produced by SWIFT's -Y output. Threadpool dumps "
             "are per rank: for multi-rank task files the dump is only "
@@ -74,44 +90,46 @@ def add_task_plots_arguments(
             "threadpool panel."
         ),
     )
-    parser.add_argument(
-        "--rank",
-        type=int,
-        default=None,
-        help=(
-            "Specific rank to plot for MPI task-debug files. By default all "
-            "ranks in the task file are emitted."
-        ),
+    add_rank_argument(
+        parser,
+        default="all",
+        help="MPI rank to plot from multi-rank task files; 'all' gives one "
+        "set of plots per rank.",
     )
     parser.add_argument(
         "--limit",
-        type=float,
+        type=positive_float,
         default=0.0,
+        metavar="MS",
         help="Upper time limit in ms (default: the data range).",
     )
     parser.add_argument(
         "--mintic",
-        type=int,
+        type=non_negative_int,
         default=None,
+        metavar="TICK",
         help="Absolute tick to use as the shared start time "
         "(default: the earliest tick).",
     )
     parser.add_argument(
         "--expand",
-        type=int,
+        type=positive_int,
         default=1,
+        metavar="N",
         help="Expansion factor for each thread lane (default: 1).",
     )
     parser.add_argument(
         "--width",
-        type=float,
+        type=positive_float,
         default=16.0,
+        metavar="IN",
         help="Figure width in inches (default: 16).",
     )
     parser.add_argument(
         "--height",
-        type=float,
+        type=positive_float,
         default=10.0,
+        metavar="IN",
         help="Figure height in inches (default: 10).",
     )
     parser.add_argument(
@@ -122,51 +140,33 @@ def add_task_plots_arguments(
     )
     add_output_arguments(parser, OUT_SUBDIR)
     parser.add_argument(
-        "--task",
+        "--tasks",
         type=str,
+        nargs="+",
         default=None,
-        help="Specific task label to include, e.g. 'pair/force'.",
+        metavar="NAME",
+        help="Task labels to include, e.g. 'pair/force' (default: all).",
     )
-    parser.add_argument(
-        "--c-type",
-        type=_parse_cell_type,
-        default=None,
-        help="Include tasks where either cell has this type.",
-    )
-    parser.add_argument(
-        "--ci-type",
-        type=_parse_cell_type,
-        default=None,
-        help="Include tasks whose ci cell has this type.",
-    )
-    parser.add_argument(
-        "--cj-type",
-        type=_parse_cell_type,
-        default=None,
-        help="Include tasks whose cj cell has this type.",
-    )
-    parser.add_argument(
-        "--c-subtype",
-        type=_parse_cell_subtype,
-        default=None,
-        help="Include tasks where either cell has this subtype.",
-    )
-    parser.add_argument(
-        "--ci-subtype",
-        type=_parse_cell_subtype,
-        default=None,
-        help="Include tasks whose ci cell has this subtype.",
-    )
-    parser.add_argument(
-        "--cj-subtype",
-        type=_parse_cell_subtype,
-        default=None,
-        help="Include tasks whose cj cell has this subtype.",
-    )
+    for flag, cell, kind, parse in (
+        ("--c-type", "either cell", "type", _parse_cell_type),
+        ("--ci-type", "the ci cell", "type", _parse_cell_type),
+        ("--cj-type", "the cj cell", "type", _parse_cell_type),
+        ("--c-subtype", "either cell", "subtype", _parse_cell_subtype),
+        ("--ci-subtype", "the ci cell", "subtype", _parse_cell_subtype),
+        ("--cj-subtype", "the cj cell", "subtype", _parse_cell_subtype),
+    ):
+        parser.add_argument(
+            flag,
+            type=parse,
+            default=None,
+            metavar=kind.upper(),
+            help=f"Include tasks where {cell} has this {kind}.",
+        )
     parser.add_argument(
         "--depth",
-        type=int,
+        type=non_negative_int,
         default=None,
+        metavar="N",
         help="Include tasks where either cell is at this tree depth.",
     )
     parser.add_argument(
@@ -190,7 +190,7 @@ def run_swift_task_plots(args: argparse.Namespace) -> None:
         threadpool_file=args.threadpool_file,
         output_path=args.out,
         prefix=args.prefix,
-        rank=args.rank,
+        rank=None if args.rank == "all" else args.rank,
         limit=args.limit,
         mintic=args.mintic,
         expand=args.expand,
@@ -199,7 +199,7 @@ def run_swift_task_plots(args: argparse.Namespace) -> None:
         show_plot=args.show,
         show_legend=not args.no_legend,
         task_filter=TaskFilter(
-            task=args.task,
+            tasks=tuple(args.tasks) if args.tasks else None,
             c_type=args.c_type,
             ci_type=args.ci_type,
             cj_type=args.cj_type,
@@ -428,8 +428,10 @@ def _plot_combined_timeline(
     width: float,
     height: float,
     show_legend: bool,
-) -> plt.Figure:
+) -> Figure:
     """Render the combined top-threadpool / bottom-task timeline figure."""
+    import matplotlib.pyplot as plt
+
     fig, (ax_top, ax_bottom) = plt.subplots(
         2,
         1,
@@ -516,8 +518,10 @@ def _plot_task_activity(
     height: float,
     sort_threads: bool,
     xbins: int = 1000,
-) -> plt.Figure:
+) -> Figure:
     """Render a task-activity heatmap for a filtered task selection."""
+    import matplotlib.pyplot as plt
+
     if thread_count < 1:
         raise ValueError("Task activity plots require at least one thread.")
 
@@ -570,7 +574,7 @@ def _plot_task_activity(
 
 
 def _plot_background_band(
-    axis: plt.Axes,
+    axis: Axes,
     records: Sequence[ThreadpoolRecord],
     total_lanes: int,
     start_ms: float,
@@ -644,7 +648,7 @@ def _expand_intervals(
 
 
 def _draw_lane_intervals(
-    axis: plt.Axes, intervals: Sequence[PlotInterval]
+    axis: Axes, intervals: Sequence[PlotInterval]
 ) -> None:
     """Draw lane intervals using ``broken_barh`` grouped by lane."""
     by_lane: dict[int, list[PlotInterval]] = defaultdict(list)
@@ -663,7 +667,7 @@ def _draw_lane_intervals(
 
 
 def _format_timeline_axis(
-    axis: plt.Axes,
+    axis: Axes,
     thread_count: int,
     expand: int,
     ylabel: str,
@@ -677,12 +681,14 @@ def _format_timeline_axis(
 
 
 def _add_legend(
-    axis: plt.Axes,
+    axis: Axes,
     intervals: Sequence[PlotInterval],
     ncol: int,
     above: bool,
 ) -> None:
     """Add a legend sorted by label frequency for one panel."""
+    import matplotlib.patches as mpatches
+
     labels_by_count = [
         label
         for label, _ in Counter(
@@ -830,8 +836,10 @@ def _task_filter_suffix(task_filter: TaskFilter | None) -> str:
         return ""
 
     suffixes: list[str] = []
-    if task_filter.task is not None:
-        suffixes.append(task_filter.task.replace("/", "-"))
+    if task_filter.tasks is not None:
+        suffixes.append(
+            "+".join(t.replace("/", "-") for t in task_filter.tasks)
+        )
     if task_filter.c_type is not None:
         suffixes.append(f"c{CELL_TYPES[task_filter.c_type].lower()}")
     if task_filter.ci_type is not None:

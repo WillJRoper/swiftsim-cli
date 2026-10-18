@@ -12,13 +12,14 @@ from swiftsim_cli.modes.utils import (
     compute_softening_rows,
     format_softening_report,
     run,
+    run_softenings,
 )
 
 
 class TestAddArguments:
     """Test the utils mode argument parser."""
 
-    def test_softenings_arguments(self):
+    def test_softenings_arguments(self, in_inputs_dir):
         """Test parsing the softenings subcommand."""
         parser = argparse.ArgumentParser()
         add_arguments(parser)
@@ -27,14 +28,15 @@ class TestAddArguments:
             [
                 "softenings",
                 "--ics",
-                "/tmp/ics.hdf5",
+                "ics.hdf5",
                 "--params",
                 "/tmp/params.yml",
             ]
         )
 
         assert args.utils_type == "softenings"
-        assert str(args.ics) == "/tmp/ics.hdf5"
+        assert args.func is run_softenings
+        assert str(args.ics) == "ics.hdf5"
         assert str(args.params) == "/tmp/params.yml"
         assert args.softening_coeff is None
         assert args.pivot_redshift is None
@@ -43,7 +45,7 @@ class TestAddArguments:
 class TestComputeSofteningRows:
     """Test softening calculations from a SWIFT dataset."""
 
-    @patch("swiftsim_cli.modes.utils.load")
+    @patch("swiftsimio.load")
     def test_compute_softening_rows(self, mock_load):
         """Test per-species softenings are computed from particle counts."""
         mock_load.return_value = SimpleNamespace(
@@ -129,6 +131,7 @@ class TestRun:
         mock_format_report.return_value = "report text"
 
         args = SimpleNamespace(
+            func=run_softenings,
             utils_type="softenings",
             ics=Mock(),
             params=Mock(),

@@ -9,6 +9,11 @@ pip install -e ".[dev,test]"
 pre-commit install
 ```
 
+`swift-cli --version` reports the version written when the package was
+installed (setuptools_scm generates `src/swiftsim_cli/_version.py` at
+install time), so in an editable install it goes stale as you commit; re-run
+`pip install -e .` to refresh it.
+
 The pre-commit hooks run ruff (lint and format) and mypy. The mypy hook uses
 the mypy installed in your environment and checks `src` and `tests` with the
 `[tool.mypy]` settings in `pyproject.toml`, exactly as CI does.
@@ -26,6 +31,19 @@ Optionally run the timer parser against a real SWIFT checkout:
 
 ```bash
 SWIFT_SRC=/path/to/swiftsim pytest tests/unit/test_timer_db_archetypes.py -k real
+```
+
+### Dependency floors
+
+The lower bounds in `pyproject.toml` are tested, not guessed. To check them
+(or a new one), install the oldest allowed version of every direct
+dependency into a fresh Python 3.10 environment and run the suite:
+
+```bash
+uv venv -p 3.10 /tmp/vmin
+SETUPTOOLS_SCM_PRETEND_VERSION=1.0.0 VIRTUAL_ENV=/tmp/vmin \
+    uv pip install --resolution lowest-direct ".[test]"
+/tmp/vmin/bin/python -m pytest -p no:cacheprovider -o addopts="" tests
 ```
 
 Add tests for new behaviour (see [tests/README.md](tests/README.md)) and a
@@ -69,7 +87,8 @@ token is stored in GitHub.
    project on the first upload.
 2. **GitHub environment.** In the repository, open *Settings → Environments*
    and create an environment named `pypi`. Optionally add required reviewers
-   (to approve each release) and restrict it to tags matching `v*`.
+   (to approve each release) and restrict it to tags matching `v[0-9]*`
+   (the pattern the release workflow runs on).
 3. **Codecov (optional).** Coverage uploads from CI work without a token for
    public repositories. If uploads are rejected or rate limited, add the
    repository's Codecov upload token as a secret named `CODECOV_TOKEN`

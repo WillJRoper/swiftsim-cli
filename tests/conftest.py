@@ -51,6 +51,31 @@ def synthetic_db(swift_src_dir) -> TimerDB:
     return TimerDB(build_timer_db(swift_src_dir))
 
 
+# Input names used by parse-only tests; input paths are checked at parse
+# time, so `in_inputs_dir` creates them in a scratch working directory.
+INPUT_FILES = (
+    "a.txt",
+    "b.txt",
+    "a.dat",
+    "swift.log",
+    "a.log",
+    "b.log",
+    "tasks.dat",
+    "threadpool.dat",
+    "ics.hdf5",
+)
+
+
+@pytest.fixture
+def in_inputs_dir(tmp_path, monkeypatch):
+    """Run in a directory holding the `INPUT_FILES` and a 'reports' dir."""
+    for name in INPUT_FILES:
+        (tmp_path / name).touch()
+    (tmp_path / "reports").mkdir()
+    monkeypatch.chdir(tmp_path)
+    return tmp_path
+
+
 @pytest.fixture
 def temp_dir():
     """Create a temporary directory for test files."""

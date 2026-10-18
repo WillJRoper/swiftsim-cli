@@ -26,30 +26,26 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         "and exit.",
     )
     parser.add_argument(
-        "--debug",
-        "-d",
+        "--debug-build",
         action="store_true",
         help="Configure using the preset debug options "
         "(--enable-debug --enable-debugging-checks --disable-optimization).",
     )
     parser.add_argument(
         "--gravity",
-        "-g",
         action="store_true",
         help="Configure using the preset gravity-only options "
         "(--enable-ipo --with-tbbmalloc --with-parmetis).",
     )
     parser.add_argument(
         "--eagle",
-        "-e",
         action="store_true",
         help="Configure using the preset EAGLE options "
         "(--with-subgrid=EAGLE --with-hydro=sphenix --with-kernel=wendland-C2 "
-        "--enable-ipo --with-tbbmalloc  --with-parmetis).",
+        "--enable-ipo --with-tbbmalloc --with-parmetis).",
     )
     parser.add_argument(
         "--eaglexl",
-        "-x",
         action="store_true",
         help="Configure using the preset EAGLE-XL options "
         "(--with-subgrid=EAGLE-XL --with-hydro=sphenix "
@@ -75,7 +71,7 @@ def run(args: argparse.Namespace) -> None:
     else:
         # Build up the options to pass to the configure script
         opts = []
-        if args.debug:
+        if args.debug_build:
             opts.extend(
                 [
                     "--enable-debug",

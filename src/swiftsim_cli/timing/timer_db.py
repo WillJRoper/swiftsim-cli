@@ -35,11 +35,9 @@ import tempfile
 from bisect import bisect_right
 from collections import defaultdict
 from dataclasses import dataclass, field
+from functools import lru_cache
 from pathlib import Path
-from typing import Any
-
-import tree_sitter
-import tree_sitter_c
+from typing import TYPE_CHECKING, Any
 
 from swiftsim_cli.profile import (
     ProfileError,
@@ -47,6 +45,9 @@ from swiftsim_cli.profile import (
     git,
     load_swift_profile,
 )
+
+if TYPE_CHECKING:
+    import tree_sitter
 
 # Bump whenever the database contents or format change.
 PARSER_VERSION = 2
@@ -92,19 +93,32 @@ _RE_COMMENT_OR_STRING = re.compile(
 )
 _NOT_FUNCTIONS = {"if", "for", "while", "switch", "do", "else", "return"}
 
-_LANGUAGE = tree_sitter.Language(tree_sitter_c.language())
-_QUERY = tree_sitter.Query(
-    _LANGUAGE,
-    "(function_definition) @func "
-    "(call_expression function: (identifier) @callee) "
-    "(argument_list (identifier) @arg) "
-    "(argument_list (pointer_expression argument: (identifier) @arg))",
-)
-# ``#if 0`` blocks: their code (up to any #elif/#else) is never compiled.
-_DEAD_QUERY = tree_sitter.Query(
-    _LANGUAGE,
-    '(preproc_if condition: (number_literal) @cond (#eq? @cond "0"))',
-)
+
+@lru_cache(maxsize=1)
+def _tree_sitter() -> tuple[
+    tree_sitter.Language, tree_sitter.Query, tree_sitter.Query
+]:
+    """Return the C language, the site query and the ``#if 0`` query.
+
+    Built on first use so that importing this module stays cheap.
+    """
+    import tree_sitter
+    import tree_sitter_c
+
+    language = tree_sitter.Language(tree_sitter_c.language())
+    query = tree_sitter.Query(
+        language,
+        "(function_definition) @func "
+        "(call_expression function: (identifier) @callee) "
+        "(argument_list (identifier) @arg) "
+        "(argument_list (pointer_expression argument: (identifier) @arg))",
+    )
+    # ``#if 0`` blocks: their code (up to any #elif/#else) is never compiled.
+    dead_query = tree_sitter.Query(
+        language,
+        '(preproc_if condition: (number_literal) @cond (#eq? @cond "0"))',
+    )
+    return language, query, dead_query
 
 
 # =============================================================================
@@ -547,9 +561,12 @@ class _ParsedFile:
 
 def _dead_ranges(root: tree_sitter.Node) -> list[tuple[int, int]]:
     """Byte ranges of the code inside ``#if 0`` (up to any #elif/#else)."""
+    import tree_sitter
+
+    dead_query = _tree_sitter()[2]
     ranges = []
     for cond in (
-        tree_sitter.QueryCursor(_DEAD_QUERY).captures(root).get("cond", [])
+        tree_sitter.QueryCursor(dead_query).captures(root).get("cond", [])
     ):
         block = cond.parent
         if block is None:
@@ -567,8 +584,11 @@ def parse_source(src: bytes, rel: str) -> _ParsedFile:
         src: The file contents.
         rel: The file's path as recorded in site ids.
     """
-    tree = tree_sitter.Parser(_LANGUAGE).parse(src)
-    captures = tree_sitter.QueryCursor(_QUERY).captures(tree.root_node)
+    import tree_sitter
+
+    language, query, _ = _tree_sitter()
+    tree = tree_sitter.Parser(language).parse(src)
+    captures = tree_sitter.QueryCursor(query).captures(tree.root_node)
     dead = _dead_ranges(tree.root_node) if b"#if 0" in src else []
 
     funcs: list[_Function] = []

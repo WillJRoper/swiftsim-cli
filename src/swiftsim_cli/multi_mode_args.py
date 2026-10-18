@@ -6,7 +6,9 @@ each with its own arguments::
     swift-cli [--profile NAME] [--debug] <mode> [args] [<mode> [args]] ...
 
 A token naming a mode starts a new mode section unless the current mode's
-parser expects it as a value (e.g. ``new --path make`` or ``switch show``).
+parser expects it as a value (e.g. ``new -o make`` or ``switch show``). A
+``--`` token always ends the current mode's arguments, so the next token
+must name a mode (``config --enable-debug -- make -j 8``).
 """
 
 import argparse
@@ -18,10 +20,12 @@ from swiftsim_cli import __version__
 from swiftsim_cli.modes import (
     AVAILABLE_MODES,
     MODE_DESCRIPTIONS,
-    MODE_MODULES,
     Mode,
+    load_mode,
 )
-from swiftsim_cli.profile import set_profile_override
+
+# Ends the current mode's arguments
+MODE_TERMINATOR = "--"
 
 # Variable-length nargs values (argparse.OPTIONAL, ZERO_OR_MORE, ...)
 _VARIABLE_NARGS = ("?", "*", "+")
@@ -77,15 +81,11 @@ class _ModeScanner:
         """Return how many values follow an option token."""
         if "=" in token and token.startswith("--"):
             return 0  # --opt=value carries its value
-        actions = self.parser._option_string_actions
-        action = actions.get(token)
-        if action is None and token.startswith("--"):
-            # argparse accepts unambiguous abbreviations of long options
-            matches = {a for s, a in actions.items() if s.startswith(token)}
-            if len(matches) == 1:
-                action = matches.pop()
-        # Unknown options (e.g. configure flags) and attached short values
-        # (-j4) take nothing from the following tokens
+        # Every parser is built with allow_abbrev=False, so only exact
+        # option strings name an action. Unknown options (e.g. configure
+        # flags) and attached short values (-j4) take nothing from the
+        # following tokens.
+        action = self.parser._option_string_actions.get(token)
         return 0 if action is None else _nargs(action)
 
     def belongs(self, token: str) -> bool:
@@ -143,6 +143,65 @@ class _ModeScanner:
             return False
         self.open, self.seen = (None if nargs == "?" else nargs), 1
         return True
+
+
+def _finish_parser(parser: argparse.ArgumentParser) -> None:
+    """Apply the shared conventions to a mode parser and its subparsers.
+
+    Disables abbreviated long options (``--res`` for ``--resolution``),
+    which would make the mode splitting ambiguous, and gives subcommands
+    without a description their one-line help as the description.
+
+    Args:
+        parser: The mode parser, after its arguments were added.
+    """
+    parser.allow_abbrev = False
+    for action in parser._actions:
+        if isinstance(action, argparse._SubParsersAction):
+            helps = {a.dest: a.help for a in action._choices_actions}
+            for name, subparser in action.choices.items():
+                if subparser.description is None:
+                    subparser.description = helps.get(name)
+                _finish_parser(subparser)
+
+
+def top_level_help() -> str:
+    """Return the text of ``swift-cli --help``.
+
+    Returns:
+        The help text.
+    """
+    modes = "\n".join(
+        f"  {name:<15} {MODE_DESCRIPTIONS[name]}" for name in AVAILABLE_MODES
+    )
+    return f"""\
+swift-cli: Utilities for SWIFT development workflows
+
+Usage:
+  swift-cli [global options] <mode> [mode args] [<mode> [mode args]] ...
+
+Global options (must come before the first mode):
+  -h, --help      Show this help and exit.
+  --version       Show the version and exit.
+  --profile NAME  Run the modes against profile NAME.
+  --debug         Show full tracebacks for errors (or set
+                  SWIFT_CLI_DEBUG=1).
+
+Available modes:
+{modes}
+
+Modes run in order and the chain stops at the first error. A mode name
+starts the next mode unless the current mode expects a value there; use
+'--' to end a mode's arguments explicitly.
+
+Examples:
+  swift-cli config --enable-debug
+  swift-cli make -j 8
+  swift-cli config --enable-debug make -j 32
+  swift-cli config --enable-debug -- make -j 32
+  swift-cli --profile zoom make -j 16
+
+For mode-specific help: swift-cli <mode> --help"""
 
 
 class MultiModeCLIArgs:
@@ -227,8 +286,6 @@ class MultiModeCLIArgs:
             self._print_help()
             sys.exit(1)
 
-        # Run every mode against --profile NAME instead of the current one
-        set_profile_override(global_args.profile)
         return global_args, argv[split:]
 
     def _split_by_modes(
@@ -245,7 +302,14 @@ class MultiModeCLIArgs:
         sections: List[Tuple[Mode, argparse.ArgumentParser, List[str]]] = []
         scanner = None
         for arg in argv:
-            if scanner is None or not scanner.belongs(arg):
+            if arg == MODE_TERMINATOR:
+                scanner = None
+            elif scanner is None or not scanner.belongs(arg):
+                if arg not in AVAILABLE_MODES:
+                    self._global_parser().error(
+                        f"expected a mode after '{MODE_TERMINATOR}', got "
+                        f"'{arg}' (choose from: {', '.join(AVAILABLE_MODES)})"
+                    )
                 mode_name = cast(Mode, arg)
                 parser = self._mode_parser(mode_name)
                 sections.append((mode_name, parser, []))
@@ -268,7 +332,8 @@ class MultiModeCLIArgs:
             prog=f"swift-cli {mode_name}",
             description=MODE_DESCRIPTIONS[mode_name],
         )
-        MODE_MODULES[mode_name].add_arguments(parser)
+        load_mode(mode_name).add_arguments(parser)
+        _finish_parser(parser)
         return parser
 
     @staticmethod
@@ -294,34 +359,7 @@ class MultiModeCLIArgs:
             return args
         return parser.parse_args(mode_argv)
 
-    def _print_help(self) -> None:
-        """Print comprehensive help for all modes."""
-        print("swift-cli: Utilities for SWIFT development workflows")
-        print()
-        print("Usage:")
-        print(
-            "  swift-cli [global options] <mode> [mode args] "
-            "[<mode> [mode args]] ..."
-        )
-        print()
-        print("Global options (must come before the first mode):")
-        print("  -h, --help      Show this help and exit.")
-        print("  --version       Show the version and exit.")
-        print("  --profile NAME  Run the modes against profile NAME.")
-        print("  --debug         Show full tracebacks for errors (or set")
-        print("                  SWIFT_CLI_DEBUG=1).")
-        print()
-        print("Available modes:")
-
-        for mode_name in AVAILABLE_MODES:
-            print(f"  {mode_name:<15} {MODE_DESCRIPTIONS[mode_name]}")
-
-        print()
-        print("Examples:")
-        print("  swift-cli config --enable-debug")
-        print("  swift-cli make -j 8")
-        print("  swift-cli config --enable-debug make -j 32")
-        print("  swift-cli update config --enable-debug make -j 8")
-        print("  swift-cli --profile zoom make -j 16")
-        print()
-        print("For mode-specific help: swift-cli <mode> --help")
+    @staticmethod
+    def _print_help() -> None:
+        """Print the top-level help (also shown in the README)."""
+        print(top_level_help())
