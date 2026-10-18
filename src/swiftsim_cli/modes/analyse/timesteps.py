@@ -43,7 +43,9 @@ _TIMESTEP_LABEL_ALIASES = {
 }
 
 
-def add_timestep_arguments(subparsers) -> None:
+def add_timestep_arguments(
+    subparsers: argparse._SubParsersAction,
+) -> None:
     """Add timestep analysis arguments to the subparser."""
     timestep_parser = subparsers.add_parser(
         "timesteps", help="Plot the timestep files of one or more runs."
@@ -77,8 +79,9 @@ def add_timestep_arguments(subparsers) -> None:
     )
 
     timestep_parser.add_argument(
-        "--nthreads",
+        "--threads-per-run",
         nargs="+",
+        metavar="N",
         help=(
             "Number of threads used by each run, in the same order as files. "
             "When given, wall-clock and dead time are converted to CPU time."
@@ -98,7 +101,7 @@ def run_timestep(args: argparse.Namespace) -> None:
         show_plot=args.show,
         time_column=args.time_column,
         match_runtimes=args.match_runtimes,
-        nthreads=args.nthreads,
+        nthreads=args.threads_per_run,
     )
 
 
@@ -158,10 +161,12 @@ def analyse_timestep_files(
     if nthreads is not None:
         if len(files) != len(nthreads):
             raise ValueError(
-                "Number of files and nthreads entries must match."
+                "Number of files and threads-per-run entries must match."
             )
         if any(nthread <= 0 for nthread in nthreads):
-            raise ValueError("nthreads entries must be positive integers.")
+            raise ValueError(
+                "threads-per-run entries must be positive integers."
+            )
 
     if time_column is None:
         time_column = 1 if plot_time is True else 2
@@ -270,7 +275,7 @@ def analyse_timestep_files(
     colors = tab10(np.linspace(0, 1, len(files)))
 
     # Main plot - absolute times
-    for i, (xi, yi, dt, label, color) in enumerate(  # type: ignore[assignment]
+    for i, (xi, yi, dt, label, color) in enumerate(
         zip(x, y, deadtime, labels, colors)
     ):
         # Plot wall clock time (solid lines)
@@ -351,7 +356,7 @@ def analyse_timestep_files(
     ax1.legend(handles=legend_elements, loc="best")
 
     # Deadtime percentage plot
-    for i, (xi, yi, dt, label, color) in enumerate(  # type: ignore[assignment]
+    for i, (xi, yi, dt, label, color) in enumerate(
         zip(x, y, deadtime, labels, colors)
     ):
         # Calculate deadtime percentage: (deadtime / total_time) * 100

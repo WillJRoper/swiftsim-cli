@@ -121,6 +121,33 @@ def test_steps_flag(name):
     assert _parse([*base, "--steps", "2", "5"]).steps == [2, 5]
 
 
+def test_renamed_v1_flags():
+    """Flags renamed for v1.0 parse to the expected destinations."""
+    assert _parse(["config", "--list-options"]).list_options is True
+    # config passes unknown flags on to ./configure, so --show is not ours
+    assert _parse(["config", "--show"]).options == ["--show"]
+    assert _parse(["profile", "--show", "zoom"]).show == "zoom"
+    assert _parse(["profile", "--show"]).show == ""
+    base = ["analyse", *_ANALYSE_ARGV["timesteps"]]
+    assert _parse(base).threads_per_run is None
+    args = _parse([*base, "--threads-per-run", "4"])
+    assert args.threads_per_run == [4]
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["profile", "-S"],
+        ["analyse", *_ANALYSE_ARGV["timesteps"], "--nthreads", "4"],
+    ],
+)
+def test_removed_v1_flags(argv):
+    """Flags removed for v1.0 (profile -S, --nthreads) are rejected."""
+    with pytest.raises(SystemExit) as excinfo:
+        MultiModeCLIArgs(argv)
+    assert excinfo.value.code == 2
+
+
 def _write_runtime_log(path: Path, ranks: int, wallclock: float) -> None:
     """Write a minimal SWIFT log with a step table."""
     path.write_text(

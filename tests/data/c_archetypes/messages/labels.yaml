@@ -1,0 +1,62 @@
+description: >
+  Labels before "took": a parenthesised runtime label (function timer), a
+  quoted runtime label with and without literal text, %d inside labels,
+  a leading " - ", a literal %% and braces in the label, and a
+  parenthesised remark with a float after the time.
+functions:
+  engine_launch: [3, 8]
+  write_array_single: [10, 18]
+  write_array_parallel: [20, 25]
+  lightcone_flush: [27, 32]
+  mesh_patches: [34, 42]
+sites:
+  labels.c:6: {function: engine_launch, kind: function, label: "(%s)"}
+  labels.c:13: {function: write_array_single, kind: operation, label: "Copying for '%s'"}
+  labels.c:16: {function: write_array_single, kind: function, label: "'%s'"}
+  labels.c:22: {function: write_array_parallel, kind: operation, label: "H5Dwrite for '%s' (%d MB) on rank %d"}
+  labels.c:30: {function: lightcone_flush, kind: operation, label: "lightcone %d: Flushing particle buffers"}
+  labels.c:37: {function: mesh_patches, kind: operation, label: "- Sorting of mesh cells", format: " - Sorting of mesh cells took %.3f %s."}
+  labels.c:40: {function: mesh_patches, kind: operation, label: "100%% of %s {done}"}
+lines:
+  labels.c:6:
+    match:
+      - {body: "(tasks) took 2190.281 ms.", ms: 2190.281, key: engine_launch (tasks)}
+      - {body: "(fof tasks) took 1.000 ms.", ms: 1.0, key: engine_launch (fof tasks)}
+    reject: ["took 1.000 ms.", "tasks took 1.000 ms."]
+  labels.c:13:
+    match:
+      - {body: "Copying for 'Coordinates' took 0.500 ms.", ms: 0.5, key: "write_array_single: Copying for 'Coordinates'"}
+  labels.c:16:
+    match:
+      - {body: "'Masses' took 0.250 ms.", ms: 0.25, key: "write_array_single 'Masses'"}
+  labels.c:22:
+    match:
+      - body: "H5Dwrite for 'Velocities' (12 MB) on rank 3 took 41.000 ms (speed = 292.68 MB/s)."
+        ms: 41.0
+        key: "write_array_parallel: H5Dwrite for 'Velocities' (%d MB) on rank %d"
+    reject:
+      - "H5Dwrite for 'Velocities' (12 MB) on rank 3 took 41.000 ms."
+  labels.c:30:
+    match:
+      - {body: "lightcone 2: Flushing particle buffers took 7.000 ms.", ms: 7.0, key: "lightcone_flush: lightcone %d: Flushing particle buffers"}
+  labels.c:37:
+    match:
+      - {body: "- Sorting of mesh cells took 1.000 ms.", ms: 1.0, key: "mesh_patches: - Sorting of mesh cells"}
+  labels.c:40:
+    match:
+      - {body: "100% of cells {done} took 1.000 ms.", ms: 1.0, key: "mesh_patches: 100%% of cells {done}"}
+log:
+  text: |
+    [0002] [00100.1] engine_launch: (tasks) took 15.000 ms.
+    [0002] [00100.2] engine_launch: (fof tasks) took 1.500 s.
+    [0002] [00100.3] write_array_single: Copying for 'Coordinates' took 0.500 ms.
+    [0002] [00100.4] lightcone_flush: lightcone 0: Flushing particle buffers took 7.000 ms.
+    [0002] [00100.5] lightcone_flush: lightcone 1: Flushing particle buffers took 3.000 ms.
+    [0002] [00100.6] mesh_patches:  - Sorting of mesh cells took 1.000 ms.
+  records:
+    - [2, engine_launch, engine_launch (tasks), 15.0]
+    - [2, engine_launch, engine_launch (fof tasks), 1500.0]
+    - [2, write_array_single, "write_array_single: Copying for 'Coordinates'", 0.5]
+    - [2, lightcone_flush, "lightcone_flush: lightcone %d: Flushing particle buffers", 7.0]
+    - [2, lightcone_flush, "lightcone_flush: lightcone %d: Flushing particle buffers", 3.0]
+    - [2, mesh_patches, "mesh_patches: - Sorting of mesh cells", 1.0]

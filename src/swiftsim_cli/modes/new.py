@@ -6,7 +6,7 @@ import warnings
 from pathlib import Path
 from typing import Any, Tuple
 
-import h5py  # type: ignore[import-untyped]
+import h5py
 import numpy as np
 from ruamel.yaml import YAML
 

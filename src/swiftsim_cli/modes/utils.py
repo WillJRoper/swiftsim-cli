@@ -5,8 +5,8 @@ from pathlib import Path
 from typing import Any, cast
 
 import numpy as np
-from swiftsimio import load  # type: ignore[import-untyped]
-from swiftsimio.metadata import particle_types  # type: ignore[import-untyped]
+from swiftsimio import load
+from swiftsimio.metadata import particle_types
 
 from swiftsim_cli.modes.common_args import add_params_argument
 from swiftsim_cli.params import load_parameters
@@ -64,7 +64,7 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     )
 
 
-def _get_cubic_box_size(boxsize):
+def _get_cubic_box_size(boxsize: Any) -> Any:
     """Return a scalar box size, enforcing the cubic-box assumption."""
     raw_values = boxsize.value if hasattr(boxsize, "value") else boxsize
     values = np.atleast_1d(np.asarray(raw_values))
@@ -85,7 +85,7 @@ def compute_softening_rows(
     ics_file: Path,
     softening_coeff: float,
     pivot_redshift: float,
-) -> tuple[object, list[dict[str, object]]]:
+) -> tuple[Any, list[dict[str, Any]]]:
     """Compute softening values for each populated particle species."""
     dataset = load(ics_file)
     box_size = _get_cubic_box_size(dataset.metadata.boxsize)
@@ -128,8 +128,8 @@ def format_softening_report(
     softening_coeff: float,
     pivot_redshift: float,
     a_begin: float | None,
-    box_size,
-    rows: list[dict[str, object]],
+    box_size: Any,
+    rows: list[dict[str, Any]],
 ) -> str:
     """Format a compact human-readable softening report."""
     z_begin = None if not a_begin else (1 / a_begin) - 1

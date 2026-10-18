@@ -1,5 +1,6 @@
 """Tests for the gravity error map analysis mode."""
 
+from typing import Any
 from unittest.mock import patch
 
 import matplotlib.pyplot as plt
@@ -32,7 +33,7 @@ def test_distance_panel_autoscales_counts_and_uses_box_centre(tmp_path):
         )
         fig = plt.gcf()
 
-    counts = fig.axes[3].collections[0]
+    counts: Any = fig.axes[3].collections[0]  # a PolyCollection (hexbin)
     assert counts.norm.vmin >= 1
     assert counts.norm.vmax > counts.norm.vmin
     # Max distance from the centre of a 10^3 box is 5*sqrt(3) ~ 8.7;

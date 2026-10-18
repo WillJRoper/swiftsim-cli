@@ -35,7 +35,7 @@ def test_run_timestep_passes_time_column(mock_analyse_timestep_files):
         show=False,
         time_column=1,
         match_runtimes=True,
-        nthreads=[4],
+        threads_per_run=[4],
     )
 
     run_timestep(args)
@@ -61,7 +61,8 @@ def test_time_column_must_be_non_negative():
 def test_nthreads_must_match_files():
     """Thread counts are provided once per input file."""
     with pytest.raises(
-        ValueError, match="Number of files and nthreads entries must match"
+        ValueError,
+        match="Number of files and threads-per-run entries must match",
     ):
         analyse_timestep_files(["a.txt"], ["run"], nthreads=[1, 2])
 
@@ -69,7 +70,7 @@ def test_nthreads_must_match_files():
 def test_nthreads_must_be_positive():
     """Thread counts must be positive integers."""
     with pytest.raises(
-        ValueError, match="nthreads entries must be positive integers"
+        ValueError, match="threads-per-run entries must be positive integers"
     ):
         analyse_timestep_files(["a.txt"], ["run"], nthreads=[0])
 

@@ -49,7 +49,7 @@ from swiftsim_cli.profile import (
 )
 
 # Bump whenever the database contents or format change.
-PARSER_VERSION = 1
+PARSER_VERSION = 2
 
 # Directories (relative to the parse root) that are never parsed.
 EXCLUDED_DIRS = {"tests", "examples", "argparse"}
@@ -58,7 +58,14 @@ EXCLUDED_DIRS = {"tests", "examples", "argparse"}
 SWIFT_SOURCE_PATHS = ("src", "swift.c", "swift_fof.c")
 
 # Milliseconds per unit printed by clocks_getunit().
-UNIT_TO_MS = {"ms": 1.0, "s": 1000.0, "us": 1e-3, "ns": 1e-6}
+UNIT_TO_MS = {
+    "ms": 1.0,
+    "s": 1000.0,
+    "us": 1e-3,
+    "ns": 1e-6,
+    "milliseconds": 1.0,
+    "seconds": 1000.0,
+}
 
 # C string literal content.
 _RE_CSTRING = re.compile(r'"((?:[^"\\]|\\.)*)"')
@@ -75,14 +82,14 @@ _RE_ESCAPE = re.compile(r"\\[\\\"nt]")
 _TOOK = re.compile(r"took\b")
 _NUMBER = r"(?P<ms>[-+]?\d*\.?\d+(?:[eE][-+]?\d+)?)"
 _UNIT = r"(?P<unit>\w+)"
-_LITERAL_UNIT = re.compile(r"^\s*(?:ms|s|seconds|milliseconds)\b")
+# A unit written literally after the time, e.g. ``took %.3f ms``.
+_LITERAL_UNIT = re.compile(r"\s*(milliseconds|seconds|ms|us|ns|s)\b")
 
 # Comments and string/char literals, blanked before brace counting.
 _RE_COMMENT_OR_STRING = re.compile(
     r"//[^\n]*|/\*.*?\*/|\"(?:\\.|[^\"\\\n])*\"|'(?:\\.|[^'\\\n])*'",
     re.S,
 )
-_RE_HEADER_END = re.compile(r"(\w+)\s*\([^;{}]*\)\s*$")
 _NOT_FUNCTIONS = {"if", "for", "while", "switch", "do", "else", "return"}
 
 _LANGUAGE = tree_sitter.Language(tree_sitter_c.language())
@@ -90,7 +97,13 @@ _QUERY = tree_sitter.Query(
     _LANGUAGE,
     "(function_definition) @func "
     "(call_expression function: (identifier) @callee) "
-    "(argument_list (identifier) @arg)",
+    "(argument_list (identifier) @arg) "
+    "(argument_list (pointer_expression argument: (identifier) @arg))",
+)
+# ``#if 0`` blocks: their code (up to any #elif/#else) is never compiled.
+_DEAD_QUERY = tree_sitter.Query(
+    _LANGUAGE,
+    '(preproc_if condition: (number_literal) @cond (#eq? @cond "0"))',
 )
 
 
@@ -178,6 +191,11 @@ def parse_timer_format(fmt: str) -> TimerFormat | None:
         if i == ms_index:
             parts.append(_NUMBER)
             tail_start = m.end()
+            unit = _LITERAL_UNIT.match(suffix, m.end())
+            if unit is not None:
+                parts.append(rf"\s*(?P<unit>{unit.group(1)})")
+                pos = tail_start = unit.end()
+                continue
         elif (
             i == ms_index + 1
             and spec.endswith("s")
@@ -193,8 +211,7 @@ def parse_timer_format(fmt: str) -> TimerFormat | None:
     parts.append(_literal(suffix[pos:].rstrip()))
     parts.append(r"\s*$")
 
-    tail = _LITERAL_UNIT.sub("", suffix[tail_start:])
-    tail = re.sub(r"\([^)]*\)", "", tail)
+    tail = re.sub(r"\([^)]*\)", "", suffix[tail_start:])
     if _has_text(prefix):
         kind, label = "operation", prefix
     elif _has_text(tail):
@@ -295,7 +312,7 @@ class TimerDB:
                 pattern=t["pattern"],
                 label=t["label"],
                 sites=t["sites"],
-                ranges=[tuple(r) for r in t["ranges"]],  # type: ignore[misc]
+                ranges=[tuple(r) for r in t["ranges"]],
             )
             for t in payload["timers"]
         ]
@@ -397,13 +414,35 @@ def _declarator_name(node: tree_sitter.Node) -> str | None:
     return None
 
 
+def _header_name(text: str) -> str | None:
+    """Function name of a header ending ``name(...)`` (parens balanced)."""
+    text = text.rstrip()
+    if not text.endswith(")"):
+        return None
+    depth = 0
+    for i in range(len(text) - 1, -1, -1):
+        ch = text[i]
+        if ch == ")":
+            depth += 1
+        elif ch == "(":
+            depth -= 1
+            if depth == 0:
+                m = re.search(r"\w+$", text[max(0, i - 200) : i].rstrip())
+                return m.group() if m else None
+        elif ch in ";{}":
+            return None
+    return None
+
+
 def _fallback_function_name(clean: str, offset: int) -> str | None:
     """Enclosing function of an offset by counting braces backwards.
 
-    Only used for the rare call sites tree-sitter could not place inside a
+    Only used for the rare nodes tree-sitter could not place inside a
     function definition (e.g. functions whose braces are unbalanced across
     ``#if`` branches). Comments and strings must already be blanked.
     """
+    if clean.count("{", 0, offset) <= clean.count("}", 0, offset):
+        return None  # at file scope
     depth = 0
     for i in range(offset - 1, -1, -1):
         ch = clean[i]
@@ -413,33 +452,49 @@ def _fallback_function_name(clean: str, offset: int) -> str | None:
             if depth:
                 depth -= 1
                 continue
-            m = _RE_HEADER_END.search(clean[max(0, i - 2000) : i])
-            if m and m.group(1) not in _NOT_FUNCTIONS:
-                return m.group(1)
+            name = _header_name(clean[max(0, i - 2000) : i])
+            if name and name not in _NOT_FUNCTIONS:
+                return name
     return None
 
 
 @dataclass
 class _Function:
-    """A function definition found in one file."""
+    """A function definition found in one file.
+
+    ``start``/``end`` are byte offsets (-1 for a function only found by
+    the brace-counting fallback); ``lines`` are its 1-based line span.
+    """
 
     name: str
     start: int
     end: int
+    lines: tuple[int, int] = (0, 0)
     tics: list[tuple[int, str]] = field(default_factory=list)
 
 
 def _tic_variable(call: tree_sitter.Node) -> str | None:
-    """Variable a ``getticks()`` call is assigned to, if any."""
-    parent = call.parent
-    if parent is None:
-        return None
-    if parent.type == "init_declarator":
-        target = parent.child_by_field_name("declarator")
-    elif parent.type == "assignment_expression":
-        target = parent.child_by_field_name("left")
+    """Variable a ``getticks()``/``clocks_gettime(&v)`` call sets, if any."""
+    function = call.child_by_field_name("function")
+    target: tree_sitter.Node | None
+    if function is not None and function.text == b"clocks_gettime":
+        args = call.child_by_field_name("arguments")
+        first = (
+            args.named_children[0] if args and args.named_children else None
+        )
+        if first is None or first.type != "pointer_expression":
+            return None
+        target = first.child_by_field_name("argument")
     else:
-        return None
+        parent = call.parent
+        if parent is None:
+            return None
+        if parent.type == "init_declarator":
+            target = parent.child_by_field_name("declarator")
+        elif parent.type == "assignment_expression":
+            target = parent.child_by_field_name("left")
+        else:
+            return None
     if target is None or target.type != "identifier" or not target.text:
         return None
     return target.text.decode()
@@ -447,21 +502,184 @@ def _tic_variable(call: tree_sitter.Node) -> str | None:
 
 def _choose_tic(
     tics: list[tuple[int, str]], line: int, args_text: str
-) -> int | None:
-    """Start line of a timer: the nearest tic whose variable is used.
+) -> tuple[int, str] | None:
+    """Start of a timer: the tic its message measures from.
 
-    Prefers the last ``getticks()`` assignment before the message whose
-    variable appears in the message arguments, falling back to the last
-    one before the message.
+    Takes the last assignment before the message of each tic variable
+    used in the message arguments and returns the earliest of those (so
+    ``clocks_diff(&tic, &toc)`` starts at ``tic``), falling back to the
+    last tic before the message.
     """
-    before = sorted((ln, var) for ln, var in tics if ln <= line)
-    if not before:
+    last: dict[str, int] = {}
+    for ln, var in sorted(tics):
+        if ln <= line:
+            last[var] = ln
+    if not last:
         return None
     used = set(re.findall(r"\b[A-Za-z_]\w*\b", args_text))
-    for ln, var in reversed(before):
-        if var in used:
-            return ln
-    return before[-1][0]
+    candidates = [(ln, var) for var, ln in last.items() if var in used]
+    if candidates:
+        return min(candidates)
+    return max((ln, var) for var, ln in last.items())
+
+
+@dataclass
+class _ParsedFile:
+    """What one source file contributes to the database.
+
+    Attributes:
+        functions: Function definitions, in source order.
+        sites: Timer message calls (file, line, function, start, tic,
+            format).
+        calls: (caller, line, callee) for each call or function
+            identifier passed as an argument.
+        fallback_sites: Sites placed by the brace-counting fallback.
+        unplaced: Ids ("file:line") of timer messages no function could
+            be found for (dropped).
+    """
+
+    functions: list[_Function]
+    sites: list[dict[str, Any]]
+    calls: list[tuple[str, int, str]]
+    fallback_sites: int = 0
+    unplaced: list[str] = field(default_factory=list)
+
+
+def _dead_ranges(root: tree_sitter.Node) -> list[tuple[int, int]]:
+    """Byte ranges of the code inside ``#if 0`` (up to any #elif/#else)."""
+    ranges = []
+    for cond in (
+        tree_sitter.QueryCursor(_DEAD_QUERY).captures(root).get("cond", [])
+    ):
+        block = cond.parent
+        if block is None:
+            continue
+        alternative = block.child_by_field_name("alternative")
+        end = alternative.start_byte if alternative else block.end_byte
+        ranges.append((cond.end_byte, end))
+    return ranges
+
+
+def parse_source(src: bytes, rel: str) -> _ParsedFile:
+    """Parse one C file into its functions, timer sites and calls.
+
+    Args:
+        src: The file contents.
+        rel: The file's path as recorded in site ids.
+    """
+    tree = tree_sitter.Parser(_LANGUAGE).parse(src)
+    captures = tree_sitter.QueryCursor(_QUERY).captures(tree.root_node)
+    dead = _dead_ranges(tree.root_node) if b"#if 0" in src else []
+
+    funcs: list[_Function] = []
+    for node in sorted(captures.get("func", []), key=lambda n: n.start_byte):
+        fname = _declarator_name(node)
+        if fname and not any(s <= node.start_byte < e for s, e in dead):
+            funcs.append(
+                _Function(
+                    fname,
+                    node.start_byte,
+                    node.end_byte,
+                    (node.start_point.row + 1, node.end_point.row + 1),
+                )
+            )
+    starts = [f.start for f in funcs]
+    fallback: dict[str, _Function] = {}
+    clean: str | None = None
+
+    def owner(node: tree_sitter.Node) -> _Function | None:
+        nonlocal clean
+        i = bisect_right(starts, node.start_byte) - 1
+        while i >= 0:
+            if funcs[i].end >= node.end_byte:
+                return funcs[i]
+            i -= 1
+        if not tree.root_node.has_error:
+            return None
+        if clean is None:
+            clean = _RE_COMMENT_OR_STRING.sub(
+                lambda m: re.sub(r"[^\n]", " ", m.group()),
+                src.decode(errors="replace"),
+            )
+        name = _fallback_function_name(
+            clean, len(src[: node.start_byte].decode(errors="replace"))
+        )
+        if name is None:
+            return None
+        return fallback.setdefault(name, _Function(name, -1, -1))
+
+    result = _ParsedFile(funcs, [], [])
+    messages: list[tuple[tree_sitter.Node, _Function | None]] = []
+    for node in sorted(
+        captures.get("callee", []) + captures.get("arg", []),
+        key=lambda n: n.start_byte,
+    ):
+        if not node.text or any(s <= node.start_byte < e for s, e in dead):
+            continue
+        func = owner(node)
+        name = node.text.decode()
+        call = node.parent
+        if call is None or call.type != "call_expression":
+            call = None
+        if call is not None and name == "message":
+            messages.append((call, func))
+        if func is None:
+            continue
+        line = node.start_point.row + 1
+        result.calls.append((func.name, line, name))
+        if call is not None and name in ("getticks", "clocks_gettime"):
+            var = _tic_variable(call)
+            if var:
+                func.tics.append((line, var))
+
+    for call, func in messages:
+        args = call.child_by_field_name("arguments")
+        named = [
+            c
+            for c in (args.named_children if args else [])
+            if c.type != "comment"
+        ]
+        if args is None or not named:
+            continue
+        first = named[0]
+        if first.type not in ("string_literal", "concatenated_string"):
+            continue
+        # Only the literals: comments between them may contain quotes.
+        pieces = (
+            [first]
+            if first.type == "string_literal"
+            else [
+                c for c in first.named_children if c.type == "string_literal"
+            ]
+        )
+        fmt = _unescape(
+            "".join(
+                "".join(_RE_CSTRING.findall(c.text.decode(errors="replace")))
+                for c in pieces
+                if c.text
+            )
+        )
+        if not _TOOK.search(fmt):
+            continue
+        line = call.start_point.row + 1
+        if func is None:
+            result.unplaced.append(f"{rel}:{line}")
+            continue
+        args_text = (args.text or b"").decode(errors="replace")
+        tic = _choose_tic(func.tics, line, args_text)
+        if func.start < 0:
+            result.fallback_sites += 1
+        result.sites.append(
+            dict(
+                file=rel,
+                line=line,
+                function=func.name,
+                start=tic[0] if tic else None,
+                tic=tic[1] if tic else None,
+                format=fmt,
+            )
+        )
+    return result
 
 
 def build_timer_db(root: Path) -> dict[str, Any]:
@@ -473,104 +691,26 @@ def build_timer_db(root: Path) -> dict[str, Any]:
     Returns:
         The JSON-serialisable payload accepted by :class:`TimerDB`.
     """
-    parser = tree_sitter.Parser(_LANGUAGE)
-    cursor = tree_sitter.QueryCursor(_QUERY)
     calls: dict[str, set[str]] = defaultdict(set)
     call_sites: dict[str, list[tuple[str, int, str]]] = defaultdict(list)
     sites: list[dict[str, Any]] = []
+    defined: set[str] = set()
     fallback_sites = 0
+    unplaced: list[str] = []
     files = _source_files(root)
 
     for path in files:
-        src = path.read_bytes()
         rel = path.relative_to(root).as_posix()
-        captures = cursor.captures(parser.parse(src).root_node)
+        source = parse_source(path.read_bytes(), rel)
+        for caller, line, callee in source.calls:
+            calls[caller].add(callee)
+            call_sites[caller].append((rel, line, callee))
+        sites += source.sites
+        defined |= {f.name for f in source.functions}
+        fallback_sites += source.fallback_sites
+        unplaced += source.unplaced
 
-        funcs: list[_Function] = []
-        for node in sorted(
-            captures.get("func", []), key=lambda n: n.start_byte
-        ):
-            fname = _declarator_name(node)
-            if fname:
-                funcs.append(_Function(fname, node.start_byte, node.end_byte))
-        starts = [f.start for f in funcs]
-
-        def owner(node: tree_sitter.Node) -> _Function | None:
-            i = bisect_right(starts, node.start_byte) - 1
-            while i >= 0:
-                if funcs[i].end >= node.end_byte:
-                    return funcs[i]
-                i -= 1
-            return None
-
-        messages: list[tuple[tree_sitter.Node, _Function | None]] = []
-        for node in captures.get("callee", []):
-            name = node.text.decode() if node.text else ""
-            func = owner(node)
-            if name == "message":
-                messages.append((node.parent, func))  # type: ignore[arg-type]
-            if func is None:
-                continue
-            line = node.start_point.row + 1
-            if name == "getticks":
-                var = _tic_variable(node.parent)  # type: ignore[arg-type]
-                if var:
-                    func.tics.append((line, var))
-            calls[func.name].add(name)
-            call_sites[func.name].append((rel, line, name))
-        for node in captures.get("arg", []):
-            func = owner(node)
-            if func is not None and node.text:
-                name = node.text.decode()
-                calls[func.name].add(name)
-                call_sites[func.name].append(
-                    (rel, node.start_point.row + 1, name)
-                )
-
-        clean: str | None = None
-        for call, func in messages:
-            args = call.child_by_field_name("arguments")
-            if args is None or not args.named_children:
-                continue
-            first = args.named_children[0]
-            if first.type not in ("string_literal", "concatenated_string"):
-                continue
-            fmt = _unescape(
-                "".join(
-                    _RE_CSTRING.findall(first.text.decode(errors="replace"))
-                )
-            )
-            if not _TOOK.search(fmt):
-                continue
-            line = call.start_point.row + 1
-            owner_name: str | None
-            if func is not None:
-                owner_name = func.name
-                args_text = (args.text or b"").decode(errors="replace")
-                start = _choose_tic(func.tics, line, args_text)
-            else:
-                if clean is None:
-                    text = src.decode(errors="replace")
-                    clean = _RE_COMMENT_OR_STRING.sub(
-                        lambda m: re.sub(r"[^\n]", " ", m.group()), text
-                    )
-                owner_name = _fallback_function_name(
-                    clean, len(src[: call.start_byte].decode(errors="replace"))
-                )
-                start = None
-                fallback_sites += 1
-            if owner_name:
-                sites.append(
-                    dict(
-                        file=rel,
-                        line=line,
-                        function=owner_name,
-                        start=start,
-                        format=fmt,
-                    )
-                )
-
-    defined = set(calls) | {s["function"] for s in sites}
+    defined |= set(calls) | {s["function"] for s in sites}
     grouped: dict[tuple[str, str], dict[str, Any]] = {}
     for site in sites:
         parsed = parse_timer_format(site["format"])
@@ -612,7 +752,8 @@ def build_timer_db(root: Path) -> dict[str, Any]:
             sites=len(sites),
             timers=len(grouped),
             fallback_sites=fallback_sites,
-            functions=len(calls),
+            unplaced_sites=len(unplaced),
+            functions=len(defined),
         ),
     )
 

@@ -136,7 +136,7 @@ class TestRun:
             pivot_redshift=None,
         )
 
-        run(args)
+        run(args)  # type: ignore[arg-type]  # duck-typed Namespace
 
         mock_compute_rows.assert_called_once_with(
             ics_file=args.ics,

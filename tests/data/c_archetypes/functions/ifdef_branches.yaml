@@ -1,0 +1,23 @@
+description: >
+  One function defined in both branches of #ifdef WITH_MPI / #else (both
+  are parsed; identical messages group into one logical timer), and in
+  #if defined(...) / #elif branches with different messages.
+functions:
+  engine_exchange: [[4, 10], [12, 17]]
+  partition_repart: [[21, 27], [29, 34]]
+  mpi_exchange: [37, 37]
+sites:
+  ifdef_branches.c:8: {function: engine_exchange, kind: function, start: 5}
+  ifdef_branches.c:15: {function: engine_exchange, kind: function, start: 13}
+  ifdef_branches.c:25: {function: partition_repart, kind: operation, label: Repartitioning, start: 22}
+  ifdef_branches.c:32: {function: partition_repart, kind: operation, label: Serial repartitioning, start: 30}
+timers:
+  - [ifdef_branches.c:8, ifdef_branches.c:15]
+  - [ifdef_branches.c:25]
+  - [ifdef_branches.c:32]
+calls:
+  engine_exchange: [mpi_exchange]
+  partition_repart: {mpi_exchange: [23]}
+op_reach:
+  ifdef_branches.c:25: [mpi_exchange]
+  ifdef_branches.c:32: []

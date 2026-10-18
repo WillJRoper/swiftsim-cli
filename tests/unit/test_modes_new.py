@@ -199,7 +199,7 @@ class TestDeriveParamsFromICs:
         }
         mock_h5_file.return_value.__enter__.return_value = mock_hdf
 
-        params = {
+        params: dict[str, dict[str, object]] = {
             "Gravity": {},
             "Cosmology": {},
             "TimeIntegration": {},

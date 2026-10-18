@@ -1,0 +1,41 @@
+description: >
+  Message calls over several lines; adjacent string-literal concatenation
+  (including a missing space before "took", as fof.c has, and a comment
+  between the literals); escaped quotes and tabs in the format.
+functions:
+  proxy_tags_exchange: [4, 12]
+  fof_search_tree: [14, 33]
+sites:
+  multiline_concat.c:7:
+    function: proxy_tags_exchange
+    kind: operation
+    label: Setting up, packing, and posting proxy aggregated tag exchanges
+    tic: tic2
+    start: 5
+  multiline_concat.c:17:
+    {function: fof_search_tree, kind: operation, label: Finding max no. of cells + offset IDs, start: 15, format: "Finding max no. of cells + offset IDstook: %.3f %s."}
+  multiline_concat.c:22:
+    {function: fof_search_tree, kind: operation, label: "Calculating the total no. of local groups"}
+  multiline_concat.c:26:
+    {function: fof_search_tree, kind: operation, label: Split label, format: "Split label took %.3f %s."}
+  multiline_concat.c:31:
+    # Whitespace runs (here a tab) are normalised in labels.
+    {function: fof_search_tree, kind: operation, label: "Escaped \"quotes\" and a tab"}
+lines:
+  multiline_concat.c:7:
+    match:
+      - body: Setting up, packing, and posting proxy aggregated tag exchanges took 5.000 ms.
+        ms: 5.0
+        key: "proxy_tags_exchange: Setting up, packing, and posting proxy aggregated tag exchanges"
+  multiline_concat.c:17:
+    match:
+      - {body: "Finding max no. of cells + offset IDstook: 0.420 ms.", ms: 0.42}
+    reject:
+      - "Finding max no. of cells + offset IDs took 0.420 ms."
+  multiline_concat.c:22:
+    match:
+      - {body: "Calculating the total no. of local groups took: (FOF SCALING): 3.000 ms.", ms: 3.0}
+  multiline_concat.c:31:
+    match:
+      - {body: "Escaped \"quotes\" and a\ttab took 1.000 ms.", ms: 1.0}
+      - {body: "Escaped \"quotes\" and a tab took 1.000 ms.", ms: 1.0}

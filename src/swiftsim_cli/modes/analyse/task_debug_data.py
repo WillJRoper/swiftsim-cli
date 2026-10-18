@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
-from tqdm.auto import tqdm  # type: ignore[import-untyped]
+from tqdm.auto import tqdm
 
 from .task_plot_metadata import (
     subtype_name,

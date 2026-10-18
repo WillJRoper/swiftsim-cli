@@ -37,7 +37,8 @@ from typing import Any
 
 from prompt_toolkit import PromptSession
 from prompt_toolkit.completion import PathCompleter
-from prompt_toolkit.key_binding import KeyBindings
+from prompt_toolkit.document import Document
+from prompt_toolkit.key_binding import KeyBindings, KeyPressEvent
 from prompt_toolkit.styles import Style
 from prompt_toolkit.validation import ValidationError, Validator
 from ruamel.yaml import YAML
@@ -479,7 +480,7 @@ def add_profile(
 class PathExistsValidator(Validator):
     """Validator to check if a given path exists."""
 
-    def validate(self, document):
+    def validate(self, document: Document) -> None:
         """Validate that the path exists."""
         p = Path(document.text).expanduser()
         if not p.exists():
@@ -504,7 +505,7 @@ KB = KeyBindings()
 
 
 @KB.add("enter")
-def _(event):
+def _(event: KeyPressEvent) -> None:
     """Enter accepts current completion if menu is open, otherwise submits."""
     buf = event.current_buffer
     if getattr(buf, "completer", None) is not None and buf.complete_state:
@@ -516,7 +517,7 @@ def _(event):
 
 
 @KB.add("tab")
-def _(event):
+def _(event: KeyPressEvent) -> None:
     """Tab opens/cycles completions, if the current prompt has a completer."""
     buf = event.current_buffer
     if getattr(buf, "completer", None) is not None:

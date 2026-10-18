@@ -1,0 +1,48 @@
+description: >
+  "took:", "took :", "took (FOF SCALING):", "took: (FOF SCALING):" and
+  "took" inside parentheses after the label, with an integer before it.
+functions:
+  fof_calc_group_props: [3, 17]
+  gravity_exact_force_compute: [19, 24]
+  ewald_init: [26, 31]
+sites:
+  took_variants.c:6: {function: fof_calc_group_props, kind: function, label: ""}
+  took_variants.c:9: {function: fof_calc_group_props, kind: operation, label: Communication}
+  took_variants.c:12: {function: fof_calc_group_props, kind: operation, label: fof_link_attachable_particles()}
+  took_variants.c:15: {function: fof_calc_group_props, kind: operation, label: Finding the total no. of groups}
+  took_variants.c:22: {function: gravity_exact_force_compute, kind: operation, label: "Computed exact gravity for %d gparts ("}
+  took_variants.c:29: {function: ewald_init, kind: operation, label: "Ewald correction table computed ("}
+lines:
+  took_variants.c:6:
+    match:
+      - {body: "took: 4.000 ms.", ms: 4.0, key: fof_calc_group_props}
+    reject: ["took 4.000 ms."]
+  took_variants.c:9:
+    match:
+      - {body: "Communication took : 2.000 ms.", ms: 2.0, key: "fof_calc_group_props: Communication"}
+    reject:
+      # The format prints a space before the colon.
+      - "Communication took: 2.000 ms."
+  took_variants.c:12:
+    match:
+      - {body: "fof_link_attachable_particles() took (FOF SCALING): 548.263 ms.", ms: 548.263}
+    reject: ["fof_link_attachable_particles() took 548.263 ms."]
+  took_variants.c:22:
+    match:
+      - body: "Computed exact gravity for 1024 gparts (took 33.100 ms)."
+        ms: 33.1
+        key: "gravity_exact_force_compute: Computed exact gravity for %d gparts ("
+  took_variants.c:29:
+    match:
+      - {body: "Ewald correction table computed (took 9.000 s).", ms: 9000.0}
+log:
+  text: |
+    [00003.0] fof_calc_group_props: took: 4.000 ms.
+    [00003.1] fof_calc_group_props: Communication took : 2.000 ms.
+    [00003.2] fof_calc_group_props: Finding the total no. of groups took: (FOF SCALING): 1.000 ms.
+    [00003.3] gravity_exact_force_compute: Computed exact gravity for 12 gparts (took 0.500 ms).
+  records:
+    - [0, fof_calc_group_props, fof_calc_group_props, 4.0]
+    - [0, fof_calc_group_props, "fof_calc_group_props: Communication", 2.0]
+    - [0, fof_calc_group_props, "fof_calc_group_props: Finding the total no. of groups", 1.0]
+    - [0, gravity_exact_force_compute, "gravity_exact_force_compute: Computed exact gravity for %d gparts (", 0.5]

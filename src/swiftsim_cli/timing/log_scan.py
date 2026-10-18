@@ -216,7 +216,11 @@ def _add_task_count_line(
             block.per_cell_avg = float(m[3])
         return
     if m := _TASK_COUNTS.match(body):
-        block = open_blocks.pop(rank, None) or TaskCountSnapshot(rank, line)
+        block = (
+            open_blocks.pop(rank)
+            if rank in open_blocks
+            else TaskCountSnapshot(rank, line)
+        )
         for token in m[1].split():
             name, _, value = token.partition("=")
             if name and value.rstrip(",").isdigit():

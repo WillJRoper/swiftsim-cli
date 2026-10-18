@@ -66,7 +66,9 @@ OUT_SUBDIR = "task_counts_analysis"
 # ============================================================================
 
 
-def add_task_counts_arguments(subparsers) -> None:
+def add_task_counts_arguments(
+    subparsers: argparse._SubParsersAction,
+) -> None:
     """Add CLI arguments for engine_print_task_counts analysis.
 
     Subcommand name: 'task-counts'

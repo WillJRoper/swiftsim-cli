@@ -15,15 +15,15 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     """Add arguments for configuring SWIFT itself."""
     parser.epilog = (
         "Any other --<option> flags are passed to ./configure after being "
-        "checked against its options (list them with --show)."
+        "checked against its options (list them with --list-options)."
     )
     # Show the configuration options (equivalent to running
     # `./configure --help`).
     parser.add_argument(
-        "--show",
-        "-s",
+        "--list-options",
         action="store_true",
-        help="Show the available configuration options.",
+        help="List the available ./configure options (./configure --help) "
+        "and exit.",
     )
     parser.add_argument(
         "--debug",
@@ -70,7 +70,7 @@ def run(args: argparse.Namespace) -> None:
         args: The parsed arguments from the command line.
     """
     # Are we just showing the config options?
-    if args.show:
+    if args.list_options:
         show_config_options()
     else:
         # Build up the options to pass to the configure script

@@ -3,9 +3,9 @@
 from functools import lru_cache
 from typing import Union
 
-import astropy.units as u  # type: ignore[import-untyped]
+import astropy.units as u
 import numpy as np
-from astropy.cosmology import (  # type: ignore[import-untyped]
+from astropy.cosmology import (
     CosmologyError,
     FlatLambdaCDM,
     z_at_value,
@@ -111,7 +111,7 @@ def convert_time_to_redshift(
         raise ValueError("Cosmology not initialized")
     age_now = cosmo.age(0).value
 
-    def _convert_single_time(t):
+    def _convert_single_time(t: float) -> float:
         if t >= age_now:
             return 0.0
         try:
@@ -121,10 +121,9 @@ def convert_time_to_redshift(
                 f"Cannot convert time {t} Gyr to a redshift: {e}"
             ) from e
 
-    if np.isscalar(time):
-        return _convert_single_time(time)
-    else:
-        return np.array([_convert_single_time(t) for t in np.asarray(time)])
+    if np.ndim(time) == 0:
+        return _convert_single_time(float(time))
+    return np.array([_convert_single_time(t) for t in np.asarray(time)])
 
 
 def convert_scale_factor_to_redshift(

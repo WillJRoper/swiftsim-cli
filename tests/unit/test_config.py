@@ -16,15 +16,15 @@ class TestConfigMode:
 
         # Test default values
         args = parser.parse_args([])
-        assert args.show is False
+        assert args.list_options is False
         assert args.debug is False
         assert args.gravity is False
         assert args.eagle is False
         assert args.eaglexl is False
 
-        # Test --show flag
-        args = parser.parse_args(["--show"])
-        assert args.show is True
+        # Test --list-options flag
+        args = parser.parse_args(["--list-options"])
+        assert args.list_options is True
 
         # Test --debug flag
         args = parser.parse_args(["--debug"])
@@ -43,9 +43,6 @@ class TestConfigMode:
         assert args.eaglexl is True
 
         # Test short forms
-        args = parser.parse_args(["-s"])
-        assert args.show is True
-
         args = parser.parse_args(["-d"])
         assert args.debug is True
 
@@ -60,10 +57,10 @@ class TestConfigMode:
 
     @patch("swiftsim_cli.modes.config.show_config_options")
     def test_run_with_show(self, mock_show, tmp_path):
-        """Test the run function with --show flag."""
+        """Test the run function with --list-options flag."""
         # Create mock args
         args = Mock()
-        args.show = True
+        args.list_options = True
 
         # Call run
         run(args)
@@ -76,7 +73,7 @@ class TestConfigMode:
         """Test the run function with --debug flag."""
         # Create mock args
         args = Mock()
-        args.show = False
+        args.list_options = False
         args.debug = True
         args.gravity = False
         args.eagle = False
@@ -99,7 +96,7 @@ class TestConfigMode:
         """Test the run function with --gravity flag."""
         # Create mock args
         args = Mock()
-        args.show = False
+        args.list_options = False
         args.debug = False
         args.gravity = True
         args.eagle = False
@@ -122,7 +119,7 @@ class TestConfigMode:
         """Test the run function with --eagle flag."""
         # Create mock args
         args = Mock()
-        args.show = False
+        args.list_options = False
         args.debug = False
         args.gravity = False
         args.eagle = True
@@ -145,7 +142,7 @@ class TestConfigMode:
         """Test the run function with --eaglexl flag."""
         # Create mock args
         args = Mock()
-        args.show = False
+        args.list_options = False
         args.debug = False
         args.gravity = False
         args.eagle = False
@@ -168,7 +165,7 @@ class TestConfigMode:
         """Test the run function with multiple preset flags."""
         # Create mock args
         args = Mock()
-        args.show = False
+        args.list_options = False
         args.debug = True
         args.gravity = True
         args.eagle = False
@@ -196,7 +193,7 @@ class TestConfigMode:
         """Test that duplicate options are removed."""
         # Create mock args with presets that have overlapping options
         args = Mock()
-        args.show = False
+        args.list_options = False
         args.debug = False
         args.gravity = True
         args.eagle = (
@@ -223,7 +220,7 @@ class TestConfigMode:
         """Test the run function with additional options."""
         # Create mock args
         args = Mock()
-        args.show = False
+        args.list_options = False
         args.debug = False
         args.gravity = False
         args.eagle = False

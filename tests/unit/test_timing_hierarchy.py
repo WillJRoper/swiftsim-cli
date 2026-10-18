@@ -25,7 +25,7 @@ def sample(synthetic_db, logs_dir):
     scan = scan_log(logs_dir / "sample.txt", synthetic_db)
     steps = select_steps(scan.steps, None)
     trees = build_step_trees(steps, 0, synthetic_db)
-    total = sum(s.wallclock_ms for s in steps)
+    total = sum(s.wallclock_ms or 0.0 for s in steps)
     return scan, trees, aggregate(trees, 0, total)
 
 

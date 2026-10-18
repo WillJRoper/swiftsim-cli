@@ -1,0 +1,19 @@
+description: >
+  Function identifiers passed as arguments (threadpool mappers, qsort
+  comparators, with or without &) count as calls at the argument's line,
+  so a timer inside a mapper is reachable from the operation that maps it.
+sites:
+  callbacks.c:13: {function: cell_compute, kind: function, start: 12}
+  callbacks.c:23: {function: space_rebuild, kind: operation, label: Rebuilding, start: 18}
+  callbacks.c:30: {function: space_rebuild, kind: operation, label: Splitting, start: 25}
+calls:
+  space_rebuild:
+    space_rebuild_mapper: [19]
+    space_split_mapper: [26]
+    cmp_cells: [28]
+  space_rebuild_mapper: [cell_compute]
+reach:
+  space_rebuild: [space_rebuild_mapper, space_split_mapper, cmp_cells, cell_compute]
+op_reach:
+  callbacks.c:23: [space_rebuild_mapper, cell_compute]
+  callbacks.c:30: [space_split_mapper, cmp_cells]

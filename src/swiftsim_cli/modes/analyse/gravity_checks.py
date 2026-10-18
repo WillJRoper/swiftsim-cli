@@ -321,7 +321,9 @@ def analyse_force_checks(
         print(f"Plot saved to {png_file}")
 
 
-def add_gravity_checks_arguments(subparsers) -> argparse.ArgumentParser:
+def add_gravity_checks_arguments(
+    subparsers: argparse._SubParsersAction,
+) -> argparse.ArgumentParser:
     """Add gravity checks analysis arguments to the argument parser.
 
     Args:

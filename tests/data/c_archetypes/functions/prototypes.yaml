@@ -1,0 +1,11 @@
+description: >
+  Prototypes, extern declarations, function-pointer variables, typedefs
+  and struct members are not definitions; calls to them are not edges.
+functions:
+  defined_caller: [12, 19]
+sites:
+  prototypes.c:17: {function: defined_caller, kind: function, start: 13}
+calls:
+  defined_caller: []
+reach:
+  defined_caller: []

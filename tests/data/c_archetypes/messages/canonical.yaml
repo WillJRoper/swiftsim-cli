@@ -1,0 +1,48 @@
+description: >
+  The canonical function timer, with an if (e->verbose) guard, without one,
+  with a braced guard and without the trailing period, plus real-looking
+  log lines (rank prefix, elapsed stamps, unit conversion, near misses).
+functions:
+  engine_rebuild: [3, 9]
+  space_rebuild: [11, 15]
+  engine_braced_guard: [17, 23]
+  engine_no_period: [25, 28]
+sites:
+  canonical.c:7: {function: engine_rebuild, kind: function, label: "", tic: tic, start: 4, format: "took %.3f %s."}
+  canonical.c:13: {function: space_rebuild, kind: function, tic: tic, start: 12}
+  canonical.c:20: {function: engine_braced_guard, kind: function, start: 18}
+  canonical.c:27: {function: engine_no_period, kind: function, start: 26, format: "took %.3f %s"}
+calls:
+  engine_rebuild: [space_rebuild]
+reach:
+  engine_rebuild: [space_rebuild]
+  space_rebuild: []
+lines:
+  canonical.c:7:
+    match:
+      - {body: "took 1.036 ms.", ms: 1.036, key: engine_rebuild}
+      - {body: "took 2 s.", ms: 2000.0}
+      - {body: "took 1.5e+03 us.", ms: 1.5}
+      - {body: "took  12.000   ms.", ms: 12.0}
+    reject:
+      - "took ms."
+      - "took 1.0 ms. extra"
+      - "Rebuilding took 1.0 ms."
+      - "took: 1.0 ms."
+  canonical.c:27:
+    match:
+      - {body: "took 7.5 ms", ms: 7.5}
+log:
+  text: |
+    [0000] [00000.0] main: MPI is up and running with 2 node(s).
+    [0000] [00012.3] space_rebuild: took 3.500 ms.
+    [0000] [00012.4] engine_rebuild: took 1.250 s.
+    [0001] [00012.4] engine_rebuild: took 900.000 ms.
+    [0001] [00012.5] engine_rebuild: took a while.
+    [0000] [00012.6] engine_no_period: took 0.001 ms
+    [0000] [00012.7] engine_rebuild: something else entirely.
+  records:
+    - [0, space_rebuild, space_rebuild, 3.5]
+    - [0, engine_rebuild, engine_rebuild, 1250.0]
+    - [1, engine_rebuild, engine_rebuild, 900.0]
+    - [0, engine_no_period, engine_no_period, 0.001]

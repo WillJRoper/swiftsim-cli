@@ -4,6 +4,7 @@ import argparse
 from pathlib import Path
 
 import numpy as np
+from astropy.cosmology import FlatLambdaCDM
 
 from swiftsim_cli.cosmology import (
     convert_redshift_to_scale_factor,
@@ -713,7 +714,7 @@ def unify_snapshot_times(
     return first_snap, final_snap
 
 
-def _generate_output_list_with_cosmo(args: dict, cosmo) -> None:
+def _generate_output_list_with_cosmo(args: dict, cosmo: FlatLambdaCDM) -> None:
     """Generate an output list file containing times for each snapshot.
 
     Args:

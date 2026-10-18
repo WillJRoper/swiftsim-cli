@@ -5,16 +5,17 @@ name = "swiftsim-cli"
 dynamic = ["version"]
 
 # Tagline for SWIFTSim CLI
-description = "A package full of helpers and tools for running SWIFT simulations."
+description = "A command-line toolkit for building, running and analysing SWIFT simulations."
 
-# A longer description of Synthesizer
+# The long description shown on PyPI
 readme = "README.md"
 
 # Minimum Python version
 requires-python = ">=3.10"
 
-# The licence
-license = {file = "LICENSE.md"}
+# The licence (SPDX expression, PEP 639)
+license = "GPL-3.0-only"
+license-files = ["LICENSE"]
 
 # Project keywords
 keywords =[
@@ -44,10 +45,11 @@ maintainers = [
 
 # Classifiers
 classifiers = [  # Optional
-  "Development Status :: 4 - Beta",  # 3 Alpha/4 Beta/5 Production/Stable
+  "Development Status :: 5 - Production/Stable",
+  "Environment :: Console",
   "Intended Audience :: Science/Research",
+  "Operating System :: POSIX",
   "Topic :: Scientific/Engineering :: Astronomy",
-  "License :: OSI Approved :: GNU General Public License v3 (GPLv3)",
 
   # Supported Python versions
   "Programming Language :: Python :: 3.10",
@@ -59,23 +61,25 @@ classifiers = [  # Optional
 ]
 
 # Dependencies
+# (each is imported under src/swiftsim_cli, except scipy, which astropy
+# needs for the cosmology integrals and z_at_value but does not install)
 dependencies = [
-  "setuptools",
-  "astropy",
-  "h5py",
+  "astropy",               # cosmology conversions
+  "scipy",                 # required by astropy.cosmology (see above)
+  "h5py",                  # reading initial conditions in `new`
+  "matplotlib >= 3.5",     # all analysis plots
   "numpy >= 1.23",
-  "packaging",
-  "scipy",
-  "unyt",
-  "prompt_toolkit",
-  "ruamel.yaml",  # Fixed: should be ruamel.yaml not ruamel_yaml
-  "PyYAML",       # Added: used in profile.py and modes/profile.py
-  "matplotlib >= 3.5",   # Added: used in analyse mode for plotting
-  "pandas >= 1.5",        # Added: used for mpiuse report parsing
-  "tqdm >= 4.60",         # Progress bars in task-plots
-  "tree-sitter",           # For C code parsing
-  "tree-sitter-c",         # C language support for tree-sitter
-  "swiftsimio",            # Used for reading SWIFT snapshots in utils
+  "pandas >= 1.5",         # mpiuse report parsing
+  "prompt_toolkit",        # interactive profile prompts
+  "ruamel.yaml",           # round-trip parameter and profile files
+  "swiftsimio",            # reading snapshots in `utils`
+  "tqdm >= 4.60",          # progress bars in task plots
+  # Parsing SWIFT's C source for timers. QueryCursor needs >= 0.25;
+  # tree-sitter 0.26.0 segfaults in timer_db.parse_source on larger files
+  # (reproduced with tests/data/swift_src/src/generated.c), so stay below it
+  # until a fixed release has been tested.
+  "tree-sitter >= 0.25, < 0.26",
+  "tree-sitter-c >= 0.24",
 ]
 
 # Optional dependencies for specific use cases
@@ -83,6 +87,7 @@ dependencies = [
 # Development
 dev = [
     "ruff==0.11.7",
+    "mypy>=1.10",  # the pre-commit mypy hook runs the installed mypy
     "pre-commit",
 ]
 
@@ -93,31 +98,18 @@ test = [
     "pytest-mock>=3.10",
     "coverage[toml]>=7.0",
     "ruff==0.11.7",
-    "mypy>=0.910",
-    "bandit>=1.7",
-    "safety>=2.3",
-]
-
-# Documentation building
-docs = [
-    "sphinx==7.4.7",
-    "pandoc",
-    "furo",
-    "sphinx_autodoc_typehints",
-    "ipython",
-    "sphinx_gallery",
-    "pillow",
-    "sphinx-toolbox",
-    "sphinx-copybutton",
-    "readthedocs-sphinx-search",
+    "mypy>=1.10",
+    "PyYAML",   # reading the expected-output fixtures
+    "unyt",     # comes with swiftsimio; imported directly by a test
 ]
 
 # Project urls
 [project.urls]
-"Homepage" = "https://github.com/WillJRoper/swiftsim-utils"
-"Bug Reports" = "https://github.com/WillJRoper/swiftsim-utils/issues"
-"Source" = "https://github.com/WillJRoper/swiftsim-utils/tree/main/src/swiftsim-utils"
-"Documentation" = "..."
+"Homepage" = "https://github.com/WillJRoper/swiftsim-cli"
+"Documentation" = "https://github.com/WillJRoper/swiftsim-cli#readme"
+"Source" = "https://github.com/WillJRoper/swiftsim-cli"
+"Bug Reports" = "https://github.com/WillJRoper/swiftsim-cli/issues"
+"Changelog" = "https://github.com/WillJRoper/swiftsim-cli/blob/main/CHANGELOG.md"
 
 # Entry points
 [project.scripts]
@@ -126,9 +118,9 @@ swift-cli="swiftsim_cli.cli:main"
 # Set up the build system
 [build-system]
 
-# Use latest setuotools, setuptools_scm for git versioning and
-# numpy (numpy includes are needed for compilation of C extensions)
-requires = ["setuptools>=64", "setuptools_scm>=8", "numpy>=1.23"]
+# setuptools>=77 for PEP 639 licence metadata, setuptools_scm for git
+# versioning (pure Python, so nothing else is needed at build time)
+requires = ["setuptools>=77", "setuptools_scm>=8"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools_scm]
@@ -177,8 +169,8 @@ line-length = 79
 indent-width = 4
 
 
-# Assume Python 3.8 by default regardless
-target-version = "py38"
+# Match requires-python
+target-version = "py310"
 
 
 [tool.ruff.lint]
@@ -219,6 +211,25 @@ skip-magic-trailing-comma = false
 # Like Black, automatically detect the appropriate line ending.
 line-ending = "auto"
 
+
+# Type checking. `mypy` with no arguments checks src and tests; CI and the
+# pre-commit hook both run it this way so they agree.
+[tool.mypy]
+python_version = "3.10"
+files = ["src", "tests"]
+exclude = ["^src/swiftsim_cli/_version\\.py$"]
+# astropy, h5py, swiftsimio and tree_sitter_c ship without type information.
+ignore_missing_imports = true
+check_untyped_defs = true
+no_implicit_optional = true
+strict_optional = true
+warn_unused_ignores = true
+warn_redundant_casts = true
+
+[[tool.mypy.overrides]]
+module = "swiftsim_cli.*"
+disallow_untyped_defs = true
+
 # Pytest configuration
 [tool.pytest.ini_options]
 minversion = "7.0"
@@ -230,7 +241,7 @@ addopts = [
     "--cov-report=term-missing",
     "--cov-report=html",
     "--cov-report=xml",
-    "--cov-fail-under=50",
+    "--cov-fail-under=85",
 ]
 testpaths = ["tests"]
 markers = [
@@ -262,8 +273,3 @@ exclude_lines = [
     "class .*\\bProtocol\\):",
     "@(abc\\.)?abstractmethod",
 ]
-
-# Bandit security configuration
-[tool.bandit]
-exclude_dirs = ["tests", "build", "dist"]
-skips = ["B101", "B601"]  # Skip assert_used and shell=True tests

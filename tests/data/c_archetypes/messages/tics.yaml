@@ -1,0 +1,37 @@
+description: >
+  The start of each timer's line range is the tic its message measures
+  from: several tic variables (tic, tic2, tic_total), a reassigned tic,
+  tics in loops and nested blocks, a declaration followed by assignment,
+  and clocks_gettime(&tic) / clocks_diff(&tic, &toc) timers (swift.c,
+  engine_config.c), which start at the tic, not the toc.
+functions:
+  engine_maketasks: [3, 23]
+  loops_and_blocks: [25, 43]
+  clocks_style: [45, 56]
+  make_hydro_tasks: [58, 58]
+  make_gravity_tasks: [59, 59]
+  link_tasks: [60, 60]
+sites:
+  tics.c:8: {function: engine_maketasks, kind: operation, label: Making hydro tasks, tic: tic, start: 5}
+  tics.c:13: {function: engine_maketasks, kind: operation, label: Making gravity tasks, tic: tic, start: 10}
+  tics.c:18: {function: engine_maketasks, kind: operation, label: Linking tasks, tic: tic2, start: 15}
+  tics.c:21: {function: engine_maketasks, kind: function, label: "", tic: tic_total, start: 4}
+  tics.c:31: {function: loops_and_blocks, kind: operation, label: Loop body, tic: tic, start: 27}
+  tics.c:40: {function: loops_and_blocks, kind: operation, label: While body, tic: tic3, start: 38}
+  tics.c:50: {function: clocks_style, kind: operation, label: space_init, tic: tic, start: 47}
+  tics.c:55: {function: clocks_style, kind: function, label: "", tic: tic, start: 52}
+calls:
+  engine_maketasks:
+    make_hydro_tasks: [6]
+    make_gravity_tasks: [11]
+    link_tasks: [16]
+  clocks_style:
+    make_hydro_tasks: [48]
+    link_tasks: [53]
+op_reach:
+  tics.c:8: [make_hydro_tasks]
+  tics.c:13: [make_gravity_tasks]
+  tics.c:18: [link_tasks]
+  tics.c:31: [make_hydro_tasks]
+  tics.c:40: [link_tasks]
+  tics.c:50: [make_hydro_tasks]

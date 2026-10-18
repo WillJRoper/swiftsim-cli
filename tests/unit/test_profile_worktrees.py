@@ -97,6 +97,7 @@ class TestNew:
             )
         )
         p = get_profile("feat")
+        assert p.worktree is not None
         assert (p.worktree / "feature.c").exists()
         assert _upstream(p.worktree, p.branch) == "origin/feature"
         assert p.configure_flags == ["--enable-debug", "--with-hydro=sphenix"]
@@ -467,7 +468,8 @@ class TestConfig:
         config_mode.run(MultiModeCLIArgs(["config"]).modes[0][1])
         assert _configure_runs(wt)[-1] == " ".join(expected)
 
-        config_mode.run(MultiModeCLIArgs(["config", "--show"]).modes[0][1])
+        argv = ["config", "--list-options"]
+        config_mode.run(MultiModeCLIArgs(argv).modes[0][1])
 
         with pytest.raises(ProfileError, match="did you mean"):
             config_mode.run(
@@ -533,6 +535,7 @@ class TestInit:
         p = store.profiles["default"]
         assert p.upstream == "origin/master"
         assert p.configure_flags == ["--enable-debug"]
+        assert p.worktree is not None
         assert (p.worktree / "src.c").exists()
 
     def test_init_keeps_existing(self, gitsetup, monkeypatch):
@@ -646,6 +649,41 @@ class TestMigrate:
         assert list(store.profiles) == ["default"]
         assert store.profiles["default"].upstream == "local-only"
         assert store.current == "default"
+
+    def test_migrate_deletes_legacy_timer_files(
+        self, gitsetup, monkeypatch, capsys
+    ):
+        """Old timer databases are listed, then deleted on confirmation."""
+        self._write_legacy(gitsetup)
+        base = profile_mod.PROFILE_FILE.parent
+        legacy = [
+            base / "timers.yaml",
+            base / "timer_nesting.yaml",
+            base / "cache" / "default" / "timers.yaml",
+            base / "cache" / "feat" / "timer_nesting.yaml",
+        ]
+        kept = [
+            base / "timer_nesting_manual_backup.yaml",
+            base / "timer_nesting_original.yaml",
+            base / "config.yaml",
+            base / "cache" / "default" / "timer_db" / "tree-x.json",
+            base / "cache" / "feat" / "timers.yaml.old",
+        ]
+        for path in legacy + kept:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("x")
+
+        _confirm(monkeypatch, False)
+        pm.migrate_profiles()
+        out = capsys.readouterr().out
+        assert all(str(path) in out for path in legacy)
+        assert not any(str(path) in out for path in kept)
+        assert all(path.exists() for path in legacy + kept)
+
+        _confirm(monkeypatch, True)
+        pm.migrate_profiles()
+        assert not any(path.exists() for path in legacy)
+        assert all(path.exists() for path in kept)
 
     def test_migrate_without_file(self):
         """Nothing to migrate is an error."""

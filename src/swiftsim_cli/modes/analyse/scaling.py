@@ -77,7 +77,9 @@ class RuntimeScalingLogData:
     step_count: int
 
 
-def add_scaling_arguments(subparsers) -> None:
+def add_scaling_arguments(
+    subparsers: argparse._SubParsersAction,
+) -> None:
     """Add the ``analyse scaling`` subcommand and its own subcommands.
 
     Args:
@@ -97,7 +99,9 @@ def add_scaling_arguments(subparsers) -> None:
     add_runtime_scaling_arguments(scaling_subparsers)
 
 
-def add_timer_scaling_arguments(subparsers) -> None:
+def add_timer_scaling_arguments(
+    subparsers: argparse._SubParsersAction,
+) -> None:
     """Add CLI arguments for detailed timer scaling analysis."""
     scaling_parser = subparsers.add_parser(
         "timers",
@@ -110,11 +114,11 @@ def add_timer_scaling_arguments(subparsers) -> None:
     scaling_parser.add_argument(
         "--min-percent-threshold",
         type=float,
-        default=10.0,
+        default=5.0,
         help=(
             "Minimum share of the step time (the timer's exclusive time, "
             "i.e. excluding nested timers) in at least one log for a timer "
-            "to be included (default: 10)."
+            "to be included (default: 5)."
         ),
     )
     scaling_parser.add_argument(
@@ -129,7 +133,9 @@ def add_timer_scaling_arguments(subparsers) -> None:
     )
 
 
-def add_runtime_scaling_arguments(subparsers) -> None:
+def add_runtime_scaling_arguments(
+    subparsers: argparse._SubParsersAction,
+) -> None:
     """Add CLI arguments for whole-run runtime scaling analysis."""
     runtime_parser = subparsers.add_parser(
         "runtime",
@@ -226,7 +232,7 @@ def analyse_swift_scaling(
     prefix: str | None = None,
     show_plot: bool = False,
     step_range: tuple[int, int] | None = None,
-    min_percent_threshold: float = 10.0,
+    min_percent_threshold: float = 5.0,
     rank_source: Literal["root", "all"] = "root",
 ) -> None:
     """Analyse timer scaling across multiple SWIFT log files."""

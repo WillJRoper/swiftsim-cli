@@ -1,0 +1,14 @@
+description: >
+  Braces in char literals, string literals (including escaped quotes and
+  backslashes) and the label itself; "//" and "/*" inside a string. The
+  following function must still be found.
+functions:
+  literal_braces: [3, 13]
+  after_literals: [15, 21]
+sites:
+  literals.c:11: {function: literal_braces, kind: operation, label: "Literal {braces}", start: 4}
+  literals.c:19: {function: after_literals, kind: function, start: 16}
+lines:
+  literals.c:11:
+    match:
+      - {body: "Literal {braces} took 1.000 ms.", ms: 1.0, key: "literal_braces: Literal {braces}"}

@@ -10,9 +10,9 @@ from typing import Any, TypedDict
 import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
-import pandas as pd  # type: ignore[import-untyped]
+import pandas as pd
 from matplotlib.axes import Axes
-from pandas.errors import EmptyDataError  # type: ignore[import-untyped]
+from pandas.errors import EmptyDataError
 
 from swiftsim_cli.modes.common_args import (
     add_labels_argument,
@@ -74,7 +74,9 @@ __all__ = [
 ]
 
 
-def add_mpiuse_arguments(subparsers) -> None:
+def add_mpiuse_arguments(
+    subparsers: argparse._SubParsersAction,
+) -> None:
     """Add CLI arguments for SWIFT mpiuse report analysis."""
     mpiuse_parser = subparsers.add_parser(
         "mpiuse",

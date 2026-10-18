@@ -12,7 +12,7 @@ from typing import Callable, Mapping, Sequence, TypeVar
 import matplotlib.patches as mpatches
 import matplotlib.pyplot as plt
 import numpy as np
-from tqdm.auto import tqdm  # type: ignore[import-untyped]
+from tqdm.auto import tqdm
 
 from swiftsim_cli.modes.common_args import add_output_arguments
 from swiftsim_cli.utilities.io import create_output_path
@@ -45,7 +45,9 @@ class PlotInterval:
     label: str
 
 
-def add_task_plots_arguments(subparsers) -> None:
+def add_task_plots_arguments(
+    subparsers: argparse._SubParsersAction,
+) -> None:
     """Add CLI arguments for combined task/threadpool plotting."""
     parser = subparsers.add_parser(
         "task-plots",

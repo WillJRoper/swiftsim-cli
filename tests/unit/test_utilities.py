@@ -55,7 +55,7 @@ class TestUtilityFunctions:
     def test_create_ascii_table_empty_rows(self):
         """Test ASCII table creation with empty rows."""
         headers = ["Name", "Value"]
-        rows = []
+        rows: list[list[str]] = []
 
         table = create_ascii_table(headers, rows)
 

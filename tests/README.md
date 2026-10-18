@@ -6,18 +6,15 @@ This directory contains the test suite for swiftsim-cli.
 
 ```
 tests/
-├── conftest.py           # Pytest configuration and shared fixtures
-├── unit/                 # Unit tests
-│   ├── test_cli.py       # CLI functionality tests  
-│   ├── test_timer_db.py          # Timer parsing from C source
-│   ├── test_log_scan.py          # Log scanning and step assignment
-│   ├── test_timer_nesting.py     # Runtime timer trees
-│   ├── test_timing_hierarchy.py  # Call-path aggregation and tables
-│   └── test_utilities.py # Utility function tests
+├── conftest.py      # Shared fixtures (profile isolation, timer fixtures, ICs)
+├── unit/
+│   ├── conftest.py  # Git fixtures: a bare "remote", main clone, worktrees
+│   └── test_*.py    # One file per module or mode (see below)
 ├── data/
-│   ├── logs/             # Scrubbed excerpts of real SWIFT logs + synthetic logs
-│   └── swift_src/        # Synthetic SWIFT-like C tree matching the logs
-└── README.md            # This file
+│   ├── c_archetypes/  # Archetypal C syntax cases + expectations
+│   ├── logs/          # Scrubbed excerpts of real SWIFT logs + synthetic logs
+│   └── swift_src/     # Synthetic SWIFT-like C tree matching the logs
+└── README.md
 ```
 
 ## Running Tests
@@ -51,24 +48,36 @@ Run specific test:
 pytest tests/unit/test_utilities.py::TestUtilityFunctions::test_create_ascii_table_basic
 ```
 
-### Using Makefile
-
-The project includes a Makefile with common test commands:
+### Optional real-SWIFT smoke test
 
 ```bash
-make test          # Run tests without coverage
-make test-cov      # Run tests with coverage
-make test-fast     # Run tests quickly (no coverage)
+SWIFT_SRC=/path/to/swiftsim pytest tests/unit/test_timer_db_archetypes.py -k real
 ```
+
+Parses a real SWIFT checkout (read-only) and checks sane invariants; it is
+skipped unless `SWIFT_SRC` is set.
 
 ## Test Categories
 
 ### Unit Tests
 
-- **test_cli.py**: Tests the main CLI entry point and argument parsing
+- **test_cli.py**, **test_multi_mode_args_real.py**,
+  **test_flag_conventions.py**: the entry point, multi-mode parsing, error
+  handling and the flag conventions shared by every mode
+- **test_profile.py**, **test_profile_worktrees.py**: profile storage and the
+  worktree-based profile commands against temporary git repositories
+- **test_config.py**, **test_modes_new.py**, **test_output_times*.py**,
+  **test_show.py**, **test_utils_mode.py**, **test_params.py**,
+  **test_cosmology.py**: the other modes and their helpers
+- **test_analyse_*.py**, **test_gravity_*.py**, **test_mpiuse.py**,
+  **test_task_plots.py**, **test_log_task_counts.py**,
+  **test_step_table.py**: the analysis subcommands
 - **test_timer_db.py**: Timer formats, function/operation rule, call graph,
   caching and revision matching (against `data/swift_src` and a temporary
   git repository)
+- **test_timer_db_archetypes.py**: one parametrised check per expectation
+  type over every case in `data/c_archetypes` (see its README); set
+  `SWIFT_SRC=/path/to/swiftsim` to also run invariants on a real checkout
 - **test_log_scan.py**, **test_timer_nesting.py**,
   **test_timing_hierarchy.py**, **test_log_timing.py**: the `analyse log`
   pipeline on the log fixtures in `data/logs`
@@ -81,7 +90,12 @@ make test-fast     # Run tests quickly (no coverage)
 
 The test suite uses pytest fixtures defined in `conftest.py`:
 
+- `isolated_profile_file` (autouse): points the profile file at a temporary
+  directory so no test touches `~/.swiftsim-utils`
 - `temp_dir`: Temporary directory for file operations
+- `write_tiny_ics`: writes a tiny gas-only HDF5 initial conditions file
+- `gitsetup` (in `unit/conftest.py`): a fresh bare remote, main clone and
+  worktree root, with git isolated from your global configuration
 - `logs_dir`: The log fixtures (`data/logs`)
 - `swift_src_dir`: The synthetic SWIFT source tree (`data/swift_src`)
 - `synthetic_db`: Timer database parsed from `swift_src_dir`
@@ -98,15 +112,14 @@ Test coverage reports are generated in multiple formats:
 - HTML report in `htmlcov/` directory
 - XML report for CI/CD integration
 
-The current coverage target is 50% (configured in `pyproject.toml`).
+The run fails below 85% coverage (`--cov-fail-under` in `pyproject.toml`).
 
 ## CI/CD Integration
 
-Tests are automatically run in GitHub Actions on:
-- Push to main/develop branches
-- Pull requests
-- Multiple Python versions (3.10, 3.11, 3.12)
-- Multiple operating systems (Ubuntu, macOS)
+GitHub Actions (`.github/workflows/ci.yml`) runs ruff, mypy and the test
+suite on Ubuntu for Python 3.10 to 3.14 on pushes and pull requests to
+`main`/`develop`. The release workflow runs the suite against the built
+wheel before publishing.
 
 ## Adding New Tests
 

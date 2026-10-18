@@ -1,0 +1,22 @@
+description: >
+  Calls as statements, in if/for/while conditions and bodies, initialisers,
+  ternaries, nested calls and returns are edges. External functions
+  (memcpy, MPI), self-calls and a function assigned to a pointer (not a
+  call or an argument) are not.
+sites:
+  call_forms.c:17: {function: engine_step, kind: function, start: 4}
+calls:
+  engine_step:
+    - direct
+    - in_condition
+    - in_loop_condition
+    - in_loop_body
+    - in_while
+    - in_initialiser
+    - in_ternary
+    - nested_outer
+    - nested_inner
+    - in_return
+  direct: []
+reach:
+  engine_step: [direct, in_condition, in_loop_condition, in_loop_body, in_while, in_initialiser, in_ternary, nested_outer, nested_inner, in_return]

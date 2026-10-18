@@ -1,0 +1,11 @@
+description: >
+  Direct recursion is not an edge; mutual recursion is, so each function
+  of the cycle reaches itself (and the walk terminates).
+calls:
+  cell_split_recursive: []
+  tree_walk_a: [tree_walk_b]
+  tree_walk_b: [tree_walk_a]
+reach:
+  cell_split_recursive: []
+  tree_walk_a: [tree_walk_a, tree_walk_b]
+  tree_walk_b: [tree_walk_a, tree_walk_b]

@@ -1,7 +1,13 @@
 """ASCII table formatting."""
 
+from collections.abc import Sequence
 
-def create_ascii_table(headers, rows, title=None):
+
+def create_ascii_table(
+    headers: Sequence[object],
+    rows: Sequence[Sequence[object]],
+    title: str | None = None,
+) -> str:
     """Create a formatted ASCII table.
 
     Args:

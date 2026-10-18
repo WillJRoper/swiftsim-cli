@@ -1,0 +1,13 @@
+description: >
+  #define bodies (with line continuations, a message and unbalanced braces)
+  are not code: no timer inside them, and they do not disturb the next
+  function. A very long single-line message still parses.
+functions:
+  after_macros: [13, 17]
+sites:
+  macros.c:16: {function: after_macros, kind: operation, start: 14}
+lines:
+  macros.c:16:
+    match:
+      - body: "A very long label that goes on and on well past any sensible line length because some messages in SWIFT are not wrapped by clang-format at all took 1.000 ms."
+        ms: 1.0

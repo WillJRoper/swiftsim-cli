@@ -59,6 +59,7 @@ class TestParseTimerFormat:
         import re
 
         parsed = parse_timer_format(fmt)
+        assert parsed is not None
         m = re.match(parsed.pattern, body)
         assert m is not None
         assert float(m["ms"]) == pytest.approx(ms)
@@ -67,7 +68,10 @@ class TestParseTimerFormat:
         """The %s after the time is captured as the unit."""
         import re
 
-        m = re.match(parse_timer_format("took %.3f %s.").pattern, "took 2 s.")
+        parsed = parse_timer_format("took %.3f %s.")
+        assert parsed is not None
+        m = re.match(parsed.pattern, "took 2 s.")
+        assert m is not None
         assert m["unit"] == "s"
 
     @pytest.mark.parametrize(
@@ -87,14 +91,18 @@ class TestParseTimerFormat:
     )
     def test_one_static_rule(self, fmt, kind):
         """Function timer iff no literal text around the time."""
-        assert parse_timer_format(fmt).kind == kind
+        parsed = parse_timer_format(fmt)
+        assert parsed is not None
+        assert parsed.kind == kind
 
     def test_runtime_label_groups(self):
         """%s before 'took' becomes a label group used in the key."""
         import re
 
         parsed = parse_timer_format("Copying for '%s' took %.3f %s.")
+        assert parsed is not None
         m = re.match(parsed.pattern, "Copying for 'gas' took 1.0 ms.")
+        assert m is not None
         assert m["l0"] == "gas"
 
     def test_not_a_timer(self):
@@ -321,11 +329,12 @@ class TestCacheAndRevisions:
         repo, _ = tiny_repo
         calls = []
         real_build = timer_db.build_timer_db
-        monkeypatch.setattr(
-            timer_db,
-            "build_timer_db",
-            lambda root: calls.append(root) or real_build(root),
-        )
+
+        def counting_build(root):
+            calls.append(root)
+            return real_build(root)
+
+        monkeypatch.setattr(timer_db, "build_timer_db", counting_build)
         key = source_key(repo)
         load_source_db(repo)
         load_source_db(repo)

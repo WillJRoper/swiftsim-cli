@@ -171,7 +171,7 @@ def validate_configure_flags(
         raise ProfileError(
             "Unknown configure option(s):\n"
             + "\n".join(problems)
-            + "\nRun 'swift-cli config --show' to list valid options."
+            + "\nRun 'swift-cli config --list-options' to list valid options."
         )
 
 

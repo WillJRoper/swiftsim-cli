@@ -55,6 +55,7 @@ def test_get_cosmology(mocker):
 
     # Get the cosmology object
     cosmo = get_cosmology()
+    assert cosmo is not None
 
     # Check that the cosmology object is correct
     assert cosmo.H0.value == 67.74

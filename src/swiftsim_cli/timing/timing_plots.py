@@ -50,7 +50,9 @@ def _barh(
     return save_figure(fig, path, show=show)
 
 
-def exclusive_time_chart(h: Hierarchy, top_n: int, path: Path, show: bool):
+def exclusive_time_chart(
+    h: Hierarchy, top_n: int, path: Path, show: bool
+) -> Path | None:
     """Timers with the most exclusive (self) time."""
     rows = [r for r in h.flat()[:top_n] if r[1].exclusive > 0]
     return _barh(
@@ -67,7 +69,9 @@ def exclusive_time_chart(h: Hierarchy, top_n: int, path: Path, show: bool):
     )
 
 
-def step_breakdown_pie(h: Hierarchy, path: Path, show: bool, top: int = 6):
+def step_breakdown_pie(
+    h: Hierarchy, path: Path, show: bool, top: int = 6
+) -> Path | None:
     """Top-level timers and the untimed remainder as shares of step time."""
     kids = h.children(())
     names = [p[-1] for p in kids[:top]]
@@ -98,7 +102,9 @@ def step_breakdown_pie(h: Hierarchy, path: Path, show: bool, top: int = 6):
     return save_figure(fig, path, show=show)
 
 
-def mean_time_chart(h: Hierarchy, top_n: int, path: Path, show: bool):
+def mean_time_chart(
+    h: Hierarchy, top_n: int, path: Path, show: bool
+) -> Path | None:
     """Timers with the largest mean (inclusive) time per call."""
     rows = sorted(h.flat(), key=lambda r: -r[1].mean)[:top_n]
     return _barh(
@@ -113,7 +119,7 @@ def mean_time_chart(h: Hierarchy, top_n: int, path: Path, show: bool):
     )
 
 
-def timer_total_histogram(h: Hierarchy, path: Path, show: bool):
+def timer_total_histogram(h: Hierarchy, path: Path, show: bool) -> Path | None:
     """Distribution of the inclusive totals of all timers."""
     totals = [outer for _, _, outer in h.flat() if outer > 0]
     if len(totals) < 2:
@@ -131,7 +137,9 @@ def timer_total_histogram(h: Hierarchy, path: Path, show: bool):
     return save_figure(fig, path, show=show)
 
 
-def task_category_chart(categories: dict[str, float], path: Path, show: bool):
+def task_category_chart(
+    categories: dict[str, float], path: Path, show: bool
+) -> Path | None:
     """CPU time per task category."""
     total = sum(categories.values())
     items = sorted(
@@ -150,7 +158,9 @@ def task_category_chart(categories: dict[str, float], path: Path, show: bool):
     )
 
 
-def calls_scatter(h: Hierarchy, path: Path, show: bool, top: int = 5):
+def calls_scatter(
+    h: Hierarchy, path: Path, show: bool, top: int = 5
+) -> Path | None:
     """Calls vs mean time per call, sized by total time."""
     rows = [r for r in h.flat() if r[1].calls and r[2] > 1]
     if not rows:
@@ -190,7 +200,7 @@ def calls_scatter(h: Hierarchy, path: Path, show: bool, top: int = 5):
 
 def step_time_series(
     trees: list[StepTree], h: Hierarchy, path: Path, show: bool, top: int = 8
-):
+) -> Path | None:
     """Per-step time of the largest top-level timers and the wall-clock."""
     if len(trees) < 2:
         return None
@@ -199,7 +209,10 @@ def step_time_series(
     fig, ax = plt.subplots(figsize=(14, 7))
     ax.plot(
         steps,
-        [t.step.wallclock_ms for t in trees],
+        [
+            np.nan if t.step.wallclock_ms is None else t.step.wallclock_ms
+            for t in trees
+        ],
         "k-",
         lw=1.5,
         label="step wall-clock",
@@ -221,7 +234,7 @@ def step_time_series(
 
 def variability_chart(
     samples: dict[str, list[float]], top_n: int, path: Path, show: bool
-):
+) -> Path | None:
     """Coefficient of variation of the per-call time of each timer."""
     rows = sorted(
         (

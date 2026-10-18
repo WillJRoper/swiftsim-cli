@@ -23,9 +23,9 @@ def write_force_file(path: Path, ids, accel_scale: float = 1.0) -> None:
         pos = [pid % 7, pid % 5, pid % 3]
         accel = [accel_scale * (pid + 1), 2.0 * (pid + 1), 3.0 * (pid + 1)]
         rows.append([pid, *pos, *accel, -float(pid + 1)])
-    rows = np.asarray(rows, dtype=float)
-    rng.shuffle(rows)
-    np.savetxt(path, rows, header="Gravity accuracy test")
+    data = np.asarray(rows, dtype=float)
+    rng.shuffle(data)
+    np.savetxt(path, data, header="Gravity accuracy test")
 
 
 class TestFindCounterpartFile:

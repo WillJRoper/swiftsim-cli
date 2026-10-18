@@ -1,0 +1,22 @@
+description: >
+  Function names produced by macros. A name built by token pasting
+  (runner_doiact_functions_*.h) is recorded as the macro token, so its log
+  lines (printed under the expanded name) go to "unknown". A macro that
+  takes the name as an argument happens to give the right name.
+functions:
+  DOPAIR1: [8, 12]
+  runner_macro_header: [14, 18]
+sites:
+  macro_named.c:10: {function: DOPAIR1, kind: function}
+  macro_named.c:16: {function: runner_macro_header, kind: function}
+log:
+  text: |
+    [00001.0] runner_dopair1_density: took 1.000 ms.
+    [00001.1] runner_macro_header: took 2.000 ms.
+  records:
+    - [0, runner_dopair1_density, runner_dopair1_density, 1.0]
+    - [0, runner_macro_header, runner_macro_header, 2.0]
+xfail:
+  log: >
+    Limitation: macro-pasted function names are not expanded (no
+    preprocessor), so the timer is keyed DOPAIR1, not the logged name.

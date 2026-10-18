@@ -68,7 +68,9 @@ def _rank_arg(value: str) -> int | str:
         ) from None
 
 
-def add_log_arguments(subparsers) -> None:
+def add_log_arguments(
+    subparsers: argparse._SubParsersAction,
+) -> None:
     """Add the ``log`` subcommand and its arguments."""
     parser = subparsers.add_parser(
         "log",

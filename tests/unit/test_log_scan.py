@@ -84,6 +84,7 @@ class TestStepAssignment:
         """A first row with 0.000 wall-clock marks a restart."""
         scan = scan_log(logs_dir / "fos_restart.txt", synthetic_db)
         init = scan.init_step
+        assert init is not None
         assert scan.restart
         assert init.number == 47241 and init.wallclock_ms == 0.0
         assert "restart_read" in _keys(init)

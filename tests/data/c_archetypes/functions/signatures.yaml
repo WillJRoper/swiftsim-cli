@@ -1,0 +1,24 @@
+description: >
+  Parameter lists and layout: restrict/const qualified params, a
+  function-pointer parameter, multi-line signatures with comments (holding
+  braces and parens) between parameters, odd spacing with the brace on its
+  own line, K&R parameter declarations, array and variadic parameters.
+functions:
+  restrict_params: [3, 8]
+  callback_param: [10, 17]
+  multi_line_commented: [19, 26]
+  odd_spacing: [28, 35]
+  knr_style: [37, 45]
+  array_params: [47, 51]
+  variadic: [53, 57]
+sites:
+  signatures.c:6: {function: restrict_params, kind: function, start: 5}
+  signatures.c:15: {function: callback_param, kind: function, start: 13}
+  signatures.c:24: {function: multi_line_commented, kind: function, start: 23}
+  signatures.c:33: {function: odd_spacing, kind: function, tic: tic, start: 32}
+  signatures.c:42: {function: knr_style, kind: function, start: 41}
+  signatures.c:49: {function: array_params, kind: function, start: 48}
+  signatures.c:55: {function: variadic, kind: function, start: 54}
+calls:
+  # map_function is a parameter, not a defined function.
+  callback_param: []

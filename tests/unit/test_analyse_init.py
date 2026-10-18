@@ -146,7 +146,10 @@ def _analyse_parser() -> argparse.ArgumentParser:
 
 def test_every_registered_subcommand_has_a_dispatch_case():
     """New subcommands must be added to the parse->dispatch test."""
-    subparsers = _analyse_parser()._subparsers._group_actions[0]
+    group = _analyse_parser()._subparsers
+    assert group is not None
+    subparsers = group._group_actions[0]
+    assert isinstance(subparsers.choices, dict)
     assert set(subparsers.choices) == set(_SUBCOMMAND_CASES)
 
 

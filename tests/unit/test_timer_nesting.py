@@ -11,7 +11,7 @@ from swiftsim_cli.timing.timer_nesting import build_tree, can_contain
 
 def _parents(scan, db, rank=0):
     """(key, parent key) -> [calls, ms] over every block of the log."""
-    out = defaultdict(lambda: [0, 0.0])
+    out: defaultdict[tuple, list[float]] = defaultdict(lambda: [0, 0.0])
 
     def walk(node, parent):
         entry = out[(node.record.key, parent)]

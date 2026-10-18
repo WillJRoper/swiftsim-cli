@@ -1,0 +1,16 @@
+description: >
+  Only getticks()/clocks_gettime() results stored in plain variables are
+  tics. A start kept in a struct member is not tracked, so the operation's
+  range collapses to the message line and calls before it are not
+  attributed to it.
+functions:
+  engine_step: [3, 8]
+  make_hydro_tasks: [10, 10]
+sites:
+  tic_untracked.c:7: {function: engine_step, kind: operation, label: Stored tic, tic: null, start: 7}
+op_reach:
+  tic_untracked.c:7: [make_hydro_tasks]
+xfail:
+  op_reach: >
+    Limitation: tics stored in struct members (e->tic_step = getticks())
+    are not tracked, so the range is just the message line.

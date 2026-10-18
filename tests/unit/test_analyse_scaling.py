@@ -554,3 +554,13 @@ def test_scaling_plot_legend_survives_skipped_series(
 
     legend = figures[0].axes[2].get_legend()
     assert [text.get_text() for text in legend.get_texts()] == expected
+
+
+def test_min_percent_threshold_default_is_five():
+    """Timers need a 5% exclusive share of the step time by default."""
+    import argparse
+
+    parser = argparse.ArgumentParser()
+    scaling.add_scaling_arguments(parser.add_subparsers(dest="mode"))
+    args = parser.parse_args(["scaling", "timers", "a.log", "b.log"])
+    assert args.min_percent_threshold == 5.0

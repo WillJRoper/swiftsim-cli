@@ -76,11 +76,10 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     )
     action.add_argument(
         "--show",
-        "-S",
         nargs="?",
         const="",
         metavar="NAME",
-        help="Show a profile (default: the current one).",
+        help="Print the settings of profile NAME (default: the current one).",
     )
     action.add_argument(
         "--update",
@@ -548,12 +547,33 @@ def _resolve_legacy_upstream(repo: Path, branch: str) -> str:
     return f"origin/{branch}"
 
 
+# Timer databases of the old log analysis, superseded by the timing
+# package's cache (cache/<profile>/timer_db/).
+LEGACY_TIMER_FILES = ("timers.yaml", "timer_nesting.yaml")
+
+
+def _legacy_timer_files() -> list[Path]:
+    """Old timer databases in the profile dir root and cache/<profile>/."""
+    base = profile_mod.PROFILE_FILE.parent
+    cache = base / "cache"
+    dirs = [base]
+    if cache.is_dir():
+        dirs += sorted(p for p in cache.iterdir() if p.is_dir())
+    return [
+        d / name
+        for d in dirs
+        for name in LEGACY_TIMER_FILES
+        if (d / name).is_file()
+    ]
+
+
 def migrate_profiles() -> None:
     """Convert an old-format profile file into version 2.
 
     Each old named profile (``Default`` becomes ``default``; ``Current`` is
     skipped) gets its own worktree tracking ``origin/<old branch>``. The old
-    file is backed up to ``profiles.yaml.bak``.
+    file is backed up to ``profiles.yaml.bak``. Old timer databases
+    (``timers.yaml``, ``timer_nesting.yaml``) are deleted.
     """
     raw = read_raw_profile_file()
     if raw is None:
@@ -616,6 +636,11 @@ def migrate_profiles() -> None:
             f"{old_current.get('branch')}) matches no named profile and will "
             "not be migrated; add it later with 'swift-cli profile --new'."
         )
+    legacy = _legacy_timer_files()
+    if legacy:
+        print("Old timer databases to delete (no longer used):")
+        for path in legacy:
+            print(f"  {path}")
     if not confirm("Proceed with the migration?"):
         print("Aborting.")
         return
@@ -623,6 +648,10 @@ def migrate_profiles() -> None:
     backup = profile_mod.PROFILE_FILE.with_suffix(".yaml.bak")
     shutil.copy2(profile_mod.PROFILE_FILE, backup)
     print(f"Backed up old profile file to {backup}")
+    for path in legacy:
+        path.unlink()
+    if legacy:
+        print(f"Deleted {len(legacy)} old timer database file(s).")
 
     store = ProfileStore(repo=repo, worktree_root=root)
     failed = []
