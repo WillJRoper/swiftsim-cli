@@ -87,7 +87,7 @@ dependencies = [
 # Development
 dev = [
     "ruff==0.11.7",
-    "mypy>=1.10",  # the pre-commit mypy hook runs the installed mypy
+    "mypy==1.19.1",  # the pre-commit mypy hook runs the installed mypy
     "pre-commit",
 ]
 
@@ -98,7 +98,7 @@ test = [
     "pytest-mock>=3.10",
     "coverage[toml]>=7.0",
     "ruff==0.11.7",
-    "mypy>=1.10",
+    "mypy==1.19.1",
     "PyYAML",   # reading the expected-output fixtures
     "unyt",     # comes with swiftsimio; imported directly by a test
 ]
@@ -161,7 +161,7 @@ exclude = [
     "site-packages",
     "venv",
     ".pre-commit-config.yaml",
-    "*__init__.py"  # ignore all init files
+    "src/swiftsim_cli/_version.py",
 ]
 
 # PEP-8 line length

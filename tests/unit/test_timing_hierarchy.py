@@ -79,7 +79,7 @@ class TestAggregation:
         _, _, h = sample
         rebuild = ("engine_prepare", "engine_rebuild")
         assert h.paths[rebuild].calls == 4
-        assert h.paths[(*rebuild, "engine_unskip")].steps == {1, 2, 3, 4}
+        assert h.paths[rebuild + ("engine_unskip",)].steps == {1, 2, 3, 4}
         assert h.paths[("engine_launch (tasks)",)].exclusive == pytest.approx(
             h.paths[("engine_launch (tasks)",)].inclusive
         )

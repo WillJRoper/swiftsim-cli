@@ -70,6 +70,7 @@ class TestNew:
         gitsetup.store()
         pm.run(_args(new="dev"))
         p = get_profile("dev")
+        assert p.worktree is not None
         assert p.worktree == gitsetup.root / "dev"
         assert (p.worktree / "src.c").exists()
         assert p.branch == "swift-cli/dev"

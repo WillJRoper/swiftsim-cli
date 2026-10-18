@@ -49,8 +49,7 @@ MODE_DESCRIPTIONS = {
     "profile": "Manage SWIFT profiles (one git worktree, branch and build "
     "each).",
     "config": "Set the current profile's configure flags and reconfigure.",
-    "output-times": "Generate a list of snapshot (and snipshot) output "
-    "times.",
+    "output-times": "Generate a list of snapshot (and snipshot) output times.",
     "update": "Pull and rebuild the current profile.",
     "switch": "Make another profile the current one.",
     "make": "Compile the current profile.",

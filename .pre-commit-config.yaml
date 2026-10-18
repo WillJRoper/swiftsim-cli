@@ -22,14 +22,14 @@ repos:
 
   # Type checking with mypy, using the [tool.mypy] config in pyproject.toml.
   # It runs the mypy from your dev environment (pip install -e ".[dev,test]")
-  # over src and tests, exactly as CI does, so both see the same third-party
-  # type information.
+  # so it sees the same third-party type information as CI. Only the staged
+  # Python files are passed (mypy still follows their imports), so untracked
+  # work-in-progress files can't break a commit; CI checks the whole tree.
   - repo: local
     hooks:
       - id: mypy
         name: mypy
         entry: mypy
         language: system
-        types_or: [python, toml]
-        pass_filenames: false
+        types: [python]
         require_serial: true

@@ -34,8 +34,8 @@ jobs:
 
       - name: Lint with ruff
         run: |
-          ruff check src/ tests/ --exclude="src/swiftsim_cli/_version.py"
-          ruff format --check src/ tests/ --exclude="src/swiftsim_cli/_version.py"
+          ruff check src/ tests/
+          ruff format --check src/ tests/
 
       # Checks src and tests with the [tool.mypy] config in pyproject.toml,
       # the same invocation as the pre-commit hook.
