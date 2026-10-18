@@ -8,6 +8,7 @@ import numpy as np
 from swiftsimio import load  # type: ignore[import-untyped]
 from swiftsimio.metadata import particle_types  # type: ignore[import-untyped]
 
+from swiftsim_cli.modes.common_args import add_params_argument
 from swiftsim_cli.params import load_parameters
 from swiftsim_cli.profile import load_swift_profile
 
@@ -32,7 +33,7 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     """Add arguments for the 'utils' mode."""
     subparsers = parser.add_subparsers(
         dest="utils_type",
-        help="Utility calculation to run",
+        help="Utility calculation to run.",
         required=True,
     )
 
@@ -42,30 +43,24 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     )
     softenings.add_argument(
         "--ics",
-        "--inic",
-        dest="ics",
         type=Path,
         required=True,
         help="Path to the SWIFT initial conditions file.",
     )
-    softenings.add_argument(
-        "-p",
-        "--params",
-        type=Path,
-        required=True,
-        help="Path to the SWIFT parameter file.",
-    )
+    add_params_argument(softenings, required=True)
     softenings.add_argument(
         "--softening-coeff",
         type=float,
         default=None,
-        help="Softening coefficient in units of mean separation.",
+        help="Softening coefficient in units of the mean separation "
+        "(default: from the profile).",
     )
     softenings.add_argument(
         "--pivot-redshift",
         type=float,
         default=None,
-        help="Pivot redshift for the maximal physical softening.",
+        help="Pivot redshift for the maximal physical softening "
+        "(default: from the profile).",
     )
 
 

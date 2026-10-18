@@ -48,7 +48,7 @@ class TestAddArguments:
         add_arguments(parser)
 
         # Test that required arguments are present
-        # This should fail without --path and --inic
+        # This should fail without --path and --ics
         with pytest.raises(SystemExit):
             parser.parse_args([])
 
@@ -58,10 +58,10 @@ class TestAddArguments:
         add_arguments(parser)
 
         args = parser.parse_args(
-            ["--path", "/test/path", "--inic", "/test/ic.hdf5"]
+            ["--path", "/test/path", "--ics", "/test/ic.hdf5"]
         )
         assert str(args.path) == "/test/path"
-        assert str(args.inic) == "/test/ic.hdf5"
+        assert str(args.ics) == "/test/ic.hdf5"
 
     def test_add_arguments_with_param_override(self):
         """Test parsing with parameter overrides."""
@@ -72,7 +72,7 @@ class TestAddArguments:
             [
                 "--path",
                 "/test/path",
-                "--inic",
+                "--ics",
                 "/test/ic.hdf5",
                 "--param",
                 "Cosmology:h=0.7",
@@ -277,7 +277,7 @@ class TestNewEndToEnd:
                 "new",
                 "--path",
                 "run",
-                "--inic",
+                "--ics",
                 "ics.hdf5",
                 "--param",
                 "TimeIntegration:dt_max=0.5",
@@ -325,17 +325,19 @@ class TestNewEndToEnd:
             "params.yml"
         ]
 
-    def test_refuses_overwrite_without_force(self, new_env):
+    def test_refuses_overwrite_without_force(self, new_env, capsys):
         """An existing params.yml is only replaced with --force."""
         from swiftsim_cli.cli import main
 
-        argv = ["new", "--path", "run", "--inic", "ics.hdf5"]
+        argv = ["new", "--path", "run", "--ics", "ics.hdf5"]
         main(argv)
         param_file = new_env / "run" / "params.yml"
         param_file.write_text("sentinel")
 
-        with pytest.raises(FileExistsError, match="--force"):
+        with pytest.raises(SystemExit) as excinfo:
             main(argv)
+        assert excinfo.value.code == 1
+        assert "--force" in capsys.readouterr().err
         assert param_file.read_text() == "sentinel"
 
         main([*argv, "--force"])
@@ -346,7 +348,7 @@ class TestNewEndToEnd:
         from swiftsim_cli.cli import main
 
         write_tiny_ics(new_env / "cosmo.hdf5", time=0.1)
-        main(["new", "--path", "run", "--inic", "cosmo.hdf5"])
+        main(["new", "--path", "run", "--ics", "cosmo.hdf5"])
 
         params = YAML(typ="safe").load(
             (new_env / "run" / "params.yml").read_text()

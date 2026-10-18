@@ -49,11 +49,11 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--path",
         required=True,
-        help="Path to the new SWIFT run.",
+        help="Directory to create the new run in.",
         type=Path,
     )
     parser.add_argument(
-        "--inic",
+        "--ics",
         required=True,
         help="Path to the initial conditions HDF5 file.",
         type=Path,
@@ -66,8 +66,7 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         type=_kv_pair,
         action="append",
         help=(
-            "Override a SWIFT parameter in the form ROOTKEY:KEY=VALUE.  "
-            "Can be repeated for multiple overrides."
+            "Override a SWIFT parameter as ROOTKEY:KEY=VALUE; can be repeated."
         ),
         default=[],
     )
@@ -82,7 +81,7 @@ def run(args: argparse.Namespace) -> None:
     """Execute the new mode."""
     make_new_run_dir(
         output_dir=args.path,
-        inicond_file=args.inic,
+        inicond_file=args.ics,
         overide_params=dict(args.param),
         force=args.force,
     )

@@ -5,7 +5,7 @@ from typing import Any
 
 import pytest
 
-from swiftsim_cli.modes.scaling import (
+from swiftsim_cli.modes.analyse.scaling import (
     ScalingLogData,
     _aggregate_timer_totals,
     _build_legend_labels,
@@ -563,7 +563,7 @@ def test_scaling_plot_legend_survives_skipped_series(
     tmp_path: Path, monkeypatch, run_statistic, expected
 ):
     """A skipped series must not shift the labels of later series."""
-    from swiftsim_cli.modes import scaling
+    from swiftsim_cli.modes.analyse import scaling
 
     figures: list[Any] = []
     monkeypatch.setattr(scaling.plt, "close", figures.append)

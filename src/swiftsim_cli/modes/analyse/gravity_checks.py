@@ -9,8 +9,15 @@ from typing import Optional, Union
 import matplotlib.pyplot as plt
 import numpy as np
 
+from swiftsim_cli.modes.common_args import (
+    add_labels_argument,
+    add_output_arguments,
+)
 from swiftsim_cli.utilities.io import create_output_path
 from swiftsim_cli.utilities.plotting import save_figure
+
+# Subdirectory of --out that the outputs are written to
+OUT_SUBDIR = "gravity_checks_analysis"
 
 
 def _find_counterpart_file(filepath: str) -> tuple[str, str]:
@@ -141,9 +148,9 @@ def _load_force_pair(
 def analyse_force_checks(
     files: list[str],
     labels: list[str],
-    output_path: Union[str, None] = None,
+    output_path: Union[str, Path, None] = None,
     prefix: Union[str, None] = None,
-    show_plot: bool = True,
+    show_plot: bool = False,
     min_error: float = 1e-7,
     max_error: float = 3e-1,
     num_bins: int = 64,
@@ -159,10 +166,10 @@ def analyse_force_checks(
         files: List of file paths to either exact or SWIFT force files.
                The function will automatically find the counterpart files.
         labels: List of labels for the runs. Must match the length of files.
-        output_path: Optional path to save the plot. If None, the plot is saved
-            to the current directory.
-        prefix: Optional prefix to add to the output filename if saving.
-            If empty, defaults to 'gravity_checks.png'.
+        output_path: Directory whose ``gravity_checks_analysis``
+            subdirectory receives the plot. If None, the current directory
+            is used.
+        prefix: Optional prefix to add to the output filename.
         show_plot: Whether to display the plot interactively.
         min_error: Minimum error for binning (default: 1e-7).
         max_error: Maximum error for binning (default: 3e-1).
@@ -308,7 +315,7 @@ def analyse_force_checks(
 
         # Save the figure
         png_file = create_output_path(
-            output_path, prefix, "gravity_checks.png"
+            output_path, prefix, "gravity_checks.png", OUT_SUBDIR
         )
         save_figure(fig, png_file, show=show_plot, dpi=200)
         print(f"Plot saved to {png_file}")
@@ -324,48 +331,18 @@ def add_gravity_checks_arguments(subparsers) -> argparse.ArgumentParser:
         The gravity checks argument parser.
     """
     gravity_parser = subparsers.add_parser(
-        "gravity-checks", help="Analyse gravity check files"
+        "gravity-checks",
+        help="Compare SWIFT gravity forces with exact gravity checks.",
     )
 
     gravity_parser.add_argument(
         "files",
         nargs="+",
-        help="List of gravity check files to analyse (either exact "
-        "or SWIFT files).",
+        help="Gravity check files to analyse (either exact or SWIFT files).",
         type=Path,
     )
-
-    gravity_parser.add_argument(
-        "--labels",
-        "-l",
-        nargs="+",
-        required=True,
-        help="List of labels for the runs being analysed.",
-        type=str,
-    )
-
-    gravity_parser.add_argument(
-        "--output-path",
-        "-o",
-        type=Path,
-        help="Where to save analysis (default: current directory).",
-        default=None,
-    )
-
-    gravity_parser.add_argument(
-        "--prefix",
-        "-p",
-        type=str,
-        help="A prefix to add to the analysis files (default: '').",
-        default="",
-    )
-
-    gravity_parser.add_argument(
-        "--show",
-        action="store_true",
-        help="Show the plot interactively.",
-        default=False,
-    )
+    add_labels_argument(gravity_parser, required=True)
+    add_output_arguments(gravity_parser, OUT_SUBDIR)
 
     gravity_parser.add_argument(
         "--min-error",
@@ -400,7 +377,7 @@ def run_gravity_checks(args: argparse.Namespace) -> None:
     analyse_force_checks(
         files=args.files,
         labels=args.labels,
-        output_path=args.output_path,
+        output_path=args.out,
         prefix=args.prefix,
         show_plot=args.show,
         min_error=args.min_error,

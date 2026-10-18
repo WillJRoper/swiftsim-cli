@@ -52,7 +52,7 @@ def _run_cli(tmp_path, mocker, extra_args):
     params = tmp_path / "params.yml"
     params.write_text(COSMO_PARAMS_YML)
     out = tmp_path / "output_list.txt"
-    main(["output-times", "-p", str(params), "-o", str(out), *extra_args])
+    main(["output-times", "-P", str(params), "-o", str(out), *extra_args])
     return out.read_text().splitlines()
 
 

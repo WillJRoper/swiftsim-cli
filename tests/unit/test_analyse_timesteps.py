@@ -30,9 +30,9 @@ def test_run_timestep_passes_time_column(mock_analyse_timestep_files):
     args = Mock(
         files=["timesteps.txt"],
         labels=["run"],
-        output_path="plot_dir",
+        out="plot_dir",
         prefix="test",
-        show_plot=False,
+        show=False,
         time_column=1,
         match_runtimes=True,
         nthreads=[4],

@@ -82,7 +82,7 @@ class TestRunSwiftTaskCounts:
         args = Mock()
         args.log_files = [Path("/path/to/test.log")]
         args.labels = ["Test Run"]
-        args.output_path = Path("/output")
+        args.out = Path("/output")
         args.prefix = "test"
         args.show = True
         args.tasks = ["sort", "self"]
@@ -92,7 +92,7 @@ class TestRunSwiftTaskCounts:
         mock_analyse.assert_called_once_with(
             log_files=[str(args.log_files[0])],
             labels=["Test Run"],
-            output_path=str(args.output_path),
+            output_path=args.out,
             prefix="test",
             show_plot=True,
             task_filter=["sort", "self"],
@@ -106,7 +106,7 @@ class TestRunSwiftTaskCounts:
         args = Mock()
         args.log_files = [Path("/path/to/test.log")]
         args.labels = None
-        args.output_path = None
+        args.out = None
         args.prefix = None
         args.show = False
         args.tasks = None
@@ -133,7 +133,7 @@ class TestRunSwiftTaskCounts:
             Path("/path/to/test2.log"),
         ]
         args.labels = ["Run 1", "Run 2"]
-        args.output_path = Path("/output")
+        args.out = Path("/output")
         args.prefix = "multi"
         args.show = False
         args.tasks = None
@@ -146,7 +146,7 @@ class TestRunSwiftTaskCounts:
                 str(args.log_files[1]),
             ],
             labels=["Run 1", "Run 2"],
-            output_path=str(args.output_path),
+            output_path=args.out,
             prefix="multi",
             show_plot=False,
             task_filter=None,

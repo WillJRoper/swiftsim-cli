@@ -28,6 +28,10 @@ import matplotlib.pyplot as plt
 import numpy as np
 from numpy.typing import NDArray
 
+from swiftsim_cli.modes.common_args import (
+    add_labels_argument,
+    add_output_arguments,
+)
 from swiftsim_cli.src_parser import (
     TaskCountSnapshot,
     scan_task_counts_by_step,
@@ -55,6 +59,10 @@ __all__ = [
 ]
 
 
+# Subdirectory of --out that the outputs are written to
+OUT_SUBDIR = "task_counts_analysis"
+
+
 # ============================================================================
 # CLI ARGUMENT SETUP
 # ============================================================================
@@ -68,62 +76,27 @@ def add_task_counts_arguments(subparsers) -> None:
     task_parser = subparsers.add_parser(
         "task-counts",
         help=(
-            "Analyse engine_print_task_counts output from SWIFT log files. "
-            "Produces a per-step task count time series and cumulative plot."
+            "Plot the engine_print_task_counts output of SWIFT log files "
+            "per step and cumulatively."
         ),
     )
 
     task_parser.add_argument(
         "log_files",
         nargs="+",
-        help="SWIFT log file(s) to analyse. Multiple files will be "
-        "plotted together with different markers.",
+        help="SWIFT log files to analyse (plotted together).",
         type=Path,
     )
-
-    task_parser.add_argument(
-        "--labels",
-        "-l",
-        nargs="+",
-        help="Labels for the log files (same order as files). "
-        "If not specified, filenames will be used.",
-        type=str,
-        default=None,
-    )
-
-    task_parser.add_argument(
-        "--output-path",
-        "-o",
-        type=Path,
-        help="Where to save analysis (default: current directory).",
-        default=None,
-    )
-
-    task_parser.add_argument(
-        "--prefix",
-        "-p",
-        type=str,
-        help="Prefix to add to analysis files and output "
-        "directory (default: '').",
-        default=None,
-    )
-
-    task_parser.add_argument(
-        "--show",
-        action="store_true",
-        help="Show the plots interactively.",
-        default=False,
-    )
+    add_labels_argument(task_parser)
+    add_output_arguments(task_parser, OUT_SUBDIR)
 
     task_parser.add_argument(
         "--tasks",
         "-t",
         type=str,
         nargs="+",
-        help="List of specific task names to include in the analysis. "
-        "Task names must match the task strings in the log "
-        "(e.g., 'sort', 'self', 'pair'). If not specified, all tasks "
-        "are included.",
+        help="Task names to include, as written in the log (e.g. 'sort', "
+        "'self', 'pair') (default: all tasks).",
         default=None,
     )
 
@@ -136,7 +109,7 @@ def run_swift_task_counts(args: argparse.Namespace) -> None:
     analyse_swift_task_counts(
         log_files=[str(f) for f in args.log_files],
         labels=args.labels,
-        output_path=str(args.output_path) if args.output_path else None,
+        output_path=args.out,
         prefix=args.prefix,
         show_plot=args.show,
         task_filter=args.tasks,
@@ -151,9 +124,9 @@ def run_swift_task_counts(args: argparse.Namespace) -> None:
 def analyse_swift_task_counts(
     log_files: list[str],
     labels: list[str] | None = None,
-    output_path: str | None = None,
+    output_path: str | Path | None = None,
     prefix: str | None = None,
-    show_plot: bool = True,
+    show_plot: bool = False,
     task_filter: list[str] | None = None,
 ) -> None:
     """Analyse engine_print_task_counts blocks in SWIFT log files.
@@ -176,9 +149,10 @@ def analyse_swift_task_counts(
             Optional list of labels for the log files. If None, filenames
             will be used. Must match the order and length of log_files.
         output_path:
-            Directory where figures are saved. If None, saves to CWD.
+            Directory whose ``task_counts_analysis`` subdirectory receives
+            the plots. If None, the current directory is used.
         prefix:
-            Optional filename and output-subdirectory prefix.
+            Optional prefix added to each output filename.
         show_plot:
             Whether to display plots interactively.
         task_filter:
@@ -203,12 +177,7 @@ def analyse_swift_task_counts(
     if task_filter:
         print(f"Filtering for specific tasks: {', '.join(task_filter)}")
 
-    # Consistent with your other analysis: prefix determines output directory.
-    out_dir = (
-        "task_counts_analysis"
-        if prefix is None
-        else f"{prefix}_task_counts_analysis"
-    )
+    out_dir = OUT_SUBDIR
 
     # Define markers for different log files
     markers = ["o", "s", "^", "D", "v", "<", ">", "p", "*", "h"]

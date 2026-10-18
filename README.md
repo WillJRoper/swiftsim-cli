@@ -24,7 +24,7 @@ The `swift-cli` command provides a unified interface for managing SWIFT simulati
 
 ### Requirements
 
-- Python ≥ 3.9
+- Python ≥ 3.10
 - Git (for SWIFT repository management)
 - To run SWIFT you will also need all of SWIFT's dependencies (for more details see [SWIFT's documentation](https://swift.strw.leidenuniv.nl/docs/index.html))
 
@@ -97,13 +97,15 @@ swift-cli profile --migrate
 ## Core Modes
 
 - **`profile`**: Manage SWIFT profiles (one git worktree, branch and build each)
-- **`config`**: Configure SWIFT compilation options (including presets and arbitrary `--<option>` flags)
-- **`make`**: Compile SWIFT with specified number of processes
+- **`config`**: Set the current profile's configure flags (presets and arbitrary `--<option>` flags) and reconfigure
+- **`make`**: Compile the current profile (`-j/--nr-threads N`)
 - **`update`**: Pull (rebase onto upstream) and rebuild the current profile
-- **`switch`**: Switch the current profile
-- **`new`**: Create new simulation run directory
-- **`analyse`**: Analyze SWIFT logs and diagnostic files
-- **`output-times`**: Generate output time sequences for simulations
+- **`switch`**: Make another profile the current one
+- **`show`**: Show the current profile (`--cosmo`/`--all` to include the cosmology)
+- **`new`**: Create a new simulation run directory (`--path DIR --ics FILE`)
+- **`output-times`**: Generate output time lists (`-P/--params FILE` for the cosmology, `-o/--out FILE`)
+- **`analyse`**: Analyse SWIFT logs and diagnostics (`timesteps`, `gravity-checks`, `gravity-error-maps`, `log`, `task-counts`, `mpiuse`, `task-plots`, `scaling timers|runtime`)
+- **`utils`**: Small helper calculations (`softenings --ics FILE -P FILE`)
 
 ### Exploring Modes
 
@@ -115,32 +117,37 @@ swift-cli --help
 
 This will show you the available modes.
 
-```bash
-swift-cli: Utilities for Swift development workflows
+```text
+swift-cli: Utilities for SWIFT development workflows
 
 Usage:
-  swift-cli [--verbose] [--swift-dir DIR] [--data-dir DIR] <mode1> [mode1_args] [<mode2> [mode2_args]] ...
+  swift-cli [global options] <mode> [mode args] [<mode> [mode args]] ...
 
-Global options:
-  -v, --verbose     Enable verbose output
-  --swift-dir DIR   Path to SWIFT directory
-  --data-dir DIR    Path to data directory
+Global options (must come before the first mode):
+  -h, --help      Show this help and exit.
+  --version       Show the version and exit.
+  --profile NAME  Run the modes against profile NAME.
+  --debug         Show full tracebacks for errors (or set
+                  SWIFT_CLI_DEBUG=1).
 
 Available modes:
-  profile         Profile mode for configuring SWIFTsim-CLI settings and profiles
-  config          A module containing tools for configuring SWIFT
-  output-times    Output-times mode for generating output time lists
-  update          Update mode for pulling latest SWIFT changes
-  switch          Switch mode for switching SWIFT branches
-  make            Make mode for compiling SWIFT
-  new             New mode for creating new SWIFT run directories
-  analyse         Analyse mode for analysing SWIFT runs
+  profile         Manage SWIFT profiles (one git worktree, branch and build each).
+  config          Set the current profile's configure flags and reconfigure.
+  output-times    Generate a list of snapshot (and snipshot) output times.
+  update          Pull and rebuild the current profile.
+  switch          Make another profile the current one.
+  make            Compile the current profile.
+  new             Create a new simulation run directory.
+  analyse         Analyse SWIFT logs and diagnostic outputs.
+  show            Show the current profile (and optionally its cosmology).
+  utils           Run small helper calculations (e.g. softenings).
 
 Examples:
   swift-cli config --enable-debug
   swift-cli make -j 8
   swift-cli config --enable-debug make -j 32
   swift-cli update config --enable-debug make -j 8
+  swift-cli --profile zoom make -j 16
 
 For mode-specific help: swift-cli <mode> --help
 ```
@@ -159,21 +166,36 @@ swift-cli analyse --help
 
 Which yields:
 
-```bash
-usage: swift-cli analyse [-h] {timesteps,gravity-checks,gravity-error-maps,log,task-counts,mpiuse} ...
+```text
+usage: swift-cli analyse [-h]
+                         {timesteps,gravity-checks,gravity-error-maps,log,task-counts,mpiuse,task-plots,scaling}
+                         ...
+
+Analyse SWIFT logs and diagnostic outputs.
 
 positional arguments:
-  {timesteps,gravity-checks,gravity-error-maps,log,task-counts,mpiuse}
-                        Type of analysis to perform
-    timesteps           Analyse timestep files
-    gravity-checks      Analyse gravity check files
-    gravity-error-maps  Create hexbin error maps for gravity check files
-    log                 Analyse timing information from SWIFT log files. To get the most from this mode SWIFT should be run with -v 1 for verbose output.
-    task-counts         Analyse engine_print_task_counts output from SWIFT log files.
-    mpiuse              Analyse SWIFT mpiuse_report-rank*-step*.dat files.
+  {timesteps,gravity-checks,gravity-error-maps,log,task-counts,mpiuse,task-plots,scaling}
+                        Type of analysis to perform.
+    timesteps           Plot the timestep files of one or more runs.
+    gravity-checks      Compare SWIFT gravity forces with exact gravity
+                        checks.
+    gravity-error-maps  Create hexbin error maps for gravity check files.
+    log                 Analyse the timers in a SWIFT log file (run SWIFT with
+                        -v 1 for the most detail).
+    task-counts         Plot the engine_print_task_counts output of SWIFT log
+                        files per step and cumulatively.
+    mpiuse              Analyse SWIFT mpiuse_report-rank*-step*.dat files and
+                        compare communication volume across inputs.
+    task-plots          Plot SWIFT task-debug and threadpool timings on a
+                        shared wall-clock axis.
+    scaling             Analyse how SWIFT scales across runs with different
+                        MPI rank counts.
 
 options:
   -h, --help            show this help message and exit
+
+Each analysis writes its files into <out>/<analysis>_analysis/ (-o/--out,
+default: the current directory), with -p/--prefix prepended to each filename.
 ```
 
 ### Multi-mode Usage
@@ -185,8 +207,41 @@ Commands can be chained together for complex workflows:
 swift-cli update config --debug make -j 16
 
 # Update SWIFT, compile, and create new simulation in the test_run directory
-swift-cli update make -j 32 new test_run --ics initial_conditions.hdf5
+swift-cli update make -j 32 new --path test_run --ics initial_conditions.hdf5
 ```
+
+A word that names a mode starts the next mode, unless the current mode
+expects it as a value: `new --path make ...` creates a run directory called
+`make`, and `switch show` switches to a profile called `show`. Global options
+(`--profile NAME`, `--debug`, `--version`, `--help`) must come before the
+first mode.
+
+### Analysis Outputs
+
+All `analyse` subcommands share the same output options:
+
+- `-o/--out DIR`: outputs go into `DIR/<analysis>_analysis/` (e.g.
+  `timesteps_analysis/`, `scaling_timers_analysis/`); `DIR` defaults to the
+  current directory.
+- `-p/--prefix PREFIX`: prepended once to every output filename
+  (`PREFIX_<name>`).
+- `--show`: also show the plots interactively.
+
+Parameter files are always given with `-P/--params` and initial conditions
+with `--ics`.
+
+```bash
+swift-cli analyse timesteps run1/timesteps.txt run2/timesteps.txt -l run1 run2 -o plots
+swift-cli analyse scaling timers logs/*.log --steps 10 100 -p zoom
+swift-cli analyse scaling runtime logs/*.log
+```
+
+### Errors
+
+Errors such as a missing file or an invalid option value are reported as a
+single `error: ...` line (exit code 1; a failed external command exits with
+its own code). Run with `swift-cli --debug ...` or set `SWIFT_CLI_DEBUG=1` to
+see the full traceback.
 
 ### MPI Use Analysis
 
@@ -210,7 +265,7 @@ This produces:
 
 - Per-input ASCII summary tables
 - A cross-input comparison table with byte deltas
-- Per-step and per-subtype plots in `<prefix>_mpiuse_analysis/`
+- Per-step and per-subtype plots in `mpiuse_analysis/` (under `--out`)
 - Optional per-step CSV output with `--format csv` or `--format both`
 
 Useful filters include `--subtypes gpart grav_counts` and

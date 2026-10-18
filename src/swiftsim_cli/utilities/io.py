@@ -31,19 +31,23 @@ def run_command_in_dir(command: Sequence[str], directory: Path) -> None:
 
 
 def create_output_path(
-    output_path: str | None = None,
+    output_path: str | Path | None = None,
     prefix: str | None = None,
     filename: str = "output.png",
     out_dir: str | None = None,
 ) -> Path:
     """Create and validate output path for saving files.
 
+    The result is ``<output_path>/<out_dir>/<prefix>_<filename>``; the
+    prefix is applied to the filename only, never to ``out_dir``.
+
     Args:
-        output_path: Optional path to save the file. If None, uses
-           current directory.
+        output_path: Optional directory to save the file in. If None, uses
+           the current directory.
         prefix: Optional prefix to add to the filename.
         filename: Base filename to use (default: "output.png").
-        out_dir: An optional directory to hold the outputs.
+        out_dir: An optional subdirectory of ``output_path`` to hold the
+            outputs.
 
     Returns:
         Path: Complete path to the output file.

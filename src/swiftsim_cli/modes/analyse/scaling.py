@@ -1,4 +1,8 @@
-"""Scaling analysis for SWIFT timing logs."""
+"""Scaling analysis for SWIFT timing logs.
+
+Provides ``swift-cli analyse scaling timers`` (per-timer scaling) and
+``swift-cli analyse scaling runtime`` (whole-run strong scaling).
+"""
 
 from __future__ import annotations
 
@@ -17,6 +21,10 @@ import numpy as np
 from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 
+from swiftsim_cli.modes.common_args import (
+    add_output_arguments,
+    add_steps_argument,
+)
 from swiftsim_cli.src_parser import (
     GENERIC_TIMER_LABELS,
     TimerDef,
@@ -40,6 +48,10 @@ MPI_RANKS_RE = re.compile(
 # speedup panel of this height.
 _SCALING_PLOT_SIZE = 10.5
 _SPEEDUP_HEIGHT = 3.0
+
+# Subdirectories of --out that each subcommand writes to
+TIMERS_OUT_SUBDIR = "scaling_timers_analysis"
+RUNTIME_OUT_SUBDIR = "scaling_runtime_analysis"
 
 
 @dataclass
@@ -70,15 +82,24 @@ class RuntimeScalingLogData:
     step_count: int
 
 
-def add_arguments(parser: argparse.ArgumentParser) -> None:
-    """Add arguments for the top-level scaling mode."""
-    subparsers = parser.add_subparsers(
+def add_scaling_arguments(subparsers) -> None:
+    """Add the ``analyse scaling`` subcommand and its own subcommands.
+
+    Args:
+        subparsers: The analyse subparsers object to add the parser to.
+    """
+    parser = subparsers.add_parser(
+        "scaling",
+        help="Analyse how SWIFT scales across runs with different MPI "
+        "rank counts.",
+    )
+    scaling_subparsers = parser.add_subparsers(
         dest="scaling_type",
-        help="Type of scaling analysis to perform",
+        help="Type of scaling analysis to perform.",
         required=True,
     )
-    add_timer_scaling_arguments(subparsers)
-    add_runtime_scaling_arguments(subparsers)
+    add_timer_scaling_arguments(scaling_subparsers)
+    add_runtime_scaling_arguments(scaling_subparsers)
 
 
 def add_timer_scaling_arguments(subparsers) -> None:
@@ -86,11 +107,11 @@ def add_timer_scaling_arguments(subparsers) -> None:
     scaling_parser = subparsers.add_parser(
         "timers",
         help=(
-            "Analyse how SWIFT timers scale across multiple log files with "
+            "Analyse how SWIFT timers scale across log files with "
             "different MPI rank counts."
         ),
     )
-    _add_common_scaling_arguments(scaling_parser)
+    _add_common_scaling_arguments(scaling_parser, TIMERS_OUT_SUBDIR)
     scaling_parser.add_argument(
         "--min-percent-threshold",
         type=float,
@@ -106,7 +127,8 @@ def add_timer_scaling_arguments(subparsers) -> None:
         default="root",
         help=(
             "Which ranks to use for the main scaling view: 'root' uses rank 0 "
-            "only, 'all' combines all emitting ranks present in each log."
+            "only, 'all' combines all emitting ranks present in each log "
+            "(default: root)."
         ),
     )
 
@@ -120,48 +142,24 @@ def add_runtime_scaling_arguments(subparsers) -> None:
             "totals in SWIFT logs."
         ),
     )
-    _add_common_scaling_arguments(runtime_parser)
+    _add_common_scaling_arguments(runtime_parser, RUNTIME_OUT_SUBDIR)
 
 
-def _add_common_scaling_arguments(parser: argparse.ArgumentParser) -> None:
+def _add_common_scaling_arguments(
+    parser: argparse.ArgumentParser, subdir: str
+) -> None:
     """Add arguments shared by scaling subcommands."""
     parser.add_argument(
         "log_files",
         nargs="+",
         type=Path,
-        help="SWIFT log files to analyse together.",
+        help="SWIFT log files (or glob patterns) to analyse together.",
     )
-    parser.add_argument(
-        "--output-path",
-        "-o",
-        type=Path,
-        help="Where to save analysis outputs (default: current directory).",
-        default=None,
-    )
-    parser.add_argument(
-        "--prefix",
-        "-p",
-        type=str,
-        help="Prefix for output files and output directory.",
-        default=None,
-    )
-    parser.add_argument(
-        "--show",
-        action="store_true",
-        help="Show the plots interactively.",
-        default=False,
-    )
-    parser.add_argument(
-        "--steps",
-        nargs=2,
-        type=int,
-        metavar=("START", "END"),
-        help="Inclusive step range to analyse.",
-        default=None,
-    )
+    add_output_arguments(parser, subdir)
+    add_steps_argument(parser)
 
 
-def run(args: argparse.Namespace) -> None:
+def run_scaling(args: argparse.Namespace) -> None:
     """Run the requested scaling analysis."""
     if args.scaling_type == "timers":
         run_swift_scaling(args)
@@ -172,7 +170,7 @@ def run(args: argparse.Namespace) -> None:
 
 
 def run_swift_scaling(args: argparse.Namespace) -> None:
-    """Entry point for the ``scaling timers`` CLI subcommand."""
+    """Entry point for ``analyse scaling timers``."""
     step_range = None
     if args.steps is not None:
         step_range = (args.steps[0], args.steps[1])
@@ -181,7 +179,7 @@ def run_swift_scaling(args: argparse.Namespace) -> None:
 
     analyse_swift_scaling(
         log_files=_resolve_log_files(args.log_files),
-        output_path=str(args.output_path) if args.output_path else None,
+        output_path=args.out,
         prefix=args.prefix,
         show_plot=args.show,
         step_range=step_range,
@@ -191,14 +189,14 @@ def run_swift_scaling(args: argparse.Namespace) -> None:
 
 
 def run_swift_runtime_scaling(args: argparse.Namespace) -> None:
-    """Entry point for the ``scaling runtime`` CLI subcommand."""
+    """Entry point for ``analyse scaling runtime``."""
     step_range = None
     if args.steps is not None:
         step_range = (args.steps[0], args.steps[1])
 
     analyse_swift_runtime_scaling(
         log_files=_resolve_log_files(args.log_files),
-        output_path=str(args.output_path) if args.output_path else None,
+        output_path=args.out,
         prefix=args.prefix,
         show_plot=args.show,
         step_range=step_range,
@@ -228,9 +226,9 @@ def _resolve_log_files(log_files: list[Path]) -> list[str]:
 
 def analyse_swift_scaling(
     log_files: list[str],
-    output_path: str | None = None,
+    output_path: str | Path | None = None,
     prefix: str | None = None,
-    show_plot: bool = True,
+    show_plot: bool = False,
     step_range: tuple[int, int] | None = None,
     min_percent_threshold: float = 10.0,
     rank_source: Literal["root", "all"] = "root",
@@ -247,9 +245,7 @@ def analyse_swift_scaling(
 
     print(f"Analyzing timer scaling across {len(log_files)} log files")
 
-    out_dir = (
-        "scaling_analysis" if prefix is None else f"{prefix}_scaling_analysis"
-    )
+    out_dir = TIMERS_OUT_SUBDIR
 
     timer_db = load_timer_db()
     compiled = compile_site_patterns(timer_db)
@@ -442,9 +438,9 @@ def analyse_swift_scaling(
 
 def analyse_swift_runtime_scaling(
     log_files: list[str],
-    output_path: str | None = None,
+    output_path: str | Path | None = None,
     prefix: str | None = None,
-    show_plot: bool = True,
+    show_plot: bool = False,
     step_range: tuple[int, int] | None = None,
 ) -> None:
     """Analyse total runtime scaling using step-table wallclock totals."""
@@ -455,9 +451,7 @@ def analyse_swift_runtime_scaling(
 
     print(f"Analyzing runtime scaling across {len(log_files)} log files")
 
-    out_dir = (
-        "runtime_scaling" if prefix is None else f"{prefix}_runtime_scaling"
-    )
+    out_dir = RUNTIME_OUT_SUBDIR
     scaling_data: list[RuntimeScalingLogData] = []
 
     for log_file in log_files:
@@ -670,7 +664,7 @@ def _create_scaling_plot(
     scaling_data: list[ScalingLogData],
     timer_ids: list[str],
     timer_db: dict[str, TimerDef],
-    output_path: str | None,
+    output_path: str | Path | None,
     prefix: str | None,
     show_plot: bool,
     out_dir: str,
@@ -1156,7 +1150,7 @@ def _create_timer_rank_scaling_plot(
     timer_id: str,
     timer_db: dict[str, TimerDef],
     ranks: list[int],
-    output_path: str | None,
+    output_path: str | Path | None,
     prefix: str | None,
     show_plot: bool,
     out_dir: str,
@@ -1338,7 +1332,7 @@ def _compute_speedup_series(y_values: list[float]) -> list[float]:
 
 def _create_runtime_scaling_plot(
     scaling_data: list[RuntimeScalingLogData],
-    output_path: str | None,
+    output_path: str | Path | None,
     prefix: str | None,
     show_plot: bool,
     out_dir: str,

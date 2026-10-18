@@ -1,10 +1,13 @@
 """Unit tests for CLI module."""
 
+import argparse
+import subprocess
 from unittest.mock import Mock, patch
 
 import pytest
 
 from swiftsim_cli.cli import main
+from swiftsim_cli.profile import ProfileError
 
 
 class TestCLI:
@@ -100,3 +103,69 @@ class TestCLI:
         with patch("swiftsim_cli.cli.MODE_MODULES", {"analyse": mock_module}):
             with pytest.raises(Exception):
                 main(["analyse", "timesteps", "test.log"])
+
+
+def _run_main_raising(exc, monkeypatch, debug=False):
+    """Run main() with a single mode whose run() raises ``exc``."""
+    multi_args = Mock()
+    multi_args.global_args.debug = debug
+    multi_args.modes = [("make", Mock(params=None))]
+    module = Mock()
+    module.run.side_effect = exc
+    monkeypatch.setattr(
+        "swiftsim_cli.cli.MultiModeCLIArgs", lambda _: multi_args
+    )
+    monkeypatch.setattr("swiftsim_cli.cli.MODE_MODULES", {"make": module})
+    main(["make"])
+
+
+@pytest.mark.parametrize(
+    ("exc", "code", "message"),
+    [
+        (ValueError("bad value"), 1, "bad value"),
+        (ProfileError("no profile"), 1, "no profile"),
+        (FileNotFoundError("missing.txt"), 1, "missing.txt"),
+        (FileExistsError("exists.txt"), 1, "exists.txt"),
+        (NotADirectoryError("notdir"), 1, "notdir"),
+        (PermissionError("denied"), 1, "denied"),
+        (argparse.ArgumentTypeError("bad arg"), 1, "bad arg"),
+        (subprocess.CalledProcessError(3, ["make"]), 3, "'['make']'"),
+        (subprocess.CalledProcessError(-9, ["make"]), 137, "SIGKILL"),
+        (KeyboardInterrupt(), 130, "interrupted"),
+    ],
+)
+def test_main_reports_user_errors(exc, code, message, monkeypatch, capsys):
+    """User-facing errors print 'error: <message>' and set the exit code."""
+    monkeypatch.delenv("SWIFT_CLI_DEBUG", raising=False)
+    with pytest.raises(SystemExit) as excinfo:
+        _run_main_raising(exc, monkeypatch)
+    assert excinfo.value.code == code
+    err = capsys.readouterr().err
+    assert err.startswith("error: ")
+    assert message in err
+
+
+def test_main_debug_flag_reraises(monkeypatch):
+    """--debug shows the original exception instead of a message."""
+    monkeypatch.delenv("SWIFT_CLI_DEBUG", raising=False)
+    with pytest.raises(ValueError, match="bad value"):
+        _run_main_raising(ValueError("bad value"), monkeypatch, debug=True)
+
+
+def test_main_debug_env_reraises(monkeypatch):
+    """SWIFT_CLI_DEBUG=1 shows the original exception too."""
+    monkeypatch.setenv("SWIFT_CLI_DEBUG", "1")
+    with pytest.raises(KeyboardInterrupt):
+        _run_main_raising(KeyboardInterrupt(), monkeypatch)
+
+
+def test_main_debug_flag_end_to_end(tmp_path, capsys):
+    """The real parser wires --debug through to main()."""
+    missing = tmp_path / "missing.yml"
+    with pytest.raises(SystemExit) as excinfo:
+        main(["output-times", "-P", str(missing)])
+    assert excinfo.value.code == 1
+    assert "error: Parameter file not found" in capsys.readouterr().err
+
+    with pytest.raises(FileNotFoundError):
+        main(["--debug", "output-times", "-P", str(missing)])

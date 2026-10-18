@@ -14,6 +14,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from tqdm.auto import tqdm  # type: ignore[import-untyped]
 
+from swiftsim_cli.modes.common_args import add_output_arguments
 from swiftsim_cli.utilities.io import create_output_path
 from swiftsim_cli.utilities.plotting import save_figure
 from swiftsim_cli.utilities.tables import create_ascii_table
@@ -27,6 +28,10 @@ __all__ = [
     "run_swift_task_plots",
     "analyse_swift_task_plots",
 ]
+
+
+# Subdirectory of --out that the outputs are written to
+OUT_SUBDIR = "task_plots_analysis"
 
 
 @dataclass(frozen=True)
@@ -45,7 +50,7 @@ def add_task_plots_arguments(subparsers) -> None:
     parser = subparsers.add_parser(
         "task-plots",
         help=(
-            "Plot SWIFT threadpool and task-debug timings on a shared "
+            "Plot SWIFT task-debug and threadpool timings on a shared "
             "wall-clock axis."
         ),
     )
@@ -80,31 +85,32 @@ def add_task_plots_arguments(subparsers) -> None:
         "--limit",
         type=float,
         default=0.0,
-        help="Upper time limit in ms. Defaults to the data range.",
+        help="Upper time limit in ms (default: the data range).",
     )
     parser.add_argument(
         "--mintic",
         type=int,
         default=None,
-        help="Absolute tick to use as the shared start time.",
+        help="Absolute tick to use as the shared start time "
+        "(default: the earliest tick).",
     )
     parser.add_argument(
         "--expand",
         type=int,
         default=1,
-        help="Expansion factor for each thread lane.",
+        help="Expansion factor for each thread lane (default: 1).",
     )
     parser.add_argument(
         "--width",
         type=float,
         default=16.0,
-        help="Figure width in inches.",
+        help="Figure width in inches (default: 16).",
     )
     parser.add_argument(
         "--height",
         type=float,
         default=10.0,
-        help="Figure height in inches.",
+        help="Figure height in inches (default: 10).",
     )
     parser.add_argument(
         "--no-legend",
@@ -112,26 +118,7 @@ def add_task_plots_arguments(subparsers) -> None:
         default=False,
         help="Suppress legends on generated figures.",
     )
-    parser.add_argument(
-        "--show",
-        action="store_true",
-        default=False,
-        help="Show the generated figures interactively.",
-    )
-    parser.add_argument(
-        "--output-path",
-        "-o",
-        type=Path,
-        default=None,
-        help="Where to save the analysis outputs.",
-    )
-    parser.add_argument(
-        "--prefix",
-        "-p",
-        type=str,
-        default=None,
-        help="Optional filename prefix for generated outputs.",
-    )
+    add_output_arguments(parser, OUT_SUBDIR)
     parser.add_argument(
         "--task",
         type=str,
@@ -174,7 +161,12 @@ def add_task_plots_arguments(subparsers) -> None:
         default=None,
         help="Include tasks whose cj cell has this subtype.",
     )
-    parser.add_argument("--depth", type=int, default=None)
+    parser.add_argument(
+        "--depth",
+        type=int,
+        default=None,
+        help="Include tasks where either cell is at this tree depth.",
+    )
     parser.add_argument(
         "--activity-plot",
         action="store_true",
@@ -194,7 +186,7 @@ def run_swift_task_plots(args: argparse.Namespace) -> None:
     analyse_swift_task_plots(
         task_file=args.task_file,
         threadpool_file=args.threadpool_file,
-        output_path=args.output_path,
+        output_path=args.out,
         prefix=args.prefix,
         rank=args.rank,
         limit=args.limit,
@@ -248,11 +240,7 @@ def analyse_swift_task_plots(
     filter_suffix = _task_filter_suffix(task_filter)
     output_root = str(output_path) if output_path is not None else None
     output_prefix = prefix or _step_prefix(task_file, threadpool_file)
-    out_dir = (
-        f"{output_prefix}_task_plots_analysis"
-        if output_prefix
-        else "task_plots_analysis"
-    )
+    out_dir = OUT_SUBDIR
 
     for current_rank in ranks:
         task_records = task_data.get_rank_records(current_rank, task_filter)

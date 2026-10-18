@@ -12,6 +12,7 @@ from swiftsim_cli.cosmology import (
     convert_time_to_redshift,
     get_cosmology,
 )
+from swiftsim_cli.modes.common_args import add_params_argument
 from swiftsim_cli.params import load_parameters
 
 # Times are ages of the Universe in Gyr when a cosmology is available (the
@@ -26,21 +27,16 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     """Add arguments for the 'output-times' mode."""
     # We always need the output file
     parser.add_argument(
-        "--out",
         "-o",
-        default="output_list.txt",
-        help="Output file for the list of times.",
+        "--out",
+        type=Path,
+        default=Path("output_list.txt"),
+        help="File to write the list of times to (default: output_list.txt).",
     )
 
     # We can optionally provide a parameter file, this will be used to
     # get cosmology parameters and other settings.
-    parser.add_argument(
-        "-p",
-        "--params",
-        type=Path,
-        help="Path to a parameter file.",
-        default=None,
-    )
+    add_params_argument(parser)
 
     # We will always need one definition of the first snapshot but this can be
     # defined in terms of redshift, time, or scale factor.
@@ -210,7 +206,7 @@ def _get_out_list_log_scale_factor(
 
 
 def write_output_list(
-    out_file: str,
+    out_file: str | Path,
     snapshot_times: np.ndarray,
     snipshot_times: np.ndarray,
     doing_z: bool = False,

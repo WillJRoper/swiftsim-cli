@@ -121,7 +121,9 @@ def test_analyse_force_checks_with_shuffled_ids(tmp_path, capsys):
 
     out = capsys.readouterr().out
     assert "median: 0.00000" in out
-    assert (tmp_path / "gravity_checks.png").exists()
+    assert (
+        tmp_path / "gravity_checks_analysis" / "gravity_checks.png"
+    ).exists()
 
 
 def test_analyse_force_checks_does_not_leak_rcparams(tmp_path):

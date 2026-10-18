@@ -164,7 +164,7 @@ class TestSofteningsEndToEnd:
         params = tmp_path / "params.yml"
         params.write_text("Cosmology:\n  a_begin: 0.1\n")
 
-        main(["utils", "softenings", "--ics", str(ics), "-p", str(params)])
+        main(["utils", "softenings", "--ics", str(ics), "-P", str(params)])
 
         out = capsys.readouterr().out
         assert "a_begin=0.1, z_begin=9" in out

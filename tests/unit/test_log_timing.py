@@ -651,7 +651,7 @@ class TestRunSwiftLogTiming:
         # Create args
         args = Mock()
         args.log_file = log_file
-        args.output_path = tmp_path
+        args.out = tmp_path
         args.prefix = "test"
         args.show = False
         args.top_n = 20
@@ -748,9 +748,7 @@ class TestAnalyseSwiftLogTimingsWithMocks:
         mock_load_nesting.assert_called_once()
         mock_scan_log.assert_called_once()
         mock_classify.assert_called_once()
-        report_path = (
-            tmp_path / "test_runtime_analysis" / "test_analysis_tables.txt"
-        )
+        report_path = tmp_path / "log_analysis" / "test_analysis_tables.txt"
         assert report_path.exists()
         assert "TOP FUNCTION TIMERS" in report_path.read_text(encoding="utf-8")
 

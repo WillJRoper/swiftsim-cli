@@ -13,6 +13,10 @@ from swiftsim_cli.swiftsim_dir import (
 
 def add_arguments(parser: argparse.ArgumentParser) -> None:
     """Add arguments for configuring SWIFT itself."""
+    parser.epilog = (
+        "Any other --<option> flags are passed to ./configure after being "
+        "checked against its options (list them with --show)."
+    )
     # Show the configuration options (equivalent to running
     # `./configure --help`).
     parser.add_argument(

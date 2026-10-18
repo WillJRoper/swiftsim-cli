@@ -153,7 +153,7 @@ class TestRunSwiftMpiuse:
         args = Mock()
         args.inputs = ["/tmp/run_a", "/tmp/run_b"]
         args.labels = ["a", "b"]
-        args.output_path = Path("/output")
+        args.out = Path("/output")
         args.prefix = "cmp"
         args.show = True
         args.subtypes = ["gpart"]
@@ -166,7 +166,7 @@ class TestRunSwiftMpiuse:
         mock_analyse.assert_called_once_with(
             inputs=["/tmp/run_a", "/tmp/run_b"],
             labels=["a", "b"],
-            output_path="/output",
+            output_path=Path("/output"),
             prefix="cmp",
             show_plot=True,
             subtype_filter=["gpart"],
@@ -295,7 +295,7 @@ class TestAnalyseSwiftMpiuse:
             output_format="both",
         )
 
-        out_dir = tmp_path / "t_mpiuse_analysis"
+        out_dir = tmp_path / "mpiuse_analysis"
         assert (out_dir / "t_mpiuse_total_bytes_per_step.png").exists()
         assert (out_dir / "t_mpiuse_total_count_per_step.png").exists()
         assert (out_dir / "t_mpiuse_bytes_by_subtype.png").exists()
@@ -332,7 +332,7 @@ class TestAnalyseSwiftMpiuse:
         assert "Δ bytes (branch)" in captured.out
 
         comparison = (
-            tmp_path / "cmp_mpiuse_analysis" / "cmp_mpiuse_comparison.txt"
+            tmp_path / "mpiuse_analysis" / "cmp_mpiuse_comparison.txt"
         ).read_text(encoding="utf-8")
         assert "master bytes" in comparison
         assert "Δ % (branch)" in comparison

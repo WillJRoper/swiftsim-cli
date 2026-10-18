@@ -11,13 +11,18 @@ Key functions:
 
 import argparse
 import math
-from typing import Any
+from pathlib import Path
+from typing import Any, Sequence
 
 import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.lines import Line2D
 
+from swiftsim_cli.modes.common_args import (
+    add_labels_argument,
+    add_output_arguments,
+)
 from swiftsim_cli.utilities.io import create_output_path
 from swiftsim_cli.utilities.plotting import save_figure
 from swiftsim_cli.utilities.step_table import (
@@ -29,6 +34,9 @@ from swiftsim_cli.utilities.tables import create_ascii_table
 
 tab10 = matplotlib.colormaps["tab10"]
 
+# Subdirectory of --out that the outputs are written to
+OUT_SUBDIR = "timesteps_analysis"
+
 _TIMESTEP_LABEL_ALIASES = {
     "Time": "Time [Internal Units]",
     "Scale-factor": "Scale factor",
@@ -38,61 +46,32 @@ _TIMESTEP_LABEL_ALIASES = {
 def add_timestep_arguments(subparsers) -> None:
     """Add timestep analysis arguments to the subparser."""
     timestep_parser = subparsers.add_parser(
-        "timesteps", help="Analyse timestep files"
+        "timesteps", help="Plot the timestep files of one or more runs."
     )
 
     timestep_parser.add_argument(
         "files",
         nargs="+",
-        help="List of timestep files to analyse and produce a plot for.",
-        type=str,
+        help="Timestep files to analyse.",
+        type=Path,
     )
-
-    timestep_parser.add_argument(
-        "--labels",
-        "-l",
-        nargs="+",
-        help="Labels for the files (same order as files).",
-        type=str,
-        required=True,
-    )
+    add_labels_argument(timestep_parser, required=True)
 
     timestep_parser.add_argument(
         "--time-column",
         help=(
             "Zero-based column index to use for the x-axis. "
-            "Use 1 for internal time, 2 for scale factor."
+            "Use 1 for internal time, 2 for scale factor (default: 2)."
         ),
         type=int,
         default=2,
     )
 
-    timestep_parser.add_argument(
-        "--output-path",
-        "-o",
-        help="Output path for the plot.",
-        type=str,
-        default=None,
-    )
-
-    timestep_parser.add_argument(
-        "--prefix",
-        "-p",
-        help="Prefix for the output files.",
-        type=str,
-        default=None,
-    )
-
-    timestep_parser.add_argument(
-        "--show-plot",
-        help="Show the plot after saving.",
-        action="store_true",
-        default=False,
-    )
+    add_output_arguments(timestep_parser, OUT_SUBDIR)
 
     timestep_parser.add_argument(
         "--match-runtimes",
-        help=("Trim each input to the x-axis extent of the shortest dataset."),
+        help="Trim each input to the x-axis extent of the shortest dataset.",
         action="store_true",
         default=False,
     )
@@ -102,7 +81,7 @@ def add_timestep_arguments(subparsers) -> None:
         nargs="+",
         help=(
             "Number of threads used by each run, in the same order as files. "
-            "When provided, the time axis is converted to CPU time."
+            "When given, wall-clock and dead time are converted to CPU time."
         ),
         type=int,
         default=None,
@@ -114,9 +93,9 @@ def run_timestep(args: argparse.Namespace) -> None:
     analyse_timestep_files(
         args.files,
         args.labels,
-        output_path=args.output_path,
+        output_path=args.out,
         prefix=args.prefix,
-        show_plot=args.show_plot,
+        show_plot=args.show,
         time_column=args.time_column,
         match_runtimes=args.match_runtimes,
         nthreads=args.nthreads,
@@ -139,12 +118,12 @@ def _normalise_timestep_label(label: str) -> str:
 
 
 def analyse_timestep_files(
-    files: list[str],
+    files: Sequence[str | Path],
     labels: list[str],
     plot_time: bool | None = None,
-    output_path: str | None = None,
+    output_path: str | Path | None = None,
     prefix: str | None = None,
-    show_plot: bool = True,
+    show_plot: bool = False,
     time_column: int | None = None,
     match_runtimes: bool = False,
     nthreads: list[int] | None = None,
@@ -156,10 +135,9 @@ def analyse_timestep_files(
         labels: List of labels for the runs.
         plot_time: Deprecated compatibility flag. If provided, True selects the
             internal-time column and False selects the scale-factor column.
-        output_path: Optional path to save the plot. If None, the plot is saved
-            to the current directory.
-        prefix: Optional prefix to add to the output filename. If None,
-            the default filename is determined by create_output_path.
+        output_path: Directory whose ``timesteps_analysis`` subdirectory
+            receives the plot. If None, the current directory is used.
+        prefix: Optional prefix to add to the output filename.
         show_plot: Whether to display the plot.
         time_column: Zero-based column index to use for the x-axis. Defaults
             to 2, which is the scale-factor column in the timestep table.
@@ -412,7 +390,7 @@ def analyse_timestep_files(
         plt.tight_layout()
 
     output_file = create_output_path(
-        output_path, prefix, "timestep_analysis.png"
+        output_path, prefix, "timestep_analysis.png", OUT_SUBDIR
     )
     save_figure(fig, output_file, show=show_plot)
     print(f"Plot saved to {output_file}")

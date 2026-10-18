@@ -9,14 +9,13 @@ from . import (
     new,
     output_times,
     profile,
-    scaling,
     show,
     switch,
     update,
     utils,
 )
 
-# Available modes for swift-utils CLI
+# Available modes for the swift-cli CLI
 AVAILABLE_MODES = [
     "profile",
     "config",
@@ -26,7 +25,6 @@ AVAILABLE_MODES = [
     "make",
     "new",
     "analyse",
-    "scaling",
     "show",
     "utils",
 ]
@@ -41,12 +39,26 @@ Mode = Literal[
     "make",
     "new",
     "analyse",
-    "scaling",
     "show",
     "utils",
 ]
 
-# Mode module imports
+# One-line description of each mode, shown by 'swift-cli --help' and at the
+# top of 'swift-cli <mode> --help'
+MODE_DESCRIPTIONS = {
+    "profile": "Manage SWIFT profiles (one git worktree, branch and build "
+    "each).",
+    "config": "Set the current profile's configure flags and reconfigure.",
+    "output-times": "Generate a list of snapshot (and snipshot) output "
+    "times.",
+    "update": "Pull and rebuild the current profile.",
+    "switch": "Make another profile the current one.",
+    "make": "Compile the current profile.",
+    "new": "Create a new simulation run directory.",
+    "analyse": "Analyse SWIFT logs and diagnostic outputs.",
+    "show": "Show the current profile (and optionally its cosmology).",
+    "utils": "Run small helper calculations (e.g. softenings).",
+}
 
 # Mapping of mode names to their modules
 MODE_MODULES = {
@@ -58,7 +70,6 @@ MODE_MODULES = {
     "make": make,
     "new": new,
     "analyse": analyse,
-    "scaling": scaling,
     "show": show,
     "utils": utils,
 }

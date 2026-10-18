@@ -14,10 +14,17 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.colors import LogNorm
 
+from swiftsim_cli.modes.common_args import (
+    add_labels_argument,
+    add_output_arguments,
+)
 from swiftsim_cli.utilities.io import create_output_path
 from swiftsim_cli.utilities.plotting import save_figure
 
 from .gravity_checks import _find_counterpart_file, _load_force_pair
+
+# Subdirectory of --out that the outputs are written to
+OUT_SUBDIR = "gravity_error_maps_analysis"
 
 
 def add_gravity_error_maps_arguments(
@@ -30,47 +37,17 @@ def add_gravity_error_maps_arguments(
     """
     error_map_parser = subparsers.add_parser(
         "gravity-error-maps",
-        help="Create hexbin error maps for gravity check files",
+        help="Create hexbin error maps for gravity check files.",
     )
 
     error_map_parser.add_argument(
         "files",
         nargs="+",
-        help="List of gravity check files to analyse (exact or SWIFT files).",
+        help="Gravity check files to analyse (either exact or SWIFT files).",
         type=Path,
     )
-
-    error_map_parser.add_argument(
-        "--labels",
-        "-l",
-        nargs="+",
-        required=True,
-        help="List of labels for the runs being analysed.",
-        type=str,
-    )
-
-    error_map_parser.add_argument(
-        "--output-path",
-        "-o",
-        type=Path,
-        help="Where to save analysis (default: current directory).",
-        default=None,
-    )
-
-    error_map_parser.add_argument(
-        "--prefix",
-        "-p",
-        type=str,
-        help="A prefix to add to the analysis files (default: '').",
-        default="",
-    )
-
-    error_map_parser.add_argument(
-        "--show",
-        action="store_true",
-        help="Show the plot interactively.",
-        default=False,
-    )
+    add_labels_argument(error_map_parser, required=True)
+    add_output_arguments(error_map_parser, OUT_SUBDIR)
 
     error_map_parser.add_argument(
         "--resolution",
@@ -98,7 +75,7 @@ def run_gravity_error_maps(args: argparse.Namespace) -> None:
     analyse_gravity_error_maps(
         files=args.files,
         labels=args.labels,
-        output_path=args.output_path,
+        output_path=args.out,
         prefix=args.prefix,
         show_plot=args.show,
         resolution=args.resolution,
@@ -111,7 +88,7 @@ def analyse_gravity_error_maps(
     labels: List[str],
     output_path: Optional[Union[str, Path]] = None,
     prefix: Optional[str] = None,
-    show_plot: bool = True,
+    show_plot: bool = False,
     resolution: int = 100,
     error_thresh: float = 1e-2,
 ) -> None:
@@ -133,10 +110,10 @@ def analyse_gravity_error_maps(
                The function will automatically find the counterpart files.
         labels: List of labels for the runs being analysed. Must match the
                 number of files.
-        output_path: Optional path to save the plot. If None, saves to current
-                    directory.
-        prefix: Optional prefix to add to the output filename. If empty,
-                defaults to 'gravity_error_map.png'.
+        output_path: Directory whose ``gravity_error_maps_analysis``
+            subdirectory receives the plots. If None, the current directory
+            is used.
+        prefix: Optional prefix to add to the output filenames.
         show_plot: Whether to display the plot interactively.
         resolution: Resolution (gridsize) for hexbin plot. Higher values
                    provide more detail but take longer to compute.
@@ -327,9 +304,10 @@ def _create_continuous_error_map(
     # Save the figure
     safe_label = label.replace(" ", "_").replace("/", "_")
     png_file = create_output_path(
-        str(output_path) if output_path is not None else None,
+        output_path,
         prefix,
         f"gravity_error_map_{safe_label}.png",
+        OUT_SUBDIR,
     )
 
     save_figure(fig, png_file, show=show_plot, dpi=200)
@@ -456,9 +434,10 @@ def _create_threshold_error_map(
     # Save the figure
     safe_label = label.replace(" ", "_").replace("/", "_")
     png_file = create_output_path(
-        str(output_path) if output_path is not None else None,
+        output_path,
         prefix,
         f"gravity_binary_error_map_{safe_label}.png",
+        OUT_SUBDIR,
     )
 
     save_figure(fig, png_file, show=show_plot, dpi=200)

@@ -14,6 +14,11 @@ import pandas as pd  # type: ignore[import-untyped]
 from matplotlib.axes import Axes
 from pandas.errors import EmptyDataError  # type: ignore[import-untyped]
 
+from swiftsim_cli.modes.common_args import (
+    add_labels_argument,
+    add_output_arguments,
+    add_steps_argument,
+)
 from swiftsim_cli.utilities.io import create_output_path, slugify
 from swiftsim_cli.utilities.plotting import save_figure, should_use_log_scale
 from swiftsim_cli.utilities.tables import create_ascii_table
@@ -59,6 +64,9 @@ class MpiuseData(TypedDict):
     per_rank_totals: pd.DataFrame | None
 
 
+# Subdirectory of --out that the outputs are written to
+OUT_SUBDIR = "mpiuse_analysis"
+
 __all__ = [
     "add_mpiuse_arguments",
     "run_swift_mpiuse",
@@ -71,8 +79,8 @@ def add_mpiuse_arguments(subparsers) -> None:
     mpiuse_parser = subparsers.add_parser(
         "mpiuse",
         help=(
-            "Analyse SWIFT mpiuse_report-rank*-step*.dat files and "
-            "compare communication volume across one or more inputs."
+            "Analyse SWIFT mpiuse_report-rank*-step*.dat files and compare "
+            "communication volume across inputs."
         ),
     )
 
@@ -85,49 +93,16 @@ def add_mpiuse_arguments(subparsers) -> None:
         ),
         type=str,
     )
-    mpiuse_parser.add_argument(
-        "--labels",
-        "-l",
-        nargs="+",
-        help="Labels for each input (same order as inputs).",
-        type=str,
-        default=None,
-    )
-    mpiuse_parser.add_argument(
-        "--output-path",
-        "-o",
-        type=Path,
-        help="Where to save analysis outputs (default: current directory).",
-        default=None,
-    )
-    mpiuse_parser.add_argument(
-        "--prefix",
-        "-p",
-        type=str,
-        help="Prefix for output files and output directory.",
-        default=None,
-    )
-    mpiuse_parser.add_argument(
-        "--show",
-        action="store_true",
-        help="Show the plots interactively.",
-        default=False,
-    )
+    add_labels_argument(mpiuse_parser)
+    add_output_arguments(mpiuse_parser, OUT_SUBDIR)
     mpiuse_parser.add_argument(
         "--subtypes",
         nargs="+",
         type=str,
-        help="Optional subtype filter (for example: gpart grav_counts).",
+        help="Subtypes to include, e.g. gpart grav_counts (default: all).",
         default=None,
     )
-    mpiuse_parser.add_argument(
-        "--steps",
-        nargs=2,
-        type=int,
-        metavar=("START", "END"),
-        help="Inclusive step range to analyse.",
-        default=None,
-    )
+    add_steps_argument(mpiuse_parser)
     mpiuse_parser.add_argument(
         "--per-rank",
         action="store_true",
@@ -138,7 +113,7 @@ def add_mpiuse_arguments(subparsers) -> None:
         "--format",
         choices=("ascii", "csv", "both"),
         default="ascii",
-        help="Write ASCII tables, CSV output, or both.",
+        help="Write ASCII tables, CSV output, or both (default: ascii).",
     )
 
 
@@ -151,7 +126,7 @@ def run_swift_mpiuse(args: argparse.Namespace) -> None:
     analyse_swift_mpiuse(
         inputs=args.inputs,
         labels=args.labels,
-        output_path=str(args.output_path) if args.output_path else None,
+        output_path=args.out,
         prefix=args.prefix,
         show_plot=args.show,
         subtype_filter=args.subtypes,
@@ -164,9 +139,9 @@ def run_swift_mpiuse(args: argparse.Namespace) -> None:
 def analyse_swift_mpiuse(
     inputs: list[str],
     labels: list[str] | None = None,
-    output_path: str | None = None,
+    output_path: str | Path | None = None,
     prefix: str | None = None,
-    show_plot: bool = True,
+    show_plot: bool = False,
     subtype_filter: list[str] | None = None,
     step_range: tuple[int, int] | None = None,
     per_rank: bool = False,
@@ -177,8 +152,9 @@ def analyse_swift_mpiuse(
     Args:
         inputs: Input directories, glob patterns, or files to analyse.
         labels: Optional labels matching ``inputs``.
-        output_path: Directory where output files should be written.
-        prefix: Optional prefix for files and output directory.
+        output_path: Directory whose ``mpiuse_analysis`` subdirectory
+            receives the outputs. If None, the current directory is used.
+        prefix: Optional prefix added to each output filename.
         show_plot: Whether to display plots interactively.
         subtype_filter: Optional subtype names to include.
         step_range: Optional inclusive ``(start, end)`` step range.
@@ -199,9 +175,7 @@ def analyse_swift_mpiuse(
     if labels is None:
         labels = [_derive_label(input_path) for input_path in inputs]
 
-    out_dir = (
-        "mpiuse_analysis" if prefix is None else f"{prefix}_mpiuse_analysis"
-    )
+    out_dir = OUT_SUBDIR
     markers = ["o", "s", "^", "D", "v", "<", ">", "p", "*", "h"]
     cmap = matplotlib.colormaps["tab20"]
 
@@ -750,7 +724,7 @@ def _lookup_subtype_value(data: MpiuseData, key: tuple[str, str]) -> int:
 
 def _write_csv(
     rows: list[pd.DataFrame],
-    output_path: str | None,
+    output_path: str | Path | None,
     prefix: str | None,
     out_dir: str,
 ) -> None:
@@ -775,7 +749,7 @@ def _plot_step_series(
     value_column: str,
     colors: Any,
     markers: list[str],
-    output_path: str | None,
+    output_path: str | Path | None,
     prefix: str | None,
     out_dir: str,
     show_plot: bool,
@@ -820,7 +794,7 @@ def _plot_step_series(
 def _plot_subtype_bars(
     all_data: list[MpiuseData],
     colors: Any,
-    output_path: str | None,
+    output_path: str | Path | None,
     prefix: str | None,
     out_dir: str,
     show_plot: bool,
@@ -910,7 +884,7 @@ def _gpart_bytes_per_step(data: MpiuseData) -> pd.DataFrame:
 
 def _plot_per_rank_totals(
     all_data: list[MpiuseData],
-    output_path: str | None,
+    output_path: str | Path | None,
     prefix: str | None,
     out_dir: str,
     show_plot: bool,

@@ -248,18 +248,14 @@ class TestTaskPlotsMode:
         )
 
         assert (
-            output_dir
-            / "demo_task_plots_analysis"
-            / "demo_task_plots_rank0.png"
+            output_dir / "task_plots_analysis" / "demo_task_plots_rank0.png"
+        ).exists()
+        assert (
+            output_dir / "task_plots_analysis" / "demo_task_plots_rank1.png"
         ).exists()
         assert (
             output_dir
-            / "demo_task_plots_analysis"
-            / "demo_task_plots_rank1.png"
-        ).exists()
-        assert (
-            output_dir
-            / "demo_task_plots_analysis"
+            / "task_plots_analysis"
             / "demo_task_timing_tables_rank0.txt"
         ).exists()
 
@@ -279,9 +275,7 @@ class TestTaskPlotsMode:
         )
 
         assert (
-            output_dir
-            / "step3_task_plots_analysis"
-            / "step3_task_plots_rank0.png"
+            output_dir / "task_plots_analysis" / "step3_task_plots_rank0.png"
         ).exists()
 
     def test_timing_report_includes_task_and_cell_breakdowns(self, tmp_path):
@@ -302,7 +296,7 @@ class TestTaskPlotsMode:
 
         report = (
             output_dir
-            / "demo_task_plots_analysis"
+            / "task_plots_analysis"
             / "demo_task_timing_tables_rank0.txt"
         ).read_text()
         assert "TASK TYPE TIMING" in report
@@ -344,12 +338,12 @@ class TestTaskPlotsMode:
 
         assert (
             output_dir
-            / "demo_task_plots_analysis"
+            / "task_plots_analysis"
             / "demo_task_plots_rank0_ci1.png"
         ).exists()
         assert (
             output_dir
-            / "demo_task_plots_analysis"
+            / "task_plots_analysis"
             / "demo_task_activity_rank0_ci1.png"
         ).exists()
 
@@ -478,7 +472,7 @@ class TestThreadpoolRankMatching:
         assert (
             tmp_path
             / "out"
-            / "demo_task_plots_analysis"
+            / "task_plots_analysis"
             / "demo_task_plots_rank1.png"
         ).exists()
 

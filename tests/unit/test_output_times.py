@@ -1,6 +1,7 @@
 """Tests for the output_times module."""
 
 import argparse
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -501,13 +502,13 @@ def test_add_arguments():
 
     # Test with defaults
     args = parser.parse_args([])
-    assert args.out == "output_list.txt"
+    assert args.out == Path("output_list.txt")
     assert args.params is None
     assert args.first_snap_z is None
 
     # Test with some arguments
     args = parser.parse_args(["--out", "test.txt", "--first-snap-z", "10.0"])
-    assert args.out == "test.txt"
+    assert args.out == Path("test.txt")
     assert args.first_snap_z == 10.0
 
 

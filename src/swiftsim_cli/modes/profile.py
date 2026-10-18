@@ -10,6 +10,7 @@ from typing import Any
 from ruamel.yaml import YAML
 
 from swiftsim_cli import profile as profile_mod
+from swiftsim_cli.modes.common_args import add_nr_threads_argument
 from swiftsim_cli.profile import (
     ProfileError,
     ProfileStore,
@@ -135,12 +136,10 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         action="store_true",
         help="Also configure and build the profile created with --new.",
     )
-    parser.add_argument(
-        "--nr-threads",
-        "-j",
-        type=int,
-        default=1,
-        help="Number of make threads for --build/--update/--update-all.",
+    add_nr_threads_argument(
+        parser,
+        help="Number of make threads for --build, --update and --update-all "
+        "(default: 1).",
     )
 
 

@@ -56,5 +56,6 @@ def test_analyse_gravity_error_maps_with_shuffled_ids(tmp_path):
         resolution=5,
     )
 
-    assert (tmp_path / "gravity_error_map_my_run.png").exists()
-    assert (tmp_path / "gravity_binary_error_map_my_run.png").exists()
+    out_dir = tmp_path / "gravity_error_maps_analysis"
+    assert (out_dir / "gravity_error_map_my_run.png").exists()
+    assert (out_dir / "gravity_binary_error_map_my_run.png").exists()

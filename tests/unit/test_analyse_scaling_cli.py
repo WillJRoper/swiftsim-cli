@@ -1,4 +1,4 @@
-"""Tests for the top-level scaling mode."""
+"""Tests for the analyse scaling subcommand CLI."""
 
 from __future__ import annotations
 
@@ -8,7 +8,14 @@ from unittest.mock import patch
 
 import pytest
 
-from swiftsim_cli.modes import scaling
+from swiftsim_cli.modes.analyse import scaling
+
+
+def _scaling_parser() -> ArgumentParser:
+    """Return a parser accepting ``scaling <timers|runtime> ...``."""
+    parser = ArgumentParser()
+    scaling.add_scaling_arguments(parser.add_subparsers(dest="analysis"))
+    return parser
 
 
 class TestScalingArguments:
@@ -16,11 +23,11 @@ class TestScalingArguments:
 
     def test_add_arguments_for_timers(self):
         """The timers subcommand accepts the expected options."""
-        parser = ArgumentParser()
-        scaling.add_arguments(parser)
+        parser = _scaling_parser()
 
         args = parser.parse_args(
             [
+                "scaling",
                 "timers",
                 "a.log",
                 "b.log",
@@ -39,10 +46,11 @@ class TestScalingArguments:
 
     def test_add_arguments_for_runtime(self):
         """The runtime subcommand accepts the shared scaling options."""
-        parser = ArgumentParser()
-        scaling.add_arguments(parser)
+        parser = _scaling_parser()
 
-        args = parser.parse_args(["runtime", "a.log", "b.log", "--show"])
+        args = parser.parse_args(
+            ["scaling", "runtime", "a.log", "b.log", "--show"]
+        )
 
         assert args.scaling_type == "runtime"
         assert args.log_files == [Path("a.log"), Path("b.log")]
@@ -53,21 +61,21 @@ class TestScalingArguments:
 class TestScalingRun:
     """Tests for scaling subcommand dispatch."""
 
-    @patch("swiftsim_cli.modes.scaling.run_swift_scaling")
+    @patch("swiftsim_cli.modes.analyse.scaling.run_swift_scaling")
     def test_run_timers(self, mock_run_timers):
         """Timer scaling dispatches to the detailed timer implementation."""
         args = Namespace(scaling_type="timers")
 
-        scaling.run(args)
+        scaling.run_scaling(args)
 
         mock_run_timers.assert_called_once_with(args)
 
-    @patch("swiftsim_cli.modes.scaling.run_swift_runtime_scaling")
+    @patch("swiftsim_cli.modes.analyse.scaling.run_swift_runtime_scaling")
     def test_run_runtime(self, mock_run_runtime):
         """Runtime scaling dispatches to the runtime implementation."""
         args = Namespace(scaling_type="runtime")
 
-        scaling.run(args)
+        scaling.run_scaling(args)
 
         mock_run_runtime.assert_called_once_with(args)
 
@@ -76,7 +84,7 @@ class TestScalingRun:
         args = Namespace(scaling_type="unknown")
 
         with pytest.raises(ValueError, match="Unknown scaling type"):
-            scaling.run(args)
+            scaling.run_scaling(args)
 
 
 def test_extract_total_runtime_from_log(tmp_path: Path):

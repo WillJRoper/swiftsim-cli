@@ -8,6 +8,13 @@ simulation data:
 - Error maps: Gravity error visualization and mapping
 - Log timing: Performance profiling and timing analysis with plots
 - Task counts: Analyse engine_print_task_counts output for task distribution
+- MPI use: Analyse mpiuse reports for communication volume
+- Task plots: Plot task-debug and threadpool timelines
+- Scaling: Analyse timer and runtime scaling across MPI rank counts
+
+Every subcommand writes its files into ``<--out>/<subcommand>_analysis/``
+(``--out`` defaults to the current directory), with ``--prefix``
+prepended once to each filename.
 
 Each analysis type is implemented in its own submodule for better organization
 and maintainability.
@@ -20,16 +27,22 @@ from .gravity_error_maps import run_gravity_error_maps
 from .log_task_counts import run_swift_task_counts
 from .log_timing import run_swift_log_timing
 from .mpiuse import run_swift_mpiuse
+from .scaling import run_scaling
 from .task_plots import run_swift_task_plots
 from .timesteps import run_timestep
 
 
 def add_arguments(parser: argparse.ArgumentParser) -> None:
     """Add arguments for the 'analyse' mode with subparsers."""
+    parser.epilog = (
+        "Each analysis writes its files into <out>/<analysis>_analysis/ "
+        "(-o/--out, default: the current directory), with -p/--prefix "
+        "prepended to each filename."
+    )
     # Create subparsers for different analysis types
     subparsers = parser.add_subparsers(
         dest="analysis_type",
-        help="Type of analysis to perform",
+        help="Type of analysis to perform.",
         required=True,
     )
 
@@ -39,6 +52,7 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     from .log_task_counts import add_task_counts_arguments
     from .log_timing import add_log_arguments
     from .mpiuse import add_mpiuse_arguments
+    from .scaling import add_scaling_arguments
     from .task_plots import add_task_plots_arguments
     from .timesteps import add_timestep_arguments
 
@@ -49,6 +63,7 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     add_task_counts_arguments(subparsers)
     add_mpiuse_arguments(subparsers)
     add_task_plots_arguments(subparsers)
+    add_scaling_arguments(subparsers)
 
 
 def run(args: argparse.Namespace) -> None:
@@ -67,6 +82,8 @@ def run(args: argparse.Namespace) -> None:
         run_swift_mpiuse(args)
     elif args.analysis_type == "task-plots":
         run_swift_task_plots(args)
+    elif args.analysis_type == "scaling":
+        run_scaling(args)
     else:
         raise ValueError(f"Unknown analysis type: {args.analysis_type}")
 
@@ -86,6 +103,7 @@ __all__ = [
     "run_swift_task_counts",
     "run_swift_mpiuse",
     "run_swift_task_plots",
+    "run_scaling",
     "run_gravity_checks",
     "run_gravity_error_maps",
     "analyse_timestep_files",

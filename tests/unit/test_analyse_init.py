@@ -1,6 +1,7 @@
 """Tests for the analyse mode init module."""
 
 import argparse
+from pathlib import Path
 from unittest.mock import Mock, patch
 
 import pytest
@@ -80,6 +81,16 @@ class TestAnalyseMode:
 
         mock_run_swift_task_plots.assert_called_once_with(args)
 
+    @patch("swiftsim_cli.modes.analyse.run_scaling")
+    def test_run_scaling(self, mock_run_scaling):
+        """Test running scaling analysis."""
+        args = Mock()
+        args.analysis_type = "scaling"
+
+        run(args)
+
+        mock_run_scaling.assert_called_once_with(args)
+
     def test_run_unknown_type(self):
         """Test running with unknown analysis type."""
         args = Mock()
@@ -120,6 +131,10 @@ _SUBCOMMAND_CASES = {
         ["task-plots", "tasks.dat", "threadpool.dat"],
         "swiftsim_cli.modes.analyse.task_plots.analyse_swift_task_plots",
     ),
+    "scaling": (
+        ["scaling", "timers", "a.log", "b.log"],
+        "swiftsim_cli.modes.analyse.scaling.analyse_swift_scaling",
+    ),
 }
 
 
@@ -145,3 +160,20 @@ def test_parse_then_dispatch_reaches_analysis(name):
         run(args)
 
     mock_analysis.assert_called_once()
+
+
+def test_scaling_runtime_dispatch():
+    """The scaling runtime subcommand reaches its analysis."""
+    args = _analyse_parser().parse_args(
+        ["scaling", "runtime", "a.log", "b.log", "-o", "out", "-p", "x"]
+    )
+
+    target = "swiftsim_cli.modes.analyse.scaling.analyse_swift_runtime_scaling"
+    with patch(target) as mock_analysis:
+        run(args)
+
+    kwargs = mock_analysis.call_args.kwargs
+    assert kwargs["log_files"] == ["a.log", "b.log"]
+    assert kwargs["output_path"] == Path("out")
+    assert kwargs["prefix"] == "x"
+    assert kwargs["show_plot"] is False

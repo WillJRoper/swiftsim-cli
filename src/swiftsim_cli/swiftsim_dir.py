@@ -54,10 +54,18 @@ def get_swiftsim_dir(swift_dir: Path | None = None) -> Path:
         swift_dir = get_profile().worktree
 
     if swift_dir is None:
-        raise ValueError("The active profile has no worktree set.")
+        raise ValueError(
+            "The active profile has no worktree set. Fix it with "
+            "'swift-cli profile --edit NAME', or pick another profile with "
+            "'swift-cli --profile NAME ...'."
+        )
 
     if not swift_dir.exists():
-        raise FileNotFoundError(f"SWIFT directory does not exist: {swift_dir}")
+        raise FileNotFoundError(
+            f"SWIFT directory does not exist: {swift_dir}. Fix the profile "
+            "with 'swift-cli profile --edit NAME' or create one with "
+            "'swift-cli profile --init'."
+        )
 
     return swift_dir
 

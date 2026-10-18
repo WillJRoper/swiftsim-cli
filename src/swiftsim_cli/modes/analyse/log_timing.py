@@ -29,6 +29,7 @@ import numpy as np
 from ruamel.yaml import YAML
 from tqdm.auto import tqdm
 
+from swiftsim_cli.modes.common_args import add_output_arguments
 from swiftsim_cli.profile import get_profile_cache_dir, load_swift_profile
 from swiftsim_cli.src_parser import (
     compile_site_patterns,
@@ -44,6 +45,9 @@ from swiftsim_cli.utilities.step_table import (
 )
 from swiftsim_cli.utilities.tables import create_ascii_table
 
+# Subdirectory of --out that the outputs are written to
+OUT_SUBDIR = "log_analysis"
+
 # ============================================================================
 # CLI ARGUMENT SETUP
 # ============================================================================
@@ -57,9 +61,8 @@ def add_log_arguments(subparsers) -> None:
     """
     log_parser = subparsers.add_parser(
         "log",
-        help="Analyse timing information from SWIFT log files."
-        " To get the most from this mode SWIFT should be run with "
-        "-v 1 for verbose output.",
+        help="Analyse the timers in a SWIFT log file (run SWIFT with -v 1 "
+        "for the most detail).",
     )
 
     log_parser.add_argument(
@@ -68,28 +71,7 @@ def add_log_arguments(subparsers) -> None:
         type=Path,
     )
 
-    log_parser.add_argument(
-        "--output-path",
-        "-o",
-        type=Path,
-        help="Where to save analysis (default: current directory).",
-        default=None,
-    )
-
-    log_parser.add_argument(
-        "--prefix",
-        "-p",
-        type=str,
-        help="A prefix to add to the analysis files (default: '').",
-        default=None,
-    )
-
-    log_parser.add_argument(
-        "--show",
-        action="store_true",
-        help="Show the plot interactively.",
-        default=False,
-    )
+    add_output_arguments(log_parser, OUT_SUBDIR)
 
     log_parser.add_argument(
         "--top-n",
@@ -119,7 +101,7 @@ def run_swift_log_timing(args: argparse.Namespace) -> None:
     """
     analyse_swift_log_timings(
         log_file=str(args.log_file),
-        output_path=args.output_path,
+        output_path=args.out,
         prefix=args.prefix,
         show_plot=args.show,
         top_n=args.top_n,
@@ -1545,9 +1527,9 @@ def add_hierarchical_rows(
 
 def analyse_swift_log_timings(
     log_file: str,
-    output_path: str | None = None,
+    output_path: str | Path | None = None,
     prefix: str | None = None,
-    show_plot: bool = True,
+    show_plot: bool = False,
     top_n: int = 20,
     hierarchy_functions: list[str] | None = None,
 ) -> None:
@@ -1579,8 +1561,9 @@ def analyse_swift_log_timings(
 
     Args:
       log_file: Path to the SWIFT log file to analyse.
-      output_path: Directory where figures are saved. If None, saves to CWD.
-      prefix: Optional filename prefix and output subdirectory prefix.
+      output_path: Directory whose ``log_analysis`` subdirectory receives
+        the outputs. If None, the current directory is used.
+      prefix: Optional prefix added to each output filename.
       show_plot: Whether to display plots interactively.
       top_n: Number of top timers shown in multi-item plots/tables.
       hierarchy_functions: Functions to show hierarchical timing for. If None,
@@ -1592,10 +1575,7 @@ def analyse_swift_log_timings(
     """
     print(f"Analyzing SWIFT log:  {log_file}")
 
-    # Output directory naming identical to your original approach
-    out_dir = (
-        "runtime_analysis" if prefix is None else f"{prefix}_runtime_analysis"
-    )
+    out_dir = OUT_SUBDIR
 
     print("Loading timer database and compiling patterns...")
     # Regenerate both timer definitions and nesting relationships from the
