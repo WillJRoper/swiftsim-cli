@@ -3,12 +3,14 @@
 from pathlib import Path
 from unittest.mock import Mock, patch
 
+import pytest
+
 from swiftsim_cli.modes.analyse.log_task_counts import (
     add_task_counts_arguments,
     analyse_swift_task_counts,
     run_swift_task_counts,
+    task_count_series,
 )
-from swiftsim_cli.src_parser import TaskCountSnapshot
 
 
 class TestTaskCountsArguments:
@@ -167,241 +169,95 @@ class TestAnalyseSwiftTaskCounts:
                 task_filter=None,
             )
 
-    def create_mock_log(self, tmp_path):
-        """Create a mock SWIFT log file with task counts."""
-        log_file = tmp_path / "test.log"
-        lines = [
-            "0 [0.100] engine_print_task_counts: "
-            "System total: 1000, no. cells: 10",
-            "0 [0.100] engine_print_task_counts: "
-            "Total = 1000 (per cell = 100.0)",
-            "0 [0.100] engine_print_task_counts: "
-            "task counts are [ sort=200 self=300 pair=500 ]",
-            "1 [0.200] engine_print_task_counts: "
-            "System total: 1200, no. cells: 10",
-            "1 [0.200] engine_print_task_counts: "
-            "Total = 1200 (per cell = 120.0)",
-            "1 [0.200] engine_print_task_counts: "
-            "task counts are [ sort=250 self=350 pair=600 ]",
-        ]
-        log_file.write_text("\n".join(lines))
-        return str(log_file)
-
-    @patch("swiftsim_cli.modes.analyse.log_task_counts.create_output_path")
-    @patch("swiftsim_cli.modes.analyse.log_task_counts.plt")
-    @patch(
-        "swiftsim_cli.modes.analyse.log_task_counts.scan_task_counts_by_step"
-    )
-    def test_analyse_swift_task_counts_no_filter(
-        self, mock_scan, mock_plt, mock_create_path, tmp_path
-    ):
-        """Test analysis without task filtering."""
-        # Mock the output path creation
-        mock_create_path.side_effect = lambda *args: tmp_path / "plot.png"
-
-        # Mock matplotlib subplot return
-        mock_fig = Mock()
-        mock_ax = Mock()
-        mock_plt.subplots.return_value = (mock_fig, mock_ax)
-        # Create mock snapshots
-        mock_snap1 = TaskCountSnapshot(
-            step=0,
-            rank=0,
-            sim_time=0.1,
-            system_total=1000,
-            num_cells=10,
-            total_tasks=1000,
-            per_cell_avg=100.0,
-            per_cell_max=None,
-            counts={"sort": 200, "self": 300, "pair": 500},
-            line_index=0,
+    def test_series_from_fixture(self, logs_dir):
+        """Task counts are taken from the step each block was printed in."""
+        steps, times, totals, series = task_count_series(
+            str(logs_dir / "sample.txt")
         )
-        mock_snap2 = TaskCountSnapshot(
-            step=1,
-            rank=0,
-            sim_time=0.2,
-            system_total=1200,
-            num_cells=10,
-            total_tasks=1200,
-            per_cell_avg=120.0,
-            per_cell_max=None,
-            counts={"sort": 250, "self": 350, "pair": 600},
-            line_index=3,
+        # One block per rebuild: init (row 0) and steps 1-4.
+        assert steps == [0, 1, 2, 3, 4]
+        assert times[0] == pytest.approx(1.225990e-05)
+        assert all(len(v) == len(steps) for v in series.values())
+        # The block printed before row N belongs to step N (init keeps the
+        # last of its blocks).
+        assert totals == [297700, 297896, 297876, 296337, 296207]
+
+    def test_missing_tasks_are_zero_filled(self, tmp_path):
+        """Per-task series stay aligned with the steps."""
+        log = tmp_path / "log.txt"
+        log.write_text(
+            _block(0, "Total = 5 (per cell = 1.0)", "sort=2 self=3")
+            + ROW.format(n=1)
+            + _block(0, "Total = 9 (per cell = 1.0)", "sort=4 pair=5")
+            + ROW.format(n=2)
         )
+        steps, _, totals, series = task_count_series(str(log))
+        assert steps == [1, 2]
+        assert totals == [5, 9]
+        assert series["self"].tolist() == [3, 0]
+        assert series["pair"].tolist() == [0, 5]
 
-        mock_scan.return_value = ({0: [mock_snap1], 1: [mock_snap2]}, [])
+    def test_ranks_summed_with_last_block_per_rank(self, tmp_path):
+        """Blocks are summed over ranks, using each rank's last block."""
+        log = tmp_path / "log.txt"
+        log.write_text(
+            _block(0, "Total = 100 (per cell = 1.0)", "self=100")
+            + _block(1, "Total = 7 (per cell = 1.0)", "self=7")
+            + _block(0, "Total = 10 (per cell = 1.0)", "self=10")
+            + ROW.format(n=1)
+        )
+        _, _, totals, series = task_count_series(str(log))
+        assert totals == [17]
+        assert series["self"].tolist() == [17]
+        _, _, filtered, _ = task_count_series(str(log), ["self", "pair"])
+        assert filtered == [17]
 
-        log_file = self.create_mock_log(tmp_path)
+    def test_incomplete_step_skipped(self, tmp_path):
+        """Blocks after the last row have no simulation time."""
+        log = tmp_path / "log.txt"
+        log.write_text(
+            _block(0, "Total = 5 (per cell = 1.0)", "self=5")
+            + ROW.format(n=1)
+            + _block(0, "Total = 6 (per cell = 1.0)", "self=6")
+        )
+        steps, _, _, _ = task_count_series(str(log))
+        assert steps == [1]
 
+    def test_end_to_end(self, logs_dir, tmp_path):
+        """Writes the three plots for one or more logs."""
+        log = str(logs_dir / "sample.txt")
         analyse_swift_task_counts(
-            log_files=[log_file],
-            labels=None,
-            output_path=None,
-            prefix=None,
-            show_plot=False,
-            task_filter=None,
+            log_files=[log, log],
+            labels=["a", "b"],
+            output_path=tmp_path,
+            task_filter=["self", "pair"],
+        )
+        out = tmp_path / "task_counts_analysis"
+        for name in [
+            "task_counts_per_step.png",
+            "task_counts_cumulative.png",
+            "task_counts_by_type.png",
+        ]:
+            assert (out / name).is_file()
+
+    def test_no_data(self, tmp_path, capsys):
+        """A log without task counts makes no plots."""
+        log = tmp_path / "log.txt"
+        log.write_text("nothing here\n")
+        analyse_swift_task_counts(log_files=[str(log)], output_path=tmp_path)
+        assert "No usable data" in capsys.readouterr().out
+        assert not (tmp_path / "task_counts_analysis").exists() or not any(
+            (tmp_path / "task_counts_analysis").iterdir()
         )
 
-        # Verify scan was called
-        mock_scan.assert_called_once_with(log_file)
 
-        # Verify plots were created (3 plots: per-step, cumulative, by-type)
-        assert mock_fig.savefig.call_count == 3
+ROW = (
+    "{n:8d}   1.0e-05    0.0078125  127.0   0.0e+00    1   56            0"
+    "     100            0            0            0             1.000"
+    "    265           495.008\n"
+)
 
-    @patch("swiftsim_cli.modes.analyse.log_task_counts.create_output_path")
-    @patch("swiftsim_cli.modes.analyse.log_task_counts.plt")
-    @patch(
-        "swiftsim_cli.modes.analyse.log_task_counts.scan_task_counts_by_step"
-    )
-    def test_analyse_swift_task_counts_with_filter(
-        self, mock_scan, mock_plt, mock_create_path, tmp_path
-    ):
-        """Test analysis with task filtering."""
-        # Mock the output path creation
-        mock_create_path.side_effect = lambda *args: tmp_path / "plot.png"
 
-        # Mock matplotlib subplot return
-        mock_fig = Mock()
-        mock_ax = Mock()
-        mock_plt.subplots.return_value = (mock_fig, mock_ax)
-        # Create mock snapshots
-        mock_snap1 = TaskCountSnapshot(
-            step=0,
-            rank=0,
-            sim_time=0.1,
-            system_total=1000,
-            num_cells=10,
-            total_tasks=1000,
-            per_cell_avg=100.0,
-            per_cell_max=None,
-            counts={"sort": 200, "self": 300, "pair": 500},
-            line_index=0,
-        )
-        mock_snap2 = TaskCountSnapshot(
-            step=1,
-            rank=0,
-            sim_time=0.2,
-            system_total=1200,
-            num_cells=10,
-            total_tasks=1200,
-            per_cell_avg=120.0,
-            per_cell_max=None,
-            counts={"sort": 250, "self": 350, "pair": 600},
-            line_index=3,
-        )
-
-        mock_scan.return_value = ({0: [mock_snap1], 1: [mock_snap2]}, [])
-
-        log_file = self.create_mock_log(tmp_path)
-
-        analyse_swift_task_counts(
-            log_files=[log_file],
-            labels=None,
-            output_path=None,
-            prefix=None,
-            show_plot=False,
-            task_filter=["sort", "self"],
-        )
-
-        # Verify scan was called
-        mock_scan.assert_called_once_with(log_file)
-
-        # Verify plots were created (3 plots: per-step, cumulative, by-type)
-        assert mock_fig.savefig.call_count == 3
-
-    @patch(
-        "swiftsim_cli.modes.analyse.log_task_counts.scan_task_counts_by_step"
-    )
-    def test_analyse_swift_task_counts_no_data(
-        self, mock_scan, tmp_path, capsys
-    ):
-        """Test analysis with no valid data."""
-        mock_scan.return_value = ({}, [])
-
-        log_file = self.create_mock_log(tmp_path)
-
-        analyse_swift_task_counts(
-            log_files=[log_file],
-            labels=None,
-            output_path=None,
-            prefix=None,
-            show_plot=False,
-            task_filter=None,
-        )
-
-        # Verify appropriate message was printed
-        captured = capsys.readouterr()
-        assert "No usable data found in any log files" in captured.out
-
-    @patch("swiftsim_cli.modes.analyse.log_task_counts.create_output_path")
-    @patch("swiftsim_cli.modes.analyse.log_task_counts.plt")
-    @patch(
-        "swiftsim_cli.modes.analyse.log_task_counts.scan_task_counts_by_step"
-    )
-    def test_analyse_swift_task_counts_multiple_logs(
-        self, mock_scan, mock_plt, mock_create_path, tmp_path
-    ):
-        """Test analysis with multiple log files."""
-        # Mock the output path creation
-        mock_create_path.side_effect = lambda *args: tmp_path / "plot.png"
-
-        # Mock matplotlib subplot return
-        mock_fig = Mock()
-        mock_ax = Mock()
-        mock_plt.subplots.return_value = (mock_fig, mock_ax)
-
-        # Create mock snapshots for first log
-        mock_snap1_log1 = TaskCountSnapshot(
-            step=0,
-            rank=0,
-            sim_time=0.1,
-            system_total=1000,
-            num_cells=10,
-            total_tasks=1000,
-            per_cell_avg=100.0,
-            per_cell_max=None,
-            counts={"sort": 200, "self": 300, "pair": 500},
-            line_index=0,
-        )
-
-        # Create mock snapshots for second log
-        mock_snap1_log2 = TaskCountSnapshot(
-            step=0,
-            rank=0,
-            sim_time=0.1,
-            system_total=1500,
-            num_cells=15,
-            total_tasks=1500,
-            per_cell_avg=100.0,
-            per_cell_max=None,
-            counts={"sort": 300, "self": 450, "pair": 750},
-            line_index=0,
-        )
-
-        # Set up mock to return different data for each call
-        mock_scan.side_effect = [
-            ({0: [mock_snap1_log1]}, []),
-            ({0: [mock_snap1_log2]}, []),
-        ]
-
-        log_file1 = self.create_mock_log(tmp_path)
-        log_file2 = tmp_path / "test2.log"
-        log_file2.write_text(
-            "0 [0.100] engine_print_task_counts: "
-            "System total: 1500, no. cells: 15"
-        )
-
-        analyse_swift_task_counts(
-            log_files=[log_file1, str(log_file2)],
-            labels=["Log 1", "Log 2"],
-            output_path=None,
-            prefix=None,
-            show_plot=False,
-            task_filter=None,
-        )
-
-        # Verify scan was called twice
-        assert mock_scan.call_count == 2
-
-        # Verify plots were created (3 plots: per-step, cumulative, by-type)
-        assert mock_fig.savefig.call_count == 3
+def _block(rank: int, total: str, counts: str) -> str:
+    p = f"[{rank:04d}] [00001.0] engine_print_task_counts"
+    return f"{p}: {total}\n{p}: task counts are [ {counts} ]\n"

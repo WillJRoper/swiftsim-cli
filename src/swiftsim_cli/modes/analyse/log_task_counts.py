@@ -10,8 +10,9 @@ Core functionality:
   * analyse_swift_task_counts(log_file, output_path, prefix, show_plot)
 
 The analysis is intentionally light-weight:
-  * Uses scan_task_counts_by_step() from swiftsim_cli.src_parser
-  * Builds a time series of per-step total task counts (preferring rank 0)
+  * Uses timing.log_scan.scan_log() (task-count blocks are tracked per rank)
+  * Builds a time series of per-step total task counts (summed over ranks,
+    using the last block each rank printed in the step)
   * Produces:
       - Scatter plot: total tasks vs simulation time
       - Cumulative plot: cumulative tasks vs simulation time
@@ -21,7 +22,7 @@ from __future__ import annotations
 
 import argparse
 from pathlib import Path
-from typing import List, TypedDict
+from typing import TypedDict
 
 import matplotlib
 import matplotlib.pyplot as plt
@@ -32,10 +33,7 @@ from swiftsim_cli.modes.common_args import (
     add_labels_argument,
     add_output_arguments,
 )
-from swiftsim_cli.src_parser import (
-    TaskCountSnapshot,
-    scan_task_counts_by_step,
-)
+from swiftsim_cli.timing.log_scan import scan_log
 from swiftsim_cli.utilities.io import create_output_path
 from swiftsim_cli.utilities.plotting import save_figure
 
@@ -116,6 +114,72 @@ def run_swift_task_counts(args: argparse.Namespace) -> None:
     )
 
 
+def task_count_series(
+    log_file: str, task_filter: list[str] | None = None
+) -> tuple[list[int], list[float], list[int], dict[str, NDArray[np.float64]]]:
+    """Per-step task counts of one log.
+
+    Uses the last block each rank printed in a step, summed over ranks.
+
+    Args:
+        log_file: The SWIFT log.
+        task_filter: If given, the totals only count these tasks.
+
+    Returns:
+        (steps, simulation times, totals, per-task series); every series
+        has one value per step (zero where a step did not list the task).
+    """
+    # Parse the log. Steps without a simulation time (an incomplete
+    # last step) cannot be placed on the time axis.
+    scan = scan_log(log_file)
+    steps: list[int] = []
+    sim_times: list[float] = []
+    totals: list[int] = []
+    per_step_counts: list[dict[str, int]] = []
+
+    for step in scan.steps:
+        if step.sim_time is None or not step.task_counts:
+            continue
+        # The last block each rank printed in this step
+        snaps = list({s.rank: s for s in step.task_counts}.values())
+        steps.append(step.number)
+        sim_times.append(step.sim_time)
+
+        # Task counts summed over ranks
+        aggregated_counts: dict[str, int] = {}
+        for snap in snaps:
+            for task_name, count in snap.counts.items():
+                aggregated_counts[task_name] = (
+                    aggregated_counts.get(task_name, 0) + count
+                )
+        per_step_counts.append(aggregated_counts)
+
+        if task_filter:
+            totals.append(
+                sum(aggregated_counts.get(t, 0) for t in task_filter)
+            )
+        else:
+            totals.append(
+                sum(
+                    int(snap.total_tasks or snap.system_total or 0)
+                    for snap in snaps
+                )
+            )
+
+    # One value per step for every task type (zero where a step's
+    # blocks did not list the task).
+    task_names = sorted({n for counts in per_step_counts for n in counts})
+    task_series: dict[str, NDArray[np.float64]] = {
+        name: np.asarray(
+            [counts.get(name, 0) for counts in per_step_counts],
+            dtype=float,
+        )
+        for name in task_names
+    }
+
+    return steps, sim_times, totals, task_series
+
+
 # ============================================================================
 # CORE ANALYSIS
 # ============================================================================
@@ -133,9 +197,9 @@ def analyse_swift_task_counts(
 
     This function:
       * Accepts multiple log files for comparison
-      * Uses scan_task_counts_by_step() to extract per-step task-count
-        snapshots keyed by step number.
-      * Collapses snapshots per step to a single series, preferring rank 0.
+      * Scans each log once, assigning task-count blocks to steps (the
+        records before step row N belong to step N).
+      * Sums the last block each rank printed in a step over the ranks.
       * Optionally filters to include only specific task types.
       * Builds:
           - A scatter plot of total tasks vs simulation time.
@@ -190,63 +254,10 @@ def analyse_swift_task_counts(
     for log_idx, log_file in enumerate(log_files):
         print(f"\nLog {log_idx + 1}/{len(log_files)}: {log_file}")
 
-        # Parse the log
-        snapshots_by_step, step_lines = scan_task_counts_by_step(log_file)
-
-        total_snapshots = sum(len(v) for v in snapshots_by_step.values())
-        print(
-            f"  Found {total_snapshots} snapshots across "
-            f"{len(snapshots_by_step)} steps"
+        steps, sim_times, totals, task_series = task_count_series(
+            log_file, task_filter
         )
-
-        # Build time series
-        steps: List[int] = []
-        sim_times: List[float] = []
-        totals: List[int] = []
-        task_counts_per_step: dict[str, list[int]] = {}
-
-        for step in sorted(
-            k for k in snapshots_by_step.keys() if k is not None
-        ):
-            snaps: list[TaskCountSnapshot] = snapshots_by_step[step]
-            if not snaps:
-                continue
-
-            # Sum task counts across all ranks for this step
-            # Use simulation time from first snapshot (should be same for all)
-            steps.append(step)
-            sim_times.append(snaps[0].sim_time)
-
-            # Aggregate task counts across all ranks
-            aggregated_counts: dict[str, int] = {}
-            for snap in snaps:
-                for task_name, count in snap.counts.items():
-                    aggregated_counts[task_name] = (
-                        aggregated_counts.get(task_name, 0) + count
-                    )
-
-            # Store individual task counts (summed over ranks)
-            for task_name, count in aggregated_counts.items():
-                if task_name not in task_counts_per_step:
-                    task_counts_per_step[task_name] = []
-                task_counts_per_step[task_name].append(count)
-
-            # Calculate total tasks (summed over ranks)
-            if task_filter:
-                total = sum(
-                    aggregated_counts.get(task_name, 0)
-                    for task_name in task_filter
-                )
-                totals.append(total)
-            else:
-                # Sum total_tasks or system_total across all ranks
-                total = 0
-                for snap in snaps:
-                    if snap.total_tasks is not None:
-                        total += int(snap.total_tasks)
-                    elif snap.system_total is not None:
-                        total += int(snap.system_total)
-                totals.append(total)
+        print(f"  Found task counts for {len(steps)} steps")
 
         if not steps:
             print("  WARNING: No usable data found in this log")
@@ -256,11 +267,6 @@ def analyse_swift_task_counts(
         times_arr = np.asarray(sim_times, dtype=float)
         totals_arr = np.asarray(totals, dtype=float)
         cumulative_arr = np.cumsum(totals_arr)
-
-        # Convert individual task counts to numpy arrays
-        task_series: dict[str, NDArray[np.float64]] = {}
-        for task_name, counts in task_counts_per_step.items():
-            task_series[task_name] = np.asarray(counts, dtype=float)
 
         print(
             f"  Prepared time series: {len(steps_arr)} steps "

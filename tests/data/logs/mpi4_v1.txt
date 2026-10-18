@@ -1,0 +1,833 @@
+====
+Starting job 0000000 at Thu 13 Apr 15:21:44 BST 2023 for user USERNAME.
+Running on nodes: NODE
+====
+OneAPI environment modules are now accessible.
+Loading compiler version 2021.1.1
+Loading tbb version 2021.1.1
+Loading debugger version 10.0.0
+Loading compiler-rt version 2021.1.1
+Loading dpl version 2021.1.1
+Loading oclfpga version 2021.1.1
+Loading init_opencl version 2021.1.1
+Warning: Intel PAC device is not found.
+Please install the Intel PAC card to execute your program on an FPGA device.
+Warning: Intel PAC device is not found.
+Please install the Intel PAC card to execute your program on an FPGA device.
+[0000] [00000.0] main: MPI is up and running with 4 node(s).
+
+ Welcome to the cosmological hydrodynamical code
+    ______       _________________
+   / ___/ |     / /  _/ ___/_  __/
+   \__ \| | /| / // // /_   / /   
+  ___/ /| |/ |/ // // __/  / /    
+ /____/ |__/|__/___/_/    /_/     
+ SPH With Inter-dependent Fine-grained Tasking
+
+ Version : 0.9.0
+ Revision: v0.9.0-3290-g6cdef369, Branch: zoom_proxy_cleanup, Date: 2023-04-12 19:35:15 +0100
+ Webpage : www.swiftsim.com
+
+ Config. options: '--enable-zoom-region --with-parmetis --enable-debug'
+
+ Compiler: ICC, Version: 20.21.20201112
+ CFLAGS  : '-g -O0  -debug inline-debug-info -O3 -ansi-alias -fma -ftz -fomit-frame-pointer -march=core-avx2 -pthread -w2 -Wunused-variable -Wshadow -Werror -Wstrict-prototypes'
+
+ HDF5 library version     : 1.10.6
+ FFTW library version     : 3.x (details not available)
+ GSL library version      : 2.5
+ MPI library version      : Intel(R) MPI Library 2018 Update 2 for Linux* OS (MPI std v3.1)
+ ParMETIS library version : 4.0.3
+
+[0001] NUMA nodes in use: [. 1 . 3 . . . . ]
+[0000] NUMA nodes in use: [0 . 2 . . . . . ]
+[0002] NUMA nodes in use: [. . . . 4 5 . . ]
+[0003] NUMA nodes in use: [. . . . . . 6 7 ]
+[0000] [00000.0] main: CPU frequency used for tick conversion: 2595113471 Hz
+[0000] [00000.0] main: Rank 0 running on: HOSTNAME
+[0000] [00000.0] main: sizeof(part)        is  160 bytes.
+[0000] [00000.0] main: sizeof(xpart)       is   96 bytes.
+[0000] [00000.0] main: sizeof(sink)        is   96 bytes.
+[0000] [00000.0] main: sizeof(spart)       is  128 bytes.
+[0000] [00000.0] main: sizeof(bpart)       is  128 bytes.
+[0000] [00000.0] main: sizeof(gpart)       is   96 bytes.
+[0000] [00000.0] main: sizeof(multipole)   is  192 bytes.
+[0000] [00000.0] main: sizeof(grav_tensor) is  144 bytes.
+[0000] [00000.0] main: sizeof(task)        is   96 bytes.
+[0000] [00000.0] main: sizeof(cell)        is 1088 bytes.
+[0000] [00000.0] main: Reading runtime parameters from file '../../params16_16.yml'
+[0000] [00000.0] main: Using ParMETIS partitioning:
+[0000] [00000.0] main:   initial partitioning: memory and edge balanced cells using particle weights
+[0000] [00000.0] main:   repartitioning: edge and vertex task cost weights
+[0000] [00000.0] main: Internal unit system: U_M = 1.988480e+43 g.
+[0000] [00000.0] main: Internal unit system: U_L = 3.085678e+24 cm.
+[0000] [00000.0] main: Internal unit system: U_t = 3.085678e+19 s.
+[0000] [00000.0] main: Internal unit system: U_I = 1.000000e+00 A.
+[0000] [00000.0] main: Internal unit system: U_T = 1.000000e+00 K.
+[0000] [00000.0] phys_const_print:    Gravitational constant = 4.301069e+01
+[0000] [00000.0] phys_const_print:            Speed of light = 2.997925e+05
+[0000] [00000.0] phys_const_print:           Planck constant = 1.079902e-99
+[0000] [00000.0] phys_const_print:        Boltzmann constant = 6.943238e-70
+[0000] [00000.0] phys_const_print:     Thomson cross-section = 6.986845e-74
+[0000] [00000.0] phys_const_print:             Electron-Volt = 8.057293e-66
+[0000] [00000.0] phys_const_print:       Vacuum permeability = 1.950021e-28
+[0000] [00000.0] phys_const_print:               Proton mass = 8.411560e-68
+[0000] [00000.0] phys_const_print:                      Year = 1.022690e-12
+[0000] [00000.0] phys_const_print:                    Parsec = 1.000000e-06
+[0000] [00000.0] phys_const_print:         Astronomical Unit = 4.848137e-12
+[0000] [00000.0] phys_const_print:              Earth radius = 2.067001e-16
+[0000] [00000.0] phys_const_print:                Solar mass = 9.999648e-11
+[0000] [00000.0] phys_const_print:          Solar luminosity = 5.940202e-01
+[0000] [00000.0] phys_const_print:    H_0 / h = 100 km/s/Mpc = 1.000000e+02
+[0000] [00000.0] phys_const_print:                    T_CMB0 = 2.725500e+00
+[0000] [00000.3] cosmology_print: Density parameters: [O_m, O_l, O_b, O_k, O_r] = [0.307000, 0.693000, 0.048252, 0.000000, 0.000000]
+[0000] [00000.3] cosmology_print: Additional density parameters: [O_nu_0, O_cdm, O_ur, O_g] = [0.000000, 0.258748, 0.000000, 0.000000]
+[0000] [00000.3] cosmology_print: Dark energy equation of state: w_0=-1.000000 w_a=0.000000
+[0000] [00000.3] cosmology_print: Hubble constant: h = 0.677700, H_0 = 6.777000e+01 U_t^(-1)
+[0000] [00000.3] cosmology_print: Hubble time: 1/H0 = 1.475579e-02 U_t
+[0000] [00000.3] cosmology_print: CMB temperature at z=0 implied by cosmology: T_CMB = 0.000000e+00 U_T
+[0000] [00000.3] cosmology_print: Neutrino temperature at z=0: T_nu = 0.000000e+00 U_T
+[0000] [00000.3] cosmology_print: Numbers of relatistic species: [N_nu, N_ur, N_eff] = [0, 0.000000, 0.000000]
+[0000] [00000.3] cosmology_print: Universe age at present day: 1.413442e-02 U_t
+[0000] [00000.3] cooling_print_backend: Cooling function is 'No cooling'.
+[0000] [00000.3] chemistry_print_backend: Chemistry function is 'No chemistry'.
+[0000] [00000.3] main: Reading ICs from file '../../ics/flares31.hdf5'
+[0000] [00000.3] main: Cleaning up h-factors (h=0.677700)
+[0000] [00000.3] main: Cleaning up a-factors from velocity (a=0.007812)
+[0000] [00000.3] io_read_unit_system: 'Units' group not found in ICs. Assuming internal unit system.
+[0000] [00000.3] read_ic_parallel: IC and internal units match. No conversion needed.
+[0000] [00000.3] ic_info_read_hdf5: Metadata group ICs_parameters not found in ICs file
+[0000] [00029.7] main: Reading initial conditions took 29472.632 ms.
+[0000] [00029.7] main: Read 0 gas particles, 0 sink particles, 0 star particles, 0 black hole particles, 166658005 DM particles, 3065000 DM background particles, and 0 neutrino DM particles from the ICs.
+[0000] [00029.7] space_init: max_size set to 8000000 split_size set to 200
+[0000] [00029.7] space_init: subdepth_grav set to 4
+[0000] [00029.7] space_init: sub_size_pair_hydro set to 256000000, sub_size_self_hydro set to 32000
+[0000] [00029.7] space_init: sub_size_pair_grav set to 256000000, sub_size_self_grav set to 32000
+[0000] [00030.0] zoom_region_init: com: [1599.783331 1600.013967 1599.671013]
+[0000] [00030.0] zoom_region_init: initial_dim: [45.361270 45.179345 42.472976] initial_zoom_boundary: [1577.209320-1622.570590 1577.304245-1622.483590 1578.641489-1621.114464]
+[0000] [00030.0] zoom_region_init: box_mid = [1600.000000 1600.000000 1600.000000] midpoint = [1599.889955 1599.893918 1599.877977]
+[0000] [00030.0] zoom_region_init: Need to shift the box by [1.100452e-01, 1.060825e-01, 1.220235e-01] to centre the zoom region
+[0000] [00030.0] zoom_region_init: Initial buffer_region_size = [6.41 6.50 7.85]
+[0000] [00030.0] zoom_region_init: Calculated buffer_region_ratio = 1.28
+[0000] [00030.0] space_init: Shifting particles by [1.100452e-01 1.060825e-01 1.220235e-01]
+[0001] [00030.0] space_init: Shifting particles by [1.100452e-01 1.060825e-01 1.220235e-01]
+[0002] [00030.0] space_init: Shifting particles by [1.100452e-01 1.060825e-01 1.220235e-01]
+[0003] [00030.0] space_init: Shifting particles by [1.100452e-01 1.060825e-01 1.220235e-01]
+[0000] [00030.4] space_regrid_zoom: h_max is 1.793e+00 (zoom_cell_min=3.600e+00).
+[0000] [00030.4] space_regrid_zoom: Constructing zoom region.
+[0000] [00030.4] construct_zoom_region: set cell dimensions to zoom_cdim=[16 16 16] background_cdim=[15 15 15] buffer_cdim=[11 11 11]
+[0000] [00030.4] construct_zoom_region: nr_zoom_cells/bkg_cell_offset: 4096 nr_bkg_cells: 3375 nr_buffer_cells: 1331
+[0000] [00030.4] construct_zoom_region: zoom_boundary: [1570.91-1629.09 1570.91-1629.09 1570.91-1629.09]
+[0000] [00030.4] construct_zoom_region: buffer_boundary: [1280.00-1920.00 1280.00-1920.00 1280.00-1920.00]
+[0000] [00030.4] construct_zoom_region: zoom_region_dim: [58.18 58.18 58.18] tl_cell_width: [213.33 213.33 213.33] zoom_cell_width: [3.64 3.64 3.64] buffer_cell_width: [58.18 58.18 58.18]
+[0001] [00030.4] space_regrid_zoom: Constructing zoom region.
+[0001] [00030.4] space_regrid_zoom: Total number of cells = 8802
+[0002] [00030.4] space_regrid_zoom: Constructing zoom region.
+[0002] [00030.4] space_regrid_zoom: Total number of cells = 8802
+[0003] [00030.4] space_regrid_zoom: Constructing zoom region.
+[0003] [00030.4] space_regrid_zoom: Total number of cells = 8802
+[0000] [00030.4] space_regrid_zoom: Total number of cells = 8802
+[0000] [00030.4] find_void_cells: 1 cells contain the zoom region
+[0000] [00030.4] find_neighbouring_cells: Looking for neighbouring natural cells up to 2 natural top-level cells away from the zoom region (delta_m=2 delta_p=2)
+[0000] [00030.4] find_neighbouring_cells: 124 cells neighbouring the zoom region
+[0000] [00030.7] find_vertex_edges: 117816 'edges' found in total
+[0000] [00030.7] space_regrid_zoom: took 254.525 ms.
+[0000] [00030.7] main: space_init took 917.341 ms.
+[0000] [00030.7] potential_print_backend: External potential is 'No external potential'.
+[0000] [00030.7] main: space dimensions are [ 3200.000 3200.000 3200.000 ].
+[0000] [00030.7] main: space is periodic.
+[0000] [00030.7] main: highest-level cell dimensions are [ 15 15 15 ].
+[0000] [00030.7] main: 0 parts in 8802 cells.
+[0000] [00030.7] main: 42430751 gparts in 8802 cells.
+[0000] [00030.7] main: 0 sinks in 8802 cells.
+[0000] [00030.7] main: 0 sparts in 8802 cells.
+[0000] [00030.7] main: 0 bparts in 8802 cells.
+[0000] [00030.7] main: maximum depth is 0.
+[0000] [00030.7] main: map_cellcheck picked up 0 parts.
+[0000] [00030.7] main: nr of cells at depth 0 is 8802.
+[0000] [00030.7] engine_init: took 0.083 ms.
+[0000] [00030.7] engine_config: Running simulation 'Untitled SWIFT simulation'.
+[0000] [00030.7] engine_config: Affinity at entry: 1111111111111111000000000000000011111111111111110000000000000000000000000000000000000000000000000000000000000000000000000000000011111111111111110000000000000000111111111111111100000000000000000000000000000000000000000000000000000000000000000000000000000000
+[0000] [00030.7] engine_config: prefer NUMA-distant CPUs
+[0000] [00030.7] engine_init: cpu map is [ 0 32 1 33 2 34 3 35 4 36 5 37 6 38 7 39 8 40 9 41 10 42 11 43 12 44 13 45 14 46 15 47 128 160 129 161 130 162 131 163 132 164 133 165 134 166 135 167 136 168 137 169 138 170 139 171 140 172 141 173 142 174 143 175 ].
+[0000] [00030.7] engine_policy: engine policies are [  'steal'  'keep'  'mpi'  'numa affinity'  'self gravity'  'cosmological integration'  ]
+[0000] [00030.7] gravity_props_print: Self-gravity scheme: With per-particle softening
+[0000] [00030.7] gravity_props_print: Self-gravity scheme: FMM-MM with m-poles of order 4
+[0000] [00030.7] gravity_props_print: Self-gravity time integration: eta=0.0250
+[0000] [00030.7] gravity_props_print: Self-gravity opening angle scheme:  adaptive
+[0000] [00030.7] gravity_props_print: Self-gravity opening angle:  epsilon_fmm=0.001000
+[0000] [00030.7] gravity_props_print: Self-gravity softening functional form: Wendland-C2
+[0000] [00030.7] gravity_props_print: Self-gravity DM comoving softening: epsilon=0.005407 (Plummer equivalent: 0.001802)
+[0000] [00030.7] gravity_props_print: Self-gravity DM maximal physical softening:    epsilon=0.001423 (Plummer equivalent: 0.000474)
+[0000] [00030.7] gravity_props_print: Self-gravity baryon comoving softening: epsilon=0.000000 (Plummer equivalent: 0.000000)
+[0000] [00030.7] gravity_props_print: Self-gravity baryon maximal physical softening:    epsilon=0.000000 (Plummer equivalent: 0.000000)
+[0000] [00030.7] gravity_props_print: Self-gravity neutrino DM comoving softening: epsilon=0.000000 (Plummer equivalent: 0.000000)
+[0000] [00030.7] gravity_props_print: Self-gravity neutrino DM maximal physical softening:    epsilon=0.000000 (Plummer equivalent: 0.000000)
+[0000] [00030.7] gravity_props_print: Self-gravity mesh side-length: N=512
+[0000] [00030.7] gravity_props_print: Self-gravity mesh smoothing-scale: a_smooth=1.250000
+[0000] [00030.7] gravity_props_print: Self-gravity distributed mesh enabled: 0
+[0000] [00030.7] gravity_props_print: Self-gravity tree cut-off ratio: r_cut_max=4.500000
+[0000] [00030.7] gravity_props_print: Self-gravity truncation cut-off ratio: r_cut_min=0.100000
+[0000] [00030.7] gravity_props_print: Self-gravity mesh truncation function: Gadget-like (using erfc())
+[0000] [00030.7] gravity_props_print: Self-gravity tree update frequency: f=0.010000
+[0000] [00030.7] engine_config: Absolute minimal timestep size: 2.162743e-17
+[0000] [00030.7] engine_config: Minimal timestep size (on time-line): 6.199103e-10
+[0000] [00030.7] engine_config: Maximal timestep size (on time-line): 1.300046e-03
+[0000] [00030.7] output_list_init: Reading Snapshots output file.
+[0000] [00030.7] output_list_read_next_time: Next output time for snapshots set to a=5.241090e-02.
+[0000] [00030.9] output_list_read_next_time: Next output time for snapshots set to a=5.241090e-02.
+[0000] [00030.9] engine_compute_next_statistics_time: Next output time for stats set to a=2.000000e-02.
+[0000] [00030.9] engine_config: Restarts will be dumped every 2.000000 hours
+[0000] [00030.9] engine_config: Using 32 threads in the thread-pool
+[0000] [00030.9] engine_estimate_nr_tasks: tasks per cell estimated as: 127.00, maximum tasks: 1117854
+[0000] [00030.9] engine_config: runner 0 on cpuid=0 with qid=0.
+[0000] [00030.9] engine_config: runner 1 on cpuid=32 with qid=1.
+[0000] [00030.9] engine_config: runner 2 on cpuid=1 with qid=2.
+[0000] [00030.9] engine_config: runner 3 on cpuid=33 with qid=3.
+[0000] [00030.9] engine_config: runner 4 on cpuid=2 with qid=4.
+[0000] [00030.9] engine_config: runner 5 on cpuid=34 with qid=5.
+[0000] [00030.9] engine_config: runner 6 on cpuid=3 with qid=6.
+[0000] [00030.9] engine_config: runner 7 on cpuid=35 with qid=7.
+[0000] [00030.9] engine_config: runner 8 on cpuid=4 with qid=8.
+[0000] [00030.9] engine_config: runner 9 on cpuid=36 with qid=9.
+[0000] [00030.9] engine_config: runner 10 on cpuid=5 with qid=10.
+[0000] [00030.9] engine_config: runner 11 on cpuid=37 with qid=11.
+[0000] [00030.9] engine_config: runner 12 on cpuid=6 with qid=12.
+[0000] [00030.9] engine_config: runner 13 on cpuid=38 with qid=13.
+[0000] [00030.9] engine_config: runner 14 on cpuid=7 with qid=14.
+[0000] [00030.9] engine_config: runner 15 on cpuid=39 with qid=15.
+[0000] [00030.9] engine_config: runner 16 on cpuid=8 with qid=16.
+[0000] [00030.9] engine_config: runner 17 on cpuid=40 with qid=17.
+[0000] [00030.9] engine_config: runner 18 on cpuid=9 with qid=18.
+[0000] [00030.9] engine_config: runner 19 on cpuid=41 with qid=19.
+[0000] [00030.9] engine_config: runner 20 on cpuid=10 with qid=20.
+[0000] [00030.9] engine_config: runner 21 on cpuid=42 with qid=21.
+[0000] [00030.9] engine_config: runner 22 on cpuid=11 with qid=22.
+[0000] [00030.9] engine_config: runner 23 on cpuid=43 with qid=23.
+[0000] [00030.9] engine_config: runner 24 on cpuid=12 with qid=24.
+[0000] [00030.9] engine_config: runner 25 on cpuid=44 with qid=25.
+[0000] [00030.9] engine_config: runner 26 on cpuid=13 with qid=26.
+[0000] [00030.9] engine_config: runner 27 on cpuid=45 with qid=27.
+[0000] [00030.9] engine_config: runner 28 on cpuid=14 with qid=28.
+[0000] [00030.9] engine_config: runner 29 on cpuid=46 with qid=29.
+[0000] [00030.9] engine_config: runner 30 on cpuid=15 with qid=30.
+[0000] [00030.9] engine_config: runner 31 on cpuid=47 with qid=31.
+[0000] [00030.9] engine_config: took 205.909 ms.
+[0000] [00030.9] main: Running on 0 gas particles, 0 sink particles, 0 stars particles 0 black hole particles, 0 neutrino particles, and 169723005 DM particles (169723005 gravity particles)
+[0000] [00030.9] main: from t=1.226e-05 until t=1.312e-03 with 4 ranks, 32 threads / rank and 32 task queues / rank (dt_min=1.000e-09, dt_max=1.000e-02)...
+[0000] [00031.0] accumulate_sizes: clipped gravity part counts of 16 cells
+[0001] [00031.2] partition_initial_partition: Alocated celllist
+[0000] [00031.2] partition_initial_partition: Alocated celllist
+[0002] [00031.2] partition_initial_partition: Alocated celllist
+[0003] [00031.2] partition_initial_partition: Alocated celllist
+[0000] [00031.5] partition_initial_partition: took 646.090 ms.
+[0000] [00031.5] engine_makeproxies_with_zoom_region: Looking for proxies up to 11 top-level zoom cells away (delta_m=11 delta_p=11)
+[0000] [00032.2] engine_makeproxies_with_zoom_region: Looking for proxies up to 11 top-level buffer cells away (delta_m=11 delta_p=11)
+[0000] [00032.2] engine_makeproxies_with_zoom_region: Looking for proxies up to 11 top-level background cells away (delta_m=7 delta_p=7)
+[0000] [00033.3] engine_makeproxies_with_zoom_region: Number of proxies: 3
+[0000] [00033.3] engine_makeproxies_with_zoom_region: took 1797.993 ms.
+[0000] [00033.9] engine_redistribute: 128045225 of 169723005 (75.44%) of g-particles moved
+[0000] [00034.8] engine_redistribute: node 0 now has 0 parts, 0 sparts, 0 bparts and 43402653 gparts in 2137 cells.
+[0000] [00034.8] engine_redistribute: took 1441.323 ms.
+[0000] [00034.8] engine_split: took 3885.448 ms.
+[0000] [00034.8] engine_init_particles: Setting particles to a valid state...
+[0000] [00034.8] space_first_init_parts: took 0.000 ms.
+[0000] [00035.0] space_first_init_gparts: took 201.853 ms.
+[0000] [00035.0] space_first_init_sparts: took 0.001 ms.
+[0000] [00035.0] space_first_init_bparts: took 0.000 ms.
+[0000] [00035.0] space_first_init_sinks: took 0.000 ms.
+[0000] [00035.0] engine_first_init_particles: took 201.919 ms.
+[0000] [00035.0] engine_init_particles: Computing initial gas densities and approximate gravity.
+[0000] [00035.0] scheduler_report_task_times: took 0.001 ms.
+[0000] [00035.0] space_regrid_zoom: h_max is 1.793e+00 (zoom_cell_min=3.600e+00).
+[0000] [00035.0] space_free_cells: took 0.495 ms.
+[0000] [00035.0] space_regrid_zoom: took 0.548 ms.
+[0000] [00035.1] space_gparts_get_cell_index: took 127.220 ms.
+[0000] [00035.1] space_rebuild: Moving non-local particles took 53.614 ms.
+[0000] [00035.1] engine_exchange_strays: sent out 0/0/0/0 parts/gparts/sparts/bparts, got 0/0/0/0 back.
+[0000] [00035.1] engine_exchange_strays: took 0.049 ms.
+[0000] [00035.9] space_rebuild: Have 2131 local top-level cells with particles (total=8802)
+[0000] [00035.9] space_rebuild: Have 2137 local top-level cells (total=8802)
+[0000] [00035.9] space_rebuild: hooking up cells took 0.390 ms.
+[0000] [00035.9] space_rebuild: Have 252423 local particles in background cells
+[0000] [00035.9] space_rebuild: Have 362468 local particles in buffer cells
+[0000] [00035.9] space_rebuild: Have 42787762 local particles in zoom cells
+[0000] [00036.5] space_split: Zoom cell tree and multipole construction took 596.854 ms.
+[0000] [00036.5] space_split: Buffer cell tree and multipole construction took 6.173 ms.
+[0000] [00036.5] space_split: Background cell tree and multipole construction took 2.624 ms.
+[0000] [00036.5] space_rebuild: took 1543.228 ms.
+[0000] [00036.5] engine_rebuild: Nr. of top-level cells: 8802 Nr. of local cells: 1250001 memory use: 1306 MB.
+[0000] [00036.5] engine_rebuild: Nr. of top-level mpoles: 8802 Nr. of local mpoles: 1250001 memory use: 499 MB.
+[0000] [00036.5] engine_rebuild: Space has memory for 0/52083183/0/0/0 part/gpart/spart/sink/bpart (0/4768/0/0/0 MB)
+[0000] [00036.5] engine_rebuild: Space holds 0/43402653/0/0/0 part/gpart/spart/sink/bpart (fracs: 0.000000/0.833333/0.000000/0.000000/0.000000)
+[0000] [00036.5] engine_rebuild: updating particle counts took 0.034 ms.
+[0000] [00036.5] engine_exchange_top_multipoles: took 5.034 ms.
+[0000] [00036.5] void_space_split: Void cell tree and multipole construction took 0.862 ms.
+[0000] [00036.5] proxy_cells_exchange: Counting cells to send took 4.226 ms.
+[0000] [00036.6] proxy_cells_exchange: Packing cells took 54.613 ms.
+[0000] [00038.6] proxy_cells_exchange: Un-packing cells took 1935.759 ms.
+[0000] [00038.6] engine_exchange_cells: took 2114.859 ms.
+[0000] [00038.6] engine_estimate_nr_tasks: tasks per cell estimated as: 11.00, maximum tasks: 51974352
+[0000] [00038.6] engine_maketasks: Making hydro tasks took 0.001 ms.
+[0000] [00038.6] engine_maketasks: Making zoom->zoom gravity tasks took 8.536 ms.
+[0000] [00038.6] engine_maketasks: Making bkg->bkg gravity tasks took 5.132 ms.
+[0000] [00038.6] engine_maketasks: Making buffer->buffer gravity tasks took 0.568 ms.
+[0000] [00038.6] engine_maketasks: Making zoom->buffer gravity tasks took 3.009 ms.
+[0000] [00038.6] engine_maketasks: Making buffer->bkg gravity tasks took 0.648 ms.
+[0000] [00038.6] scheduler_splittasks: space_subsize_self_hydro= 32000
+[0000] [00038.6] scheduler_splittasks: space_subsize_pair_hydro= 256000000
+[0000] [00038.6] scheduler_splittasks: space_subsize_self_stars= 32000
+[0000] [00038.6] scheduler_splittasks: space_subsize_pair_stars= 256000000
+[0000] [00038.6] scheduler_splittasks: space_subsize_self_grav= 32000
+[0000] [00038.6] scheduler_splittasks: space_subsize_pair_grav= 256000000
+[0000] [00038.6] engine_maketasks: Splitting tasks took 0.248 ms.
+[0000] [00038.6] engine_maketasks: Counting and linking tasks took 9.309 ms.
+[0000] [00038.7] engine_maketasks: Setting super-pointers took 25.973 ms.
+[0000] [00038.7] engine_maketasks: Making extra hydroloop tasks took 0.010 ms.
+[0000] [00038.7] engine_maketasks: Linking gravity tasks took 21.261 ms.
+[0000] [00038.7] engine_maketasks: Creating send tasks took 2.012 ms.
+[0000] [00038.7] proxy_tags_exchange: Cell pack tags took 33.374 ms.
+[0000] [00039.2] proxy_tags_exchange: Cell unpack tags took 471.439 ms.
+[0000] [00039.2] engine_maketasks: Exchanging cell tags took 539.965 ms.
+[0000] [00039.2] engine_maketasks: Creating recv tasks took 7.190 ms.
+[0000] [00039.3] engine_allocate_foreign_particles: Counting number of foreign particles took 4.757 ms.
+[0000] [00039.3] engine_allocate_foreign_particles: Allocating 0/124811663/0/0 foreign part/gpart/spart/bpart (0/11426/0/0 MB)
+[0000] [00039.3] engine_allocate_foreign_particles: Re-allocations 0/124811663/0/0 part/gpart/spart/bpart (0/11426/0/0 MB)
+[0000] [00039.4] engine_allocate_foreign_particles: Recursively linking foreign arrays took 105.270 ms.
+[0000] [00039.4] engine_maketasks: Nr. of tasks: 98632 allocated tasks: 51974352 ratio: 0.001898 memory use: 4758 MB.
+[0000] [00039.4] engine_maketasks: Nr. of links: 129150 allocated links: 1455525 ratio: 0.088731 memory use: 22 MB.
+[0000] [00039.4] engine_maketasks: Actual usage: tasks/cell: 0.020409 links/task: 1.309413
+[0000] [00039.4] engine_maketasks: Setting unlocks took 3.243 ms.
+[0000] [00039.4] engine_maketasks: Ranking the tasks took 2.261 ms.
+[0000] [00039.4] scheduler_reweight: took 3.181 ms.
+[0000] [00039.4] engine_maketasks: took 749.724 ms (including reweight).
+[0000] [00039.4] space_list_useful_top_level_cells: Have 6173 local top-level cells with tasks (total=8802)
+[0000] [00039.4] space_list_useful_top_level_cells: Have 8775 top-level cells with particles (total=8802)
+[0000] [00039.4] space_list_useful_top_level_cells: took 0.269 ms.
+[0000] [00039.5] engine_marktasks: took 130.217 ms.
+[0000] [00039.5] engine_print_task_counts: Total = 98632 (per cell = 0.02)
+[0000] [00039.5] engine_print_task_counts: task counts are [ none=0 sort=0 self=2131 pair=56090 sub_self=0 sub_pair=0 init_grav=2131 init_grav_out=2131 ghost_in=0 ghost=0 ghost_out=0 extra_ghost=0 drift_part=0 drift_spart=0 drift_sink=0 drift_bpart=0 drift_gpart=2131 drift_gpart_out=2131 hydro_end_force=0 kick1=2131 kick2=2131 timestep=2131 timestep_limiter=0 timestep_sync=0 collect=2131 send=7496 recv=7343 pack=0 unpack=0 grav_long_range=1026 grav_long_range_bkg=1105 grav_mm=0 grav_down_in=2131 grav_down=2131 grav_end_force=2131 cooling=0 cooling_in=0 cooling_out=0 star_formation=0 star_formation_in=0 star_formation_out=0 star_formation_sink=0 csds=0 stars_in=0 stars_out=0 stars_ghost_in=0 stars_density_ghost=0 stars_ghost_out=0 stars_prep_ghost1=0 hydro_prep_ghost1=0 stars_prep_ghost2=0 stars_sort=0 stars_resort=0 bh_in=0 bh_out=0 bh_density_ghost=0 bh_swallow_ghost1=0 bh_swallow_ghost2=0 bh_swallow_ghost3=0 fof_self=0 fof_pair=0 neutrino_weight=0 sink_in=0 sink_ghost1=0 sink_ghost2=0 sink_out=0 rt_in=0 rt_out=0 sink_formation=0 rt_ghost1=0 rt_ghost2=0 rt_transport_out=0 rt_tchem=0 rt_advance_cell_time=0 rt_sorts=0 rt_collect_times=0 skipped=0 ]
+[0000] [00039.5] engine_print_task_counts: nr_parts = 0.
+[0000] [00039.5] engine_print_task_counts: nr_gparts = 43402653.
+[0000] [00039.5] engine_print_task_counts: nr_sink = 0.
+[0000] [00039.5] engine_print_task_counts: nr_sparts = 0.
+[0000] [00039.5] engine_print_task_counts: nr_bparts = 0.
+[0000] [00039.5] engine_print_task_counts: took 0.395 ms.
+[0000] [00039.5] engine_rebuild: took 4544.954 ms.
+[0000] [00039.7] compute_potential_global: Gpart assignment took 225.426 ms.
+[0000] [00041.0] compute_potential_global: Mesh MPI-reduction took 1180.185 ms.
+[0000] [00041.2] compute_potential_global: Forward Fourier transform took 267.214 ms.
+[0000] [00041.3] compute_potential_global: Applying Green function took 34.487 ms.
+[0000] [00041.5] compute_potential_global: Reverse Fourier transform took 277.733 ms.
+[0000] [00041.8] compute_potential_global: Computing mesh accelerations took 298.621 ms.
+[0000] [00041.9] engine_recompute_displacement_constraint: max_dt_RMS_displacement = 1.424080e-06
+[0000] [00041.9] engine_recompute_displacement_constraint: Mesh time-step changed to 6.087580e-03 (time-bin 47)
+[0000] [00041.9] engine_recompute_displacement_constraint: took 67.002 ms.
+[0000] [00042.2] engine_print_task_counts: Total = 98632 (per cell = 0.02)
+[0000] [00042.2] engine_print_task_counts: task counts are [ none=0 sort=0 self=2131 pair=56090 sub_self=0 sub_pair=0 init_grav=2131 init_grav_out=2131 ghost_in=0 ghost=0 ghost_out=0 extra_ghost=0 drift_part=0 drift_spart=0 drift_sink=0 drift_bpart=0 drift_gpart=0 drift_gpart_out=2131 hydro_end_force=0 kick1=0 kick2=0 timestep=0 timestep_limiter=0 timestep_sync=0 collect=0 send=3419 recv=3301 pack=0 unpack=0 grav_long_range=1026 grav_long_range_bkg=1105 grav_mm=0 grav_down_in=2131 grav_down=2131 grav_end_force=2131 cooling=0 cooling_in=0 cooling_out=0 star_formation=0 star_formation_in=0 star_formation_out=0 star_formation_sink=0 csds=0 stars_in=0 stars_out=0 stars_ghost_in=0 stars_density_ghost=0 stars_ghost_out=0 stars_prep_ghost1=0 hydro_prep_ghost1=0 stars_prep_ghost2=0 stars_sort=0 stars_resort=0 bh_in=0 bh_out=0 bh_density_ghost=0 bh_swallow_ghost1=0 bh_swallow_ghost2=0 bh_swallow_ghost3=0 fof_self=0 fof_pair=0 neutrino_weight=0 sink_in=0 sink_ghost1=0 sink_ghost2=0 sink_out=0 rt_in=0 rt_out=0 sink_formation=0 rt_ghost1=0 rt_ghost2=0 rt_transport_out=0 rt_tchem=0 rt_advance_cell_time=0 rt_sorts=0 rt_collect_times=0 skipped=18774 ]
+[0000] [00042.2] engine_print_task_counts: nr_parts = 0.
+[0000] [00042.2] engine_print_task_counts: nr_gparts = 43402653.
+[0000] [00042.2] engine_print_task_counts: nr_sink = 0.
+[0000] [00042.2] engine_print_task_counts: nr_sparts = 0.
+[0000] [00042.2] engine_print_task_counts: nr_bparts = 0.
+[0000] [00042.2] engine_print_task_counts: took 0.564 ms.
+[0000] [00042.2] space_init_parts: took 0.001 ms.
+[0000] [00042.3] space_init_gparts: took 126.369 ms.
+[0000] [00042.3] space_init_sparts: took 0.001 ms.
+[0000] [00042.3] space_init_bparts: took 0.000 ms.
+[0000] [00042.3] space_init_sinks: took 0.000 ms.
+[0000] [00048.3] engine_launch: (tasks) took 6005.051 ms.
+[0000] [00048.3] engine_init_particles: Converting internal energy variable.
+[0000] [00048.3] space_convert_quantities: took 0.001 ms.
+[0000] [00048.6] engine_init_particles: Running initial fake time-step.
+[0000] [00048.6] scheduler_report_task_times: *** CPU time spent in different task categories:
+[0000] [00048.6] scheduler_report_task_times: ***                drift:     0.00 ms (0.00 %)
+[0000] [00048.6] scheduler_report_task_times: ***                sorts:     0.00 ms (0.00 %)
+[0000] [00048.6] scheduler_report_task_times: ***               resort:     0.00 ms (0.00 %)
+[0000] [00048.6] scheduler_report_task_times: ***                hydro:     0.00 ms (0.00 %)
+[0000] [00048.6] scheduler_report_task_times: ***              gravity: 122166.55 ms (63.58 %)
+[0000] [00048.6] scheduler_report_task_times: ***             feedback:     0.00 ms (0.00 %)
+[0000] [00048.6] scheduler_report_task_times: ***          black holes:     0.00 ms (0.00 %)
+[0000] [00048.6] scheduler_report_task_times: ***              cooling:     0.00 ms (0.00 %)
+[0000] [00048.6] scheduler_report_task_times: ***       star formation:     0.00 ms (0.00 %)
+[0000] [00048.6] scheduler_report_task_times: ***              limiter:     0.00 ms (0.00 %)
+[0000] [00048.6] scheduler_report_task_times: ***                 sync:     0.00 ms (0.00 %)
+[0000] [00048.6] scheduler_report_task_times: ***     time integration:     0.00 ms (0.00 %)
+[0000] [00048.6] scheduler_report_task_times: ***                  mpi:   129.54 ms (0.07 %)
+[0000] [00048.6] scheduler_report_task_times: ***                 pack:     0.00 ms (0.00 %)
+[0000] [00048.6] scheduler_report_task_times: ***                  fof:     0.00 ms (0.00 %)
+[0000] [00048.6] scheduler_report_task_times: ***               others:     0.00 ms (0.00 %)
+[0000] [00048.6] scheduler_report_task_times: ***             neutrino:     0.00 ms (0.00 %)
+[0000] [00048.6] scheduler_report_task_times: ***                 sink:     0.00 ms (0.00 %)
+[0000] [00048.6] scheduler_report_task_times: ***                   RT:     0.00 ms (0.00 %)
+[0000] [00048.6] scheduler_report_task_times: ***                 CSDS:     0.00 ms (0.00 %)
+[0000] [00048.6] scheduler_report_task_times: ***            dead time: 69864.98 ms (36.36 %)
+[0000] [00048.6] scheduler_report_task_times: ***                total: 192161.08 ms (100.00 %)
+[0000] [00048.6] scheduler_report_task_times: took 0.415 ms.
+[0000] [00048.6] space_regrid_zoom: h_max is 1.793e+00 (zoom_cell_min=3.600e+00).
+[0000] [00048.6] space_free_cells: took 33.448 ms.
+[0000] [00048.6] space_regrid_zoom: took 33.481 ms.
+[0000] [00048.8] space_gparts_get_cell_index: took 125.694 ms.
+[0000] [00048.8] space_rebuild: Moving non-local particles took 53.329 ms.
+[0000] [00048.8] engine_exchange_strays: sent out 0/0/0/0 parts/gparts/sparts/bparts, got 0/0/0/0 back.
+[0000] [00048.8] engine_exchange_strays: took 0.029 ms.
+[0000] [00048.9] space_rebuild: Have 2131 local top-level cells with particles (total=8802)
+[0000] [00048.9] space_rebuild: Have 2137 local top-level cells (total=8802)
+[0000] [00048.9] space_rebuild: hooking up cells took 0.405 ms.
+[0000] [00048.9] space_rebuild: Have 252423 local particles in background cells
+[0000] [00048.9] space_rebuild: Have 362468 local particles in buffer cells
+[0000] [00048.9] space_rebuild: Have 42787762 local particles in zoom cells
+[0000] [00049.3] space_split: Zoom cell tree and multipole construction took 318.111 ms.
+[0000] [00049.3] space_split: Buffer cell tree and multipole construction took 4.209 ms.
+[0000] [00049.3] space_split: Background cell tree and multipole construction took 1.673 ms.
+[0000] [00049.4] space_rebuild: took 807.945 ms.
+[0000] [00049.4] engine_rebuild: Nr. of top-level cells: 8802 Nr. of local cells: 1250001 memory use: 1306 MB.
+[0000] [00049.4] engine_rebuild: Nr. of top-level mpoles: 8802 Nr. of local mpoles: 1250001 memory use: 499 MB.
+[0000] [00049.4] engine_rebuild: Space has memory for 0/52083183/0/0/0 part/gpart/spart/sink/bpart (0/4768/0/0/0 MB)
+[0000] [00049.4] engine_rebuild: Space holds 0/43402653/0/0/0 part/gpart/spart/sink/bpart (fracs: 0.000000/0.833333/0.000000/0.000000/0.000000)
+[0000] [00049.4] engine_rebuild: updating particle counts took 0.035 ms.
+[0000] [00049.4] engine_exchange_top_multipoles: took 4.060 ms.
+[0000] [00049.4] void_space_split: Void cell tree and multipole construction took 1.006 ms.
+[0000] [00049.5] proxy_cells_exchange: Counting cells to send took 3.598 ms.
+[0000] [00049.5] proxy_cells_exchange: Packing cells took 48.932 ms.
+[0000] [00050.9] proxy_cells_exchange: Un-packing cells took 1314.260 ms.
+[0000] [00050.9] engine_exchange_cells: took 1483.296 ms.
+[0000] [00050.9] engine_estimate_nr_tasks: tasks per cell estimated as: 11.00, maximum tasks: 51974352
+[0000] [00050.9] engine_maketasks: Making hydro tasks took 0.001 ms.
+[0000] [00051.0] engine_maketasks: Making zoom->zoom gravity tasks took 38.289 ms.
+[0000] [00051.0] engine_maketasks: Making bkg->bkg gravity tasks took 5.414 ms.
+[0000] [00051.0] engine_maketasks: Making buffer->buffer gravity tasks took 0.578 ms.
+[0000] [00051.0] engine_maketasks: Making zoom->buffer gravity tasks took 3.683 ms.
+[0000] [00051.0] engine_maketasks: Making buffer->bkg gravity tasks took 0.643 ms.
+[0000] [00051.0] scheduler_splittasks: space_subsize_self_hydro= 32000
+[0000] [00051.0] scheduler_splittasks: space_subsize_pair_hydro= 256000000
+[0000] [00051.0] scheduler_splittasks: space_subsize_self_stars= 32000
+[0000] [00051.0] scheduler_splittasks: space_subsize_pair_stars= 256000000
+[0000] [00051.0] scheduler_splittasks: space_subsize_self_grav= 32000
+[0000] [00051.0] scheduler_splittasks: space_subsize_pair_grav= 256000000
+[0000] [00051.0] engine_maketasks: Splitting tasks took 0.772 ms.
+[0000] [00051.0] engine_maketasks: Counting and linking tasks took 27.089 ms.
+[0000] [00051.0] engine_maketasks: Setting super-pointers took 26.185 ms.
+[0000] [00051.0] engine_maketasks: Making extra hydroloop tasks took 0.002 ms.
+[0000] [00051.1] engine_maketasks: Linking gravity tasks took 75.521 ms.
+[0000] [00051.1] engine_maketasks: Creating send tasks took 2.463 ms.
+[0000] [00051.2] proxy_tags_exchange: Cell pack tags took 40.223 ms.
+[0000] [00051.9] proxy_tags_exchange: Cell unpack tags took 724.064 ms.
+[0000] [00051.9] engine_maketasks: Exchanging cell tags took 827.048 ms.
+[0000] [00052.0] engine_maketasks: Creating recv tasks took 15.718 ms.
+[0000] [00052.0] engine_allocate_foreign_particles: Counting number of foreign particles took 0.678 ms.
+[0000] [00052.0] engine_allocate_foreign_particles: Allocating 0/130746886/0/0 foreign part/gpart/spart/bpart (0/11970/0/0 MB)
+[0000] [00052.0] engine_allocate_foreign_particles: Re-allocations 0/130746886/0/0 part/gpart/spart/bpart (0/11970/0/0 MB)
+[0000] [00052.1] engine_allocate_foreign_particles: Recursively linking foreign arrays took 107.907 ms.
+[0000] [00052.1] engine_maketasks: Nr. of tasks: 252576 allocated tasks: 51974352 ratio: 0.004860 memory use: 4758 MB.
+[0000] [00052.1] engine_maketasks: Nr. of links: 436612 allocated links: 5293475 ratio: 0.082481 memory use: 80 MB.
+[0000] [00052.1] engine_maketasks: Actual usage: tasks/cell: 0.052264 links/task: 1.728636
+[0000] [00052.1] engine_maketasks: Setting unlocks took 11.436 ms.
+[0000] [00052.1] engine_maketasks: Ranking the tasks took 16.039 ms.
+[0000] [00052.1] scheduler_reweight: took 16.764 ms.
+[0000] [00052.1] engine_maketasks: took 1182.880 ms (including reweight).
+[0000] [00052.1] space_list_useful_top_level_cells: Have 6173 local top-level cells with tasks (total=8802)
+[0000] [00052.1] space_list_useful_top_level_cells: Have 8775 top-level cells with particles (total=8802)
+[0000] [00052.1] space_list_useful_top_level_cells: took 0.255 ms.
+[0000] [00052.3] engine_marktasks: took 157.939 ms.
+[0000] [00052.3] engine_print_task_counts: Total = 252576 (per cell = 0.05)
+[0000] [00052.3] engine_print_task_counts: task counts are [ none=0 sort=0 self=2131 pair=209608 sub_self=0 sub_pair=0 init_grav=2131 init_grav_out=2131 ghost_in=0 ghost=0 ghost_out=0 extra_ghost=0 drift_part=0 drift_spart=0 drift_sink=0 drift_bpart=0 drift_gpart=2131 drift_gpart_out=2131 hydro_end_force=0 kick1=2131 kick2=2131 timestep=2131 timestep_limiter=0 timestep_sync=0 collect=2131 send=7685 recv=7580 pack=0 unpack=0 grav_long_range=1026 grav_long_range_bkg=1105 grav_mm=0 grav_down_in=2131 grav_down=2131 grav_end_force=2131 cooling=0 cooling_in=0 cooling_out=0 star_formation=0 star_formation_in=0 star_formation_out=0 star_formation_sink=0 csds=0 stars_in=0 stars_out=0 stars_ghost_in=0 stars_density_ghost=0 stars_ghost_out=0 stars_prep_ghost1=0 hydro_prep_ghost1=0 stars_prep_ghost2=0 stars_sort=0 stars_resort=0 bh_in=0 bh_out=0 bh_density_ghost=0 bh_swallow_ghost1=0 bh_swallow_ghost2=0 bh_swallow_ghost3=0 fof_self=0 fof_pair=0 neutrino_weight=0 sink_in=0 sink_ghost1=0 sink_ghost2=0 sink_out=0 rt_in=0 rt_out=0 sink_formation=0 rt_ghost1=0 rt_ghost2=0 rt_transport_out=0 rt_tchem=0 rt_advance_cell_time=0 rt_sorts=0 rt_collect_times=0 skipped=0 ]
+[0000] [00052.3] engine_print_task_counts: nr_parts = 0.
+[0000] [00052.3] engine_print_task_counts: nr_gparts = 43402653.
+[0000] [00052.3] engine_print_task_counts: nr_sink = 0.
+[0000] [00052.3] engine_print_task_counts: nr_sparts = 0.
+[0000] [00052.3] engine_print_task_counts: nr_bparts = 0.
+[0000] [00052.3] engine_print_task_counts: took 0.626 ms.
+[0000] [00052.3] engine_rebuild: took 3669.984 ms.
+[0000] [00052.4] space_init_parts: took 0.009 ms.
+[0000] [00052.5] space_init_gparts: took 122.622 ms.
+[0000] [00052.5] space_init_sparts: took 0.001 ms.
+[0000] [00052.5] space_init_bparts: took 0.000 ms.
+[0000] [00052.5] space_init_sinks: took 0.000 ms.
+[0000] [00052.5] engine_print_task_counts: Total = 252576 (per cell = 0.05)
+[0000] [00052.5] engine_print_task_counts: task counts are [ none=0 sort=0 self=2131 pair=209608 sub_self=0 sub_pair=0 init_grav=2131 init_grav_out=2131 ghost_in=0 ghost=0 ghost_out=0 extra_ghost=0 drift_part=0 drift_spart=0 drift_sink=0 drift_bpart=0 drift_gpart=0 drift_gpart_out=2131 hydro_end_force=0 kick1=2131 kick2=2131 timestep=2131 timestep_limiter=0 timestep_sync=0 collect=2131 send=7685 recv=7580 pack=0 unpack=0 grav_long_range=1026 grav_long_range_bkg=1105 grav_mm=0 grav_down_in=2131 grav_down=2131 grav_end_force=2131 cooling=0 cooling_in=0 cooling_out=0 star_formation=0 star_formation_in=0 star_formation_out=0 star_formation_sink=0 csds=0 stars_in=0 stars_out=0 stars_ghost_in=0 stars_density_ghost=0 stars_ghost_out=0 stars_prep_ghost1=0 hydro_prep_ghost1=0 stars_prep_ghost2=0 stars_sort=0 stars_resort=0 bh_in=0 bh_out=0 bh_density_ghost=0 bh_swallow_ghost1=0 bh_swallow_ghost2=0 bh_swallow_ghost3=0 fof_self=0 fof_pair=0 neutrino_weight=0 sink_in=0 sink_ghost1=0 sink_ghost2=0 sink_out=0 rt_in=0 rt_out=0 sink_formation=0 rt_ghost1=0 rt_ghost2=0 rt_transport_out=0 rt_tchem=0 rt_advance_cell_time=0 rt_sorts=0 rt_collect_times=0 skipped=2131 ]
+[0000] [00052.5] engine_print_task_counts: nr_parts = 0.
+[0000] [00052.5] engine_print_task_counts: nr_gparts = 43402653.
+[0000] [00052.5] engine_print_task_counts: nr_sink = 0.
+[0000] [00052.5] engine_print_task_counts: nr_sparts = 0.
+[0000] [00052.5] engine_print_task_counts: nr_bparts = 0.
+[0000] [00052.5] engine_print_task_counts: took 0.775 ms.
+[0000] [00052.7] scheduler_write_dependencies: Printing task graph took 115.943 ms.
+[0000] [00068.5] engine_launch: (tasks) took 15811.176 ms.
+[0000] [00068.5] engine_collect_end_of_step: took 1.350 ms.
+[0000] [00068.9] engine_init_particles: took 33914.875 ms.
+[0000] [00069.1] engine_print_stats: Saving statistics at a=7.812500e-03
+[0000] [00069.2] engine_print_stats: took 61.084 ms.
+#   Step           Time Scale-factor     Redshift      Time-step Time-bins      Updates    g-Updates    s-Updates sink-Updates    b-Updates  Wall-clock time [ms]  Props    Dead time [ms] 
+       0   1.225990e-05    0.0078125  127.0000000   0.000000e+00    1   56            0    169723005            0            0            0             33914.875    267          8634.494
+[0000] [00069.2] engine_step: Writing step info to files took 0.019 ms
+[0000] [00069.2] engine_step: Updating general quantities took 0.001 ms
+[0000] [00069.2] engine_repartition_trigger: took 0.001 ms
+[0000] [00069.2] engine_prepare: Communicating rebuild flag took 0.015 ms.
+[0000] [00069.2] engine_drift_all: Drifting all to a=7.860204276077e-03
+[0000] [00069.3] space_synchronize_particle_positions: took 0.016 ms.
+[0000] [00069.3] engine_drift_all: took 132.479 ms.
+[0000] [00069.3] scheduler_report_task_times: *** CPU time spent in different task categories:
+[0000] [00069.3] scheduler_report_task_times: ***                drift:     0.00 ms (0.00 %)
+[0000] [00069.3] scheduler_report_task_times: ***                sorts:     0.00 ms (0.00 %)
+[0000] [00069.3] scheduler_report_task_times: ***               resort:     0.00 ms (0.00 %)
+[0000] [00069.3] scheduler_report_task_times: ***                hydro:     0.00 ms (0.00 %)
+[0000] [00069.3] scheduler_report_task_times: ***              gravity: 330023.66 ms (65.23 %)
+[0000] [00069.3] scheduler_report_task_times: ***             feedback:     0.00 ms (0.00 %)
+[0000] [00069.3] scheduler_report_task_times: ***          black holes:     0.00 ms (0.00 %)
+[0000] [00069.3] scheduler_report_task_times: ***              cooling:     0.00 ms (0.00 %)
+[0000] [00069.3] scheduler_report_task_times: ***       star formation:     0.00 ms (0.00 %)
+[0000] [00069.3] scheduler_report_task_times: ***              limiter:     0.00 ms (0.00 %)
+[0000] [00069.3] scheduler_report_task_times: ***                 sync:     0.00 ms (0.00 %)
+[0000] [00069.3] scheduler_report_task_times: ***     time integration: 10174.04 ms (2.01 %)
+[0000] [00069.3] scheduler_report_task_times: ***                  mpi:   785.84 ms (0.16 %)
+[0000] [00069.3] scheduler_report_task_times: ***                 pack:     0.00 ms (0.00 %)
+[0000] [00069.3] scheduler_report_task_times: ***                  fof:     0.00 ms (0.00 %)
+[0000] [00069.3] scheduler_report_task_times: ***               others:     0.00 ms (0.00 %)
+[0000] [00069.3] scheduler_report_task_times: ***             neutrino:     0.00 ms (0.00 %)
+[0000] [00069.3] scheduler_report_task_times: ***                 sink:     0.00 ms (0.00 %)
+[0000] [00069.3] scheduler_report_task_times: ***                   RT:     0.00 ms (0.00 %)
+[0000] [00069.3] scheduler_report_task_times: ***                 CSDS:     0.00 ms (0.00 %)
+[0000] [00069.3] scheduler_report_task_times: ***            dead time: 164973.62 ms (32.61 %)
+[0000] [00069.3] scheduler_report_task_times: ***                total: 505957.16 ms (100.00 %)
+[0000] [00069.3] scheduler_report_task_times: took 0.982 ms.
+[0000] [00069.3] space_regrid_zoom: h_max is 1.793e+00 (zoom_cell_min=3.600e+00).
+[0000] [00069.3] space_free_cells: took 36.871 ms.
+[0000] [00069.3] space_regrid_zoom: took 39.698 ms.
+[0000] [00069.5] space_gparts_get_cell_index: took 123.186 ms.
+[0000] [00069.5] space_rebuild: Moving non-local particles took 53.750 ms.
+[0000] [00069.5] engine_exchange_strays: sent out 0/3305/0/0 parts/gparts/sparts/bparts, got 0/1084/0/0 back.
+[0000] [00069.5] engine_exchange_strays: took 2.161 ms.
+[0000] [00069.6] space_rebuild: Have 2131 local top-level cells with particles (total=8802)
+[0000] [00069.6] space_rebuild: Have 2137 local top-level cells (total=8802)
+[0000] [00069.6] space_rebuild: hooking up cells took 0.374 ms.
+[0000] [00069.6] space_rebuild: Have 252425 local particles in background cells
+[0000] [00069.6] space_rebuild: Have 362470 local particles in buffer cells
+[0000] [00069.6] space_rebuild: Have 42785537 local particles in zoom cells
+[0000] [00070.0] space_split: Zoom cell tree and multipole construction took 413.372 ms.
+[0000] [00070.0] space_split: Buffer cell tree and multipole construction took 6.667 ms.
+[0000] [00070.0] space_split: Background cell tree and multipole construction took 2.460 ms.
+[0000] [00070.2] space_rebuild: took 924.768 ms.
+[0000] [00070.2] engine_rebuild: Nr. of top-level cells: 8802 Nr. of local cells: 1249950 memory use: 1306 MB.
+[0000] [00070.2] engine_rebuild: Nr. of top-level mpoles: 8802 Nr. of local mpoles: 1249950 memory use: 499 MB.
+[0000] [00070.2] engine_rebuild: Space has memory for 0/52083183/0/0/0 part/gpart/spart/sink/bpart (0/4768/0/0/0 MB)
+[0000] [00070.2] engine_rebuild: Space holds 0/43400432/0/0/0 part/gpart/spart/sink/bpart (fracs: 0.000000/0.833291/0.000000/0.000000/0.000000)
+[0000] [00070.2] engine_rebuild: updating particle counts took 16.280 ms.
+[0000] [00070.3] engine_exchange_top_multipoles: took 3.533 ms.
+[0000] [00070.3] void_space_split: Void cell tree and multipole construction took 0.802 ms.
+[0000] [00070.3] proxy_cells_exchange: Counting cells to send took 4.002 ms.
+[0000] [00070.3] proxy_cells_exchange: Packing cells took 50.063 ms.
+[0000] [00071.5] proxy_cells_exchange: Un-packing cells took 1084.667 ms.
+[0000] [00071.5] engine_exchange_cells: took 1248.862 ms.
+[0000] [00071.5] engine_estimate_nr_tasks: tasks per cell estimated as: 11.00, maximum tasks: 51974352
+[0000] [00071.5] engine_maketasks: Making hydro tasks took 0.001 ms.
+[0000] [00071.6] engine_maketasks: Making zoom->zoom gravity tasks took 37.690 ms.
+[0000] [00071.6] engine_maketasks: Making bkg->bkg gravity tasks took 5.618 ms.
+[0000] [00071.6] engine_maketasks: Making buffer->buffer gravity tasks took 0.516 ms.
+[0000] [00071.6] engine_maketasks: Making zoom->buffer gravity tasks took 2.783 ms.
+[0000] [00071.6] engine_maketasks: Making buffer->bkg gravity tasks took 0.668 ms.
+[0000] [00071.6] scheduler_splittasks: space_subsize_self_hydro= 32000
+[0000] [00071.6] scheduler_splittasks: space_subsize_pair_hydro= 256000000
+[0000] [00071.6] scheduler_splittasks: space_subsize_self_stars= 32000
+[0000] [00071.6] scheduler_splittasks: space_subsize_pair_stars= 256000000
+[0000] [00071.6] scheduler_splittasks: space_subsize_self_grav= 32000
+[0000] [00071.6] scheduler_splittasks: space_subsize_pair_grav= 256000000
+[0000] [00071.6] engine_maketasks: Splitting tasks took 0.763 ms.
+[0000] [00071.6] engine_maketasks: Counting and linking tasks took 24.834 ms.
+[0000] [00071.6] engine_maketasks: Setting super-pointers took 26.257 ms.
+[0000] [00071.6] engine_maketasks: Making extra hydroloop tasks took 0.009 ms.
+[0000] [00071.7] engine_maketasks: Linking gravity tasks took 70.814 ms.
+[0000] [00071.7] engine_maketasks: Creating send tasks took 4.309 ms.
+[0000] [00071.8] proxy_tags_exchange: Cell pack tags took 38.927 ms.
+[0000] [00072.5] proxy_tags_exchange: Cell unpack tags took 727.620 ms.
+[0000] [00072.5] engine_maketasks: Exchanging cell tags took 829.139 ms.
+[0000] [00072.6] engine_maketasks: Creating recv tasks took 14.652 ms.
+[0000] [00072.6] engine_allocate_foreign_particles: Counting number of foreign particles took 0.730 ms.
+[0000] [00072.6] engine_allocate_foreign_particles: Allocating 0/130748775/0/0 foreign part/gpart/spart/bpart (0/11970/0/0 MB)
+[0000] [00072.6] engine_allocate_foreign_particles: Re-allocations 0/130748775/0/0 part/gpart/spart/bpart (0/11970/0/0 MB)
+[0000] [00072.7] engine_allocate_foreign_particles: Recursively linking foreign arrays took 110.062 ms.
+[0000] [00072.7] engine_maketasks: Nr. of tasks: 253021 allocated tasks: 51974352 ratio: 0.004868 memory use: 4758 MB.
+[0000] [00072.7] engine_maketasks: Nr. of links: 437499 allocated links: 5304525 ratio: 0.082477 memory use: 80 MB.
+[0000] [00072.7] engine_maketasks: Actual usage: tasks/cell: 0.052351 links/task: 1.729102
+[0000] [00072.7] engine_maketasks: Setting unlocks took 11.416 ms.
+[0000] [00072.7] engine_maketasks: Ranking the tasks took 16.070 ms.
+[0000] [00072.7] scheduler_reweight: took 16.900 ms.
+[0000] [00072.7] engine_maketasks: took 1179.594 ms (including reweight).
+[0000] [00072.7] space_list_useful_top_level_cells: Have 6173 local top-level cells with tasks (total=8802)
+[0000] [00072.7] space_list_useful_top_level_cells: Have 8775 top-level cells with particles (total=8802)
+[0000] [00072.7] space_list_useful_top_level_cells: took 0.243 ms.
+[0000] [00072.8] engine_marktasks: took 132.412 ms.
+[0000] [00072.8] engine_print_task_counts: System total: 1009178, no. cells: 19335444
+[0000] [00072.8] engine_print_task_counts: Total = 253021 (per cell = 0.05)
+[0000] [00072.8] engine_print_task_counts: Total = 253021 (maximum per cell = 0.07)
+[0000] [00072.8] engine_print_task_counts: task counts are [ none=0 sort=0 self=2131 pair=210050 sub_self=0 sub_pair=0 init_grav=2131 init_grav_out=2131 ghost_in=0 ghost=0 ghost_out=0 extra_ghost=0 drift_part=0 drift_spart=0 drift_sink=0 drift_bpart=0 drift_gpart=2131 drift_gpart_out=2131 hydro_end_force=0 kick1=2131 kick2=2131 timestep=2131 timestep_limiter=0 timestep_sync=0 collect=2131 send=7685 recv=7583 pack=0 unpack=0 grav_long_range=1026 grav_long_range_bkg=1105 grav_mm=0 grav_down_in=2131 grav_down=2131 grav_end_force=2131 cooling=0 cooling_in=0 cooling_out=0 star_formation=0 star_formation_in=0 star_formation_out=0 star_formation_sink=0 csds=0 stars_in=0 stars_out=0 stars_ghost_in=0 stars_density_ghost=0 stars_ghost_out=0 stars_prep_ghost1=0 hydro_prep_ghost1=0 stars_prep_ghost2=0 stars_sort=0 stars_resort=0 bh_in=0 bh_out=0 bh_density_ghost=0 bh_swallow_ghost1=0 bh_swallow_ghost2=0 bh_swallow_ghost3=0 fof_self=0 fof_pair=0 neutrino_weight=0 sink_in=0 sink_ghost1=0 sink_ghost2=0 sink_out=0 rt_in=0 rt_out=0 sink_formation=0 rt_ghost1=0 rt_ghost2=0 rt_transport_out=0 rt_tchem=0 rt_advance_cell_time=0 rt_sorts=0 rt_collect_times=0 skipped=0 ]
+[0000] [00072.8] engine_print_task_counts: nr_parts = 0.
+[0000] [00072.8] engine_print_task_counts: nr_gparts = 43400432.
+[0000] [00072.8] engine_print_task_counts: nr_sink = 0.
+[0000] [00072.8] engine_print_task_counts: nr_sparts = 0.
+[0000] [00072.8] engine_print_task_counts: nr_bparts = 0.
+[0000] [00072.8] engine_print_task_counts: took 0.577 ms.
+[0000] [00072.8] engine_rebuild: took 3542.125 ms.
+[0000] [00072.8] engine_prepare: took 3674.627 ms (including unskip, rebuild and reweight).
+[0000] [00073.0] compute_potential_global: Gpart assignment took 197.923 ms.
+[0000] [00074.2] compute_potential_global: Mesh MPI-reduction took 1060.087 ms.
+[0000] [00074.4] compute_potential_global: Forward Fourier transform took 270.910 ms.
+[0000] [00074.5] compute_potential_global: Applying Green function took 33.985 ms.
+[0000] [00074.8] compute_potential_global: Reverse Fourier transform took 285.146 ms.
+[0000] [00075.1] compute_potential_global: Computing mesh accelerations took 301.632 ms.
+[0000] [00075.1] engine_recompute_displacement_constraint: max_dt_RMS_displacement = 1.434978e-06
+[0000] [00075.1] engine_recompute_displacement_constraint: took 24.112 ms.
+[0000] [00086.5] engine_launch: (tasks) took 11426.714 ms.
+[0000] [00086.5] engine_collect_end_of_step: took 0.642 ms.
+       1   1.237237e-05    0.0078602  126.2231567   1.124624e-07   47   47            0    169723005            0            0            0             17350.127    257          2322.246
+[0000] [00086.5] engine_step: Writing step info to files took 0.014 ms
+[0000] [00086.5] engine_step: Updating general quantities took 0.001 ms
+[0000] [00086.5] engine_repartition_trigger: trigger fraction 0.183 > 0.100 will repartition
+[0000] [00086.5] engine_repartition_trigger: took 8.737 ms
+[0000] [00086.5] engine_prepare: Communicating rebuild flag took 0.006 ms.
+[0000] [00086.5] engine_drift_all: Drifting all to a=7.908199841491e-03
+[0000] [00086.7] space_synchronize_particle_positions: took 0.012 ms.
+[0000] [00086.7] engine_drift_all: took 143.147 ms.
+[0000] [00087.1] repart_edge_metis_zoom: weight mapper took 159.129 ms.
+[0000] [00087.8] partition_repartition: took 1078.750 ms.
+[0000] [00087.8] space_free_cells: took 35.225 ms.
+[0000] [00087.8] scheduler_report_task_times: *** CPU time spent in different task categories:
+[0000] [00087.8] scheduler_report_task_times: ***                drift: 20682.96 ms (5.66 %)
+[0000] [00087.8] scheduler_report_task_times: ***                sorts:     0.00 ms (0.00 %)
+[0000] [00087.8] scheduler_report_task_times: ***               resort:     0.00 ms (0.00 %)
+[0000] [00087.8] scheduler_report_task_times: ***                hydro:     0.00 ms (0.00 %)
+[0000] [00087.8] scheduler_report_task_times: ***              gravity: 307700.88 ms (84.15 %)
+[0000] [00087.8] scheduler_report_task_times: ***             feedback:     0.00 ms (0.00 %)
+[0000] [00087.8] scheduler_report_task_times: ***          black holes:     0.00 ms (0.00 %)
+[0000] [00087.8] scheduler_report_task_times: ***              cooling:     0.00 ms (0.00 %)
+[0000] [00087.8] scheduler_report_task_times: ***       star formation:     0.00 ms (0.00 %)
+[0000] [00087.8] scheduler_report_task_times: ***              limiter:     0.00 ms (0.00 %)
+[0000] [00087.8] scheduler_report_task_times: ***                 sync:     0.00 ms (0.00 %)
+[0000] [00087.8] scheduler_report_task_times: ***     time integration:  8714.68 ms (2.38 %)
+[0000] [00087.8] scheduler_report_task_times: ***                  mpi:   492.99 ms (0.13 %)
+[0000] [00087.8] scheduler_report_task_times: ***                 pack:     0.00 ms (0.00 %)
+[0000] [00087.8] scheduler_report_task_times: ***                  fof:     0.00 ms (0.00 %)
+[0000] [00087.8] scheduler_report_task_times: ***               others:     0.00 ms (0.00 %)
+[0000] [00087.8] scheduler_report_task_times: ***             neutrino:     0.00 ms (0.00 %)
+[0000] [00087.8] scheduler_report_task_times: ***                 sink:     0.00 ms (0.00 %)
+[0000] [00087.8] scheduler_report_task_times: ***                   RT:     0.00 ms (0.00 %)
+[0000] [00087.8] scheduler_report_task_times: ***                 CSDS:     0.00 ms (0.00 %)
+[0000] [00087.8] scheduler_report_task_times: ***            dead time: 28062.84 ms (7.67 %)
+[0000] [00087.8] scheduler_report_task_times: ***                total: 365654.38 ms (100.00 %)
+[0000] [00087.8] scheduler_report_task_times: took 1.020 ms.
+[0000] [00088.3] engine_redistribute: 113913636 of 169723005 (67.12%) of g-particles moved
+[0000] [00089.1] engine_redistribute: node 0 now has 0 parts, 0 sparts, 0 bparts and 44378258 gparts in 2294 cells.
+[0000] [00089.1] engine_redistribute: took 1299.703 ms.
+[0000] [00089.1] engine_makeproxies_with_zoom_region: Looking for proxies up to 11 top-level zoom cells away (delta_m=11 delta_p=11)
+[0000] [00089.9] engine_makeproxies_with_zoom_region: Looking for proxies up to 11 top-level buffer cells away (delta_m=11 delta_p=11)
+[0000] [00089.9] engine_makeproxies_with_zoom_region: Looking for proxies up to 11 top-level background cells away (delta_m=7 delta_p=7)
+[0000] [00091.1] engine_makeproxies_with_zoom_region: Number of proxies: 3
+[0000] [00091.1] engine_makeproxies_with_zoom_region: took 1981.668 ms.
+[0000] [00091.1] engine_repartition: took 4428.433 ms.
+[0000] [00091.4] space_regrid_zoom: h_max is 1.793e+00 (zoom_cell_min=3.600e+00).
+[0000] [00091.4] space_free_cells: took 0.760 ms.
+[0000] [00091.4] space_regrid_zoom: took 308.995 ms.
+[0000] [00091.5] space_gparts_get_cell_index: took 131.050 ms.
+[0000] [00091.5] space_rebuild: Moving non-local particles took 0.001 ms.
+[0000] [00092.6] space_rebuild: Have 2287 local top-level cells with particles (total=8802)
+[0000] [00092.6] space_rebuild: Have 2294 local top-level cells (total=8802)
+[0000] [00092.6] space_rebuild: hooking up cells took 0.370 ms.
+[0000] [00092.6] space_rebuild: Have 285499 local particles in background cells
+[0000] [00092.6] space_rebuild: Have 375836 local particles in buffer cells
+[0000] [00092.6] space_rebuild: Have 43716923 local particles in zoom cells
+[0000] [00093.2] space_split: Zoom cell tree and multipole construction took 571.117 ms.
+[0000] [00093.2] space_split: Buffer cell tree and multipole construction took 6.010 ms.
+[0000] [00093.2] space_split: Background cell tree and multipole construction took 1.832 ms.
+[0000] [00093.5] space_rebuild: took 2410.761 ms.
+[0000] [00093.5] engine_rebuild: Nr. of top-level cells: 8802 Nr. of local cells: 1280042 memory use: 1337 MB.
+[0000] [00093.5] engine_rebuild: Nr. of top-level mpoles: 8802 Nr. of local mpoles: 1280042 memory use: 511 MB.
+[0000] [00093.5] engine_rebuild: Space has memory for 0/53253909/0/0/0 part/gpart/spart/sink/bpart (0/4875/0/0/0 MB)
+[0000] [00093.5] engine_rebuild: Space holds 0/44378258/0/0/0 part/gpart/spart/sink/bpart (fracs: 0.000000/0.833333/0.000000/0.000000/0.000000)
+[0000] [00093.5] engine_rebuild: updating particle counts took 0.037 ms.
+[0000] [00093.5] engine_exchange_top_multipoles: took 3.556 ms.
+[0000] [00093.5] void_space_split: Void cell tree and multipole construction took 0.808 ms.
+[0000] [00093.5] proxy_cells_exchange: Counting cells to send took 3.235 ms.
+[0000] [00093.6] proxy_cells_exchange: Packing cells took 50.994 ms.
+[0000] [00095.0] proxy_cells_exchange: Un-packing cells took 1352.031 ms.
+[0000] [00095.1] engine_exchange_cells: took 1534.124 ms.
+[0000] [00095.1] engine_estimate_nr_tasks: tasks per cell estimated as: 11.00, maximum tasks: 52032080
+[0000] [00095.1] engine_maketasks: Making hydro tasks took 0.001 ms.
+[0000] [00095.1] engine_maketasks: Making zoom->zoom gravity tasks took 44.967 ms.
+[0000] [00095.1] engine_maketasks: Making bkg->bkg gravity tasks took 6.181 ms.
+[0000] [00095.1] engine_maketasks: Making buffer->buffer gravity tasks took 0.616 ms.
+[0000] [00095.1] engine_maketasks: Making zoom->buffer gravity tasks took 3.157 ms.
+[0000] [00095.1] engine_maketasks: Making buffer->bkg gravity tasks took 0.794 ms.
+[0000] [00095.1] scheduler_splittasks: space_subsize_self_hydro= 32000
+[0000] [00095.1] scheduler_splittasks: space_subsize_pair_hydro= 256000000
+[0000] [00095.1] scheduler_splittasks: space_subsize_self_stars= 32000
+[0000] [00095.1] scheduler_splittasks: space_subsize_pair_stars= 256000000
+[0000] [00095.1] scheduler_splittasks: space_subsize_self_grav= 32000
+[0000] [00095.1] scheduler_splittasks: space_subsize_pair_grav= 256000000
+[0000] [00095.1] engine_maketasks: Splitting tasks took 0.834 ms.
+[0000] [00095.1] engine_maketasks: Counting and linking tasks took 28.989 ms.
+[0000] [00095.2] engine_maketasks: Setting super-pointers took 26.667 ms.
+[0000] [00095.2] engine_maketasks: Making extra hydroloop tasks took 0.002 ms.
+[0000] [00095.2] engine_maketasks: Linking gravity tasks took 72.637 ms.
+[0000] [00095.2] engine_maketasks: Creating send tasks took 4.474 ms.
+[0000] [00095.3] proxy_tags_exchange: Cell pack tags took 67.050 ms.
+[0000] [00096.6] proxy_tags_exchange: Cell unpack tags took 1255.248 ms.
+[0000] [00096.6] engine_maketasks: Exchanging cell tags took 1333.655 ms.
+[0000] [00096.6] engine_maketasks: Creating recv tasks took 19.572 ms.
+[0000] [00096.6] engine_allocate_foreign_particles: Counting number of foreign particles took 0.776 ms.
+[0000] [00096.6] engine_allocate_foreign_particles: Allocating 0/130069172/0/0 foreign part/gpart/spart/bpart (0/11908/0/0 MB)
+[0000] [00096.6] engine_allocate_foreign_particles: Re-allocations 0/130069172/0/0 part/gpart/spart/bpart (0/11908/0/0 MB)
+[0000] [00096.7] engine_allocate_foreign_particles: Recursively linking foreign arrays took 107.718 ms.
+[0000] [00096.7] engine_maketasks: Nr. of tasks: 269474 allocated tasks: 52032080 ratio: 0.005179 memory use: 4763 MB.
+[0000] [00096.7] engine_maketasks: Nr. of links: 463391 allocated links: 5591200 ratio: 0.082879 memory use: 85 MB.
+[0000] [00096.7] engine_maketasks: Actual usage: tasks/cell: 0.055695 links/task: 1.719613
+[0000] [00096.7] engine_maketasks: Setting unlocks took 11.734 ms.
+[0000] [00096.7] engine_maketasks: Ranking the tasks took 16.960 ms.
+[0000] [00096.8] scheduler_reweight: took 17.745 ms.
+[0000] [00096.8] engine_maketasks: took 1704.218 ms (including reweight).
+[0000] [00096.8] space_list_useful_top_level_cells: Have 6797 local top-level cells with tasks (total=8802)
+[0000] [00096.8] space_list_useful_top_level_cells: Have 8775 top-level cells with particles (total=8802)
+[0000] [00096.8] space_list_useful_top_level_cells: took 0.164 ms.
+[0000] [00097.0] engine_marktasks: took 216.141 ms.
+[0000] [00097.0] engine_print_task_counts: System total: 998063, no. cells: 19337192
+[0000] [00097.0] engine_print_task_counts: Total = 269474 (per cell = 0.06)
+[0000] [00097.0] engine_print_task_counts: Total = 269474 (maximum per cell = 0.07)
+[0000] [00097.0] engine_print_task_counts: task counts are [ none=0 sort=0 self=2287 pair=221361 sub_self=0 sub_pair=0 init_grav=2287 init_grav_out=2287 ghost_in=0 ghost=0 ghost_out=0 extra_ghost=0 drift_part=0 drift_spart=0 drift_sink=0 drift_bpart=0 drift_gpart=2287 drift_gpart_out=2287 hydro_end_force=0 kick1=2287 kick2=2287 timestep=2287 timestep_limiter=0 timestep_sync=0 collect=2287 send=9881 recv=8501 pack=0 unpack=0 grav_long_range=1107 grav_long_range_bkg=1180 grav_mm=0 grav_down_in=2287 grav_down=2287 grav_end_force=2287 cooling=0 cooling_in=0 cooling_out=0 star_formation=0 star_formation_in=0 star_formation_out=0 star_formation_sink=0 csds=0 stars_in=0 stars_out=0 stars_ghost_in=0 stars_density_ghost=0 stars_ghost_out=0 stars_prep_ghost1=0 hydro_prep_ghost1=0 stars_prep_ghost2=0 stars_sort=0 stars_resort=0 bh_in=0 bh_out=0 bh_density_ghost=0 bh_swallow_ghost1=0 bh_swallow_ghost2=0 bh_swallow_ghost3=0 fof_self=0 fof_pair=0 neutrino_weight=0 sink_in=0 sink_ghost1=0 sink_ghost2=0 sink_out=0 rt_in=0 rt_out=0 sink_formation=0 rt_ghost1=0 rt_ghost2=0 rt_transport_out=0 rt_tchem=0 rt_advance_cell_time=0 rt_sorts=0 rt_collect_times=0 skipped=0 ]
+[0000] [00097.0] engine_print_task_counts: nr_parts = 0.
+[0000] [00097.0] engine_print_task_counts: nr_gparts = 44378258.
+[0000] [00097.0] engine_print_task_counts: nr_sink = 0.
+[0000] [00097.0] engine_print_task_counts: nr_sparts = 0.
+[0000] [00097.0] engine_print_task_counts: nr_bparts = 0.
+[0000] [00097.0] engine_print_task_counts: took 0.596 ms.
+[0000] [00097.0] engine_rebuild: took 5870.655 ms.
+[0000] [00097.0] engine_prepare: took 10444.344 ms (including unskip, rebuild and reweight).
+[0000] [00097.2] compute_potential_global: Gpart assignment took 228.284 ms.
+[0000] [00098.3] compute_potential_global: Mesh MPI-reduction took 1055.429 ms.
+[0000] [00098.5] compute_potential_global: Forward Fourier transform took 269.129 ms.
+[0000] [00098.6] compute_potential_global: Applying Green function took 34.823 ms.
+[0000] [00098.8] compute_potential_global: Reverse Fourier transform took 270.173 ms.
+[0000] [00099.2] compute_potential_global: Computing mesh accelerations took 321.716 ms.
+[0000] [00099.2] engine_recompute_displacement_constraint: max_dt_RMS_displacement = 1.439393e-06
+[0000] [00099.2] engine_recompute_displacement_constraint: took 0.047 ms.
+[0000] [00111.0] engine_launch: (tasks) took 11857.622 ms.
+[0000] [00111.0] engine_collect_end_of_step: took 0.759 ms.
+       2   1.248586e-05    0.0079082  125.4510281   1.134940e-07   47   48            0    169723005            0            0            0             24496.936    263          2218.450
+[0000] [00111.0] engine_step: Writing step info to files took 0.011 ms
+[0000] [00111.0] engine_step: Updating general quantities took 0.001 ms
+[0000] [00111.0] engine_repartition_trigger: took 0.001 ms
+[0000] [00111.0] engine_prepare: Communicating rebuild flag took 0.005 ms.
+[0000] [00111.0] engine_drift_all: Drifting all to a=7.956488474900e-03
+[0000] [00111.2] space_synchronize_particle_positions: took 0.010 ms.
+[0000] [00111.2] engine_drift_all: took 138.564 ms.
+[0000] [00111.2] scheduler_report_task_times: *** CPU time spent in different task categories:
+[0000] [00111.2] scheduler_report_task_times: ***                drift: 24234.76 ms (6.39 %)
+[0000] [00111.2] scheduler_report_task_times: ***                sorts:     0.00 ms (0.00 %)
+[0000] [00111.2] scheduler_report_task_times: ***               resort:     0.00 ms (0.00 %)
+[0000] [00111.2] scheduler_report_task_times: ***                hydro:     0.00 ms (0.00 %)
+[0000] [00111.2] scheduler_report_task_times: ***              gravity: 296803.88 ms (78.22 %)
+[0000] [00111.2] scheduler_report_task_times: ***             feedback:     0.00 ms (0.00 %)
+[0000] [00111.2] scheduler_report_task_times: ***          black holes:     0.00 ms (0.00 %)
+[0000] [00111.2] scheduler_report_task_times: ***              cooling:     0.00 ms (0.00 %)
+[0000] [00111.2] scheduler_report_task_times: ***       star formation:     0.00 ms (0.00 %)
+[0000] [00111.2] scheduler_report_task_times: ***              limiter:     0.00 ms (0.00 %)
+[0000] [00111.2] scheduler_report_task_times: ***                 sync:     0.00 ms (0.00 %)
+[0000] [00111.2] scheduler_report_task_times: ***     time integration: 11626.26 ms (3.06 %)
+[0000] [00111.2] scheduler_report_task_times: ***                  mpi:   417.17 ms (0.11 %)
+[0000] [00111.2] scheduler_report_task_times: ***                 pack:     0.00 ms (0.00 %)
+[0000] [00111.2] scheduler_report_task_times: ***                  fof:     0.00 ms (0.00 %)
+[0000] [00111.2] scheduler_report_task_times: ***               others:     0.00 ms (0.00 %)
+[0000] [00111.2] scheduler_report_task_times: ***             neutrino:     0.00 ms (0.00 %)
+[0000] [00111.2] scheduler_report_task_times: ***                 sink:     0.00 ms (0.00 %)
+[0000] [00111.2] scheduler_report_task_times: ***                   RT:     0.00 ms (0.00 %)
+[0000] [00111.2] scheduler_report_task_times: ***                 CSDS:     0.00 ms (0.00 %)
+[0000] [00111.2] scheduler_report_task_times: ***            dead time: 46361.31 ms (12.22 %)
+[0000] [00111.2] scheduler_report_task_times: ***                total: 379443.34 ms (100.00 %)
+[0000] [00111.2] scheduler_report_task_times: took 1.025 ms.
+[0000] [00111.2] space_regrid_zoom: h_max is 1.793e+00 (zoom_cell_min=3.600e+00).
+[0000] [00111.2] space_free_cells: took 35.858 ms.
+[0000] [00111.2] space_regrid_zoom: took 35.902 ms.
+[0000] [00111.3] space_gparts_get_cell_index: took 125.034 ms.
+[0000] [00111.4] space_rebuild: Moving non-local particles took 55.411 ms.
+[0000] [00111.4] engine_exchange_strays: sent out 0/6471/0/0 parts/gparts/sparts/bparts, got 0/5273/0/0 back.
+[0000] [00111.4] engine_exchange_strays: took 4.248 ms.
+[0000] [00111.5] space_rebuild: Have 2287 local top-level cells with particles (total=8802)
+[0000] [00111.5] space_rebuild: Have 2294 local top-level cells (total=8802)
+[0000] [00111.5] space_rebuild: hooking up cells took 0.362 ms.
+[0000] [00111.5] space_rebuild: Have 285499 local particles in background cells
+[0000] [00111.5] space_rebuild: Have 375828 local particles in buffer cells
+[0000] [00111.5] space_rebuild: Have 43715733 local particles in zoom cells
+[0000] [00111.9] space_split: Zoom cell tree and multipole construction took 426.781 ms.
+[0000] [00111.9] space_split: Buffer cell tree and multipole construction took 6.466 ms.
+[0000] [00111.9] space_split: Background cell tree and multipole construction took 2.222 ms.
+[0000] [00112.2] space_rebuild: took 1076.868 ms.
+[0000] [00112.2] engine_rebuild: Nr. of top-level cells: 8802 Nr. of local cells: 1280007 memory use: 1337 MB.
+[0000] [00112.2] engine_rebuild: Nr. of top-level mpoles: 8802 Nr. of local mpoles: 1280007 memory use: 511 MB.
+[0000] [00112.2] engine_rebuild: Space has memory for 0/53253909/0/0/0 part/gpart/spart/sink/bpart (0/4875/0/0/0 MB)
+[0000] [00112.2] engine_rebuild: Space holds 0/44377060/0/0/0 part/gpart/spart/sink/bpart (fracs: 0.000000/0.833311/0.000000/0.000000/0.000000)
+[0000] [00112.3] engine_rebuild: updating particle counts took 33.022 ms.
+[0000] [00112.3] engine_exchange_top_multipoles: took 3.552 ms.
+[0000] [00112.3] void_space_split: Void cell tree and multipole construction took 0.814 ms.
+[0000] [00112.3] proxy_cells_exchange: Counting cells to send took 3.846 ms.
+[0000] [00112.4] proxy_cells_exchange: Packing cells took 48.043 ms.
+[0000] [00113.7] proxy_cells_exchange: Un-packing cells took 1182.693 ms.
+[0000] [00113.7] engine_exchange_cells: took 1351.605 ms.
+[0000] [00113.7] engine_estimate_nr_tasks: tasks per cell estimated as: 11.00, maximum tasks: 52032168
+[0000] [00113.7] engine_maketasks: Making hydro tasks took 0.001 ms.
+[0000] [00113.7] engine_maketasks: Making zoom->zoom gravity tasks took 39.703 ms.
+[0000] [00113.7] engine_maketasks: Making bkg->bkg gravity tasks took 6.119 ms.
+[0000] [00113.7] engine_maketasks: Making buffer->buffer gravity tasks took 0.605 ms.
+[0000] [00113.7] engine_maketasks: Making zoom->buffer gravity tasks took 2.759 ms.
+[0000] [00113.7] engine_maketasks: Making buffer->bkg gravity tasks took 0.842 ms.
+[0000] [00113.7] scheduler_splittasks: space_subsize_self_hydro= 32000
+[0000] [00113.7] scheduler_splittasks: space_subsize_pair_hydro= 256000000
+[0000] [00113.7] scheduler_splittasks: space_subsize_self_stars= 32000
+[0000] [00113.7] scheduler_splittasks: space_subsize_pair_stars= 256000000
+[0000] [00113.7] scheduler_splittasks: space_subsize_self_grav= 32000
+[0000] [00113.7] scheduler_splittasks: space_subsize_pair_grav= 256000000
+[0000] [00113.7] engine_maketasks: Splitting tasks took 0.844 ms.
+[0000] [00113.7] engine_maketasks: Counting and linking tasks took 27.756 ms.
+[0000] [00113.8] engine_maketasks: Setting super-pointers took 26.930 ms.
+[0000] [00113.8] engine_maketasks: Making extra hydroloop tasks took 0.009 ms.
+[0000] [00113.8] engine_maketasks: Linking gravity tasks took 69.436 ms.
+[0000] [00113.8] engine_maketasks: Creating send tasks took 4.611 ms.
+[0000] [00113.9] proxy_tags_exchange: Cell pack tags took 65.944 ms.
+[0000] [00115.2] proxy_tags_exchange: Cell unpack tags took 1254.995 ms.
+[0000] [00115.2] engine_maketasks: Exchanging cell tags took 1331.917 ms.
+[0000] [00115.2] engine_maketasks: Creating recv tasks took 19.859 ms.
+[0000] [00115.2] engine_allocate_foreign_particles: Counting number of foreign particles took 0.738 ms.
+[0000] [00115.2] engine_allocate_foreign_particles: Allocating 0/130102988/0/0 foreign part/gpart/spart/bpart (0/11911/0/0 MB)
+[0000] [00115.2] engine_allocate_foreign_particles: Re-allocations 0/130102988/0/0 part/gpart/spart/bpart (0/11911/0/0 MB)
+[0000] [00115.3] engine_allocate_foreign_particles: Recursively linking foreign arrays took 109.744 ms.
+[0000] [00115.3] engine_maketasks: Nr. of tasks: 268597 allocated tasks: 52032168 ratio: 0.005162 memory use: 4763 MB.
+[0000] [00115.3] engine_maketasks: Nr. of links: 461646 allocated links: 5569500 ratio: 0.082888 memory use: 84 MB.
+[0000] [00115.3] engine_maketasks: Actual usage: tasks/cell: 0.055511 links/task: 1.718731
+[0000] [00115.3] engine_maketasks: Setting unlocks took 11.750 ms.
+[0000] [00115.3] engine_maketasks: Ranking the tasks took 17.006 ms.
+[0000] [00115.4] scheduler_reweight: took 17.626 ms.
+[0000] [00115.4] engine_maketasks: took 1694.961 ms (including reweight).
+[0000] [00115.4] space_list_useful_top_level_cells: Have 6797 local top-level cells with tasks (total=8802)
+[0000] [00115.4] space_list_useful_top_level_cells: Have 8775 top-level cells with particles (total=8802)
+[0000] [00115.4] space_list_useful_top_level_cells: took 0.163 ms.
+[0000] [00115.5] engine_marktasks: took 168.407 ms.
+[0000] [00115.5] engine_print_task_counts: System total: 1121806, no. cells: 19363912
+[0000] [00115.5] engine_print_task_counts: Total = 268597 (per cell = 0.06)
+[0000] [00115.5] engine_print_task_counts: Total = 268597 (maximum per cell = 0.08)
+[0000] [00115.5] engine_print_task_counts: task counts are [ none=0 sort=0 self=2287 pair=220493 sub_self=0 sub_pair=0 init_grav=2287 init_grav_out=2287 ghost_in=0 ghost=0 ghost_out=0 extra_ghost=0 drift_part=0 drift_spart=0 drift_sink=0 drift_bpart=0 drift_gpart=2287 drift_gpart_out=2287 hydro_end_force=0 kick1=2287 kick2=2287 timestep=2287 timestep_limiter=0 timestep_sync=0 collect=2287 send=9872 recv=8501 pack=0 unpack=0 grav_long_range=1107 grav_long_range_bkg=1180 grav_mm=0 grav_down_in=2287 grav_down=2287 grav_end_force=2287 cooling=0 cooling_in=0 cooling_out=0 star_formation=0 star_formation_in=0 star_formation_out=0 star_formation_sink=0 csds=0 stars_in=0 stars_out=0 stars_ghost_in=0 stars_density_ghost=0 stars_ghost_out=0 stars_prep_ghost1=0 hydro_prep_ghost1=0 stars_prep_ghost2=0 stars_sort=0 stars_resort=0 bh_in=0 bh_out=0 bh_density_ghost=0 bh_swallow_ghost1=0 bh_swallow_ghost2=0 bh_swallow_ghost3=0 fof_self=0 fof_pair=0 neutrino_weight=0 sink_in=0 sink_ghost1=0 sink_ghost2=0 sink_out=0 rt_in=0 rt_out=0 sink_formation=0 rt_ghost1=0 rt_ghost2=0 rt_transport_out=0 rt_tchem=0 rt_advance_cell_time=0 rt_sorts=0 rt_collect_times=0 skipped=0 ]
+[0000] [00115.5] engine_print_task_counts: nr_parts = 0.
+[0000] [00115.5] engine_print_task_counts: nr_gparts = 44377060.
+[0000] [00115.5] engine_print_task_counts: nr_sink = 0.
+[0000] [00115.5] engine_print_task_counts: nr_sparts = 0.
+[0000] [00115.5] engine_print_task_counts: nr_bparts = 0.
+[0000] [00115.5] engine_print_task_counts: took 0.672 ms.
+[0000] [00115.5] engine_rebuild: took 4365.666 ms.
+[0000] [00115.5] engine_prepare: took 4504.243 ms (including unskip, rebuild and reweight).
+[0000] [00115.7] compute_potential_global: Gpart assignment took 207.230 ms.
+[0000] [00116.8] compute_potential_global: Mesh MPI-reduction took 1052.565 ms.
+[0000] [00117.1] compute_potential_global: Forward Fourier transform took 271.353 ms.
+[0000] [00117.1] compute_potential_global: Applying Green function took 34.271 ms.
+[0000] [00117.4] compute_potential_global: Reverse Fourier transform took 265.759 ms.
+[0000] [00117.7] compute_potential_global: Computing mesh accelerations took 319.403 ms.
+[0000] [00117.7] engine_recompute_displacement_constraint: max_dt_RMS_displacement = 1.443822e-06
+[0000] [00117.7] engine_recompute_displacement_constraint: took 12.239 ms.
+[0000] [00131.2] engine_launch: (tasks) took 13460.312 ms.
+[0000] [00131.2] engine_collect_end_of_step: took 0.941 ms.
+       3   1.260039e-05    0.0079565  124.6835856   1.145351e-07   47   47            0    169723005            0            0            0             20138.043    257          3913.904

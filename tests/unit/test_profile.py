@@ -142,11 +142,11 @@ class TestResolution:
 
     def test_timer_files_use_profile_cache(self, tmp_path):
         """Timer databases live in the active profile's cache dir."""
-        from swiftsim_cli import src_parser
+        from swiftsim_cli.timing import timer_db
 
         _store(tmp_path)
         expected = profile_mod.PROFILE_FILE.parent / "cache" / "a"
-        assert src_parser._timer_file() == expected / "timers.yaml"
+        assert timer_db._db_cache_dir() == expected / "timer_db"
 
 
 class TestHelpers:

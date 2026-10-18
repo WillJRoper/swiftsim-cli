@@ -25,14 +25,9 @@ from swiftsim_cli.modes.common_args import (
     add_output_arguments,
     add_steps_argument,
 )
-from swiftsim_cli.src_parser import (
-    GENERIC_TIMER_LABELS,
-    TimerDef,
-    TimerInstance,
-    compile_site_patterns,
-    load_timer_db,
-    scan_log_instances_by_step,
-)
+from swiftsim_cli.timing.log_scan import read_log_revision, scan_log
+from swiftsim_cli.timing.timer_db import resolve_timer_db
+from swiftsim_cli.timing.timing_hierarchy import hierarchy_for
 from swiftsim_cli.utilities.io import create_output_path, slugify
 from swiftsim_cli.utilities.plotting import save_figure, should_use_log_scale
 from swiftsim_cli.utilities.step_table import (
@@ -117,8 +112,9 @@ def add_timer_scaling_arguments(subparsers) -> None:
         type=float,
         default=10.0,
         help=(
-            "Minimum per-log percentage contribution required for a timer to "
-            "be included (default: 10)."
+            "Minimum share of the step time (the timer's exclusive time, "
+            "i.e. excluding nested timers) in at least one log for a timer "
+            "to be included (default: 10)."
         ),
     )
     scaling_parser.add_argument(
@@ -247,27 +243,25 @@ def analyse_swift_scaling(
 
     out_dir = TIMERS_OUT_SUBDIR
 
-    timer_db = load_timer_db()
-    compiled = compile_site_patterns(timer_db)
-
     scaling_data: list[ScalingLogData] = []
 
     for log_file in log_files:
         print(f"\nProcessing scaling input: {log_file}")
         rank_count = _extract_rank_count_from_log(log_file)
-        instances_by_step, _ = scan_log_instances_by_step(
-            log_file, compiled, timer_db
-        )
         (
             timer_totals,
             timer_call_counts,
             per_rank_totals,
             per_rank_call_counts,
-        ) = _aggregate_timer_totals(instances_by_step, step_range)
+            step_time,
+        ) = _exclusive_timer_totals(log_file, step_range)
         total_time = sum(timer_totals.values())
         total_call_count = sum(timer_call_counts.values())
+        # Exclusive time as a share of the step time of the emitting ranks,
+        # so nested timers are not double counted.
+        denominator = step_time * max(1, len(per_rank_totals))
         timer_percentages = {
-            timer_id: (100.0 * total / total_time if total_time > 0 else 0.0)
+            timer_id: (100.0 * total / denominator if denominator > 0 else 0)
             for timer_id, total in timer_totals.items()
         }
 
@@ -317,7 +311,6 @@ def analyse_swift_scaling(
         plot_path = _create_scaling_plot(
             scaling_data=scaling_data,
             timer_ids=selected_timers,
-            timer_db=timer_db,
             output_path=output_path,
             prefix=prefix,
             show_plot=show_plot,
@@ -337,7 +330,6 @@ def analyse_swift_scaling(
         table_text = _build_scaling_table(
             scaling_data,
             selected_timers,
-            timer_db,
             min_percent_threshold,
             run_statistic,
             rank_source,
@@ -345,7 +337,6 @@ def analyse_swift_scaling(
         analysis_text = _build_scaling_analysis(
             scaling_data,
             selected_timers,
-            timer_db,
             min_percent_threshold,
             used_log_scale,
             run_statistic,
@@ -373,7 +364,6 @@ def analyse_swift_scaling(
         rank_path = _create_scaling_plot(
             scaling_data=scaling_data,
             timer_ids=selected_timers,
-            timer_db=timer_db,
             output_path=output_path,
             prefix=prefix,
             show_plot=show_plot,
@@ -393,7 +383,6 @@ def analyse_swift_scaling(
             timer_rank_path = _create_timer_rank_scaling_plot(
                 scaling_data=scaling_data,
                 timer_id=timer_id,
-                timer_db=timer_db,
                 ranks=comparable_ranks,
                 output_path=output_path,
                 prefix=prefix,
@@ -402,7 +391,7 @@ def analyse_swift_scaling(
                 filename=(
                     "timer_rank_scaling_"
                     + slugify(
-                        _timer_display_name(timer_id, timer_db),
+                        timer_id,
                         fallback="timer",
                         lowercase=True,
                     )
@@ -414,7 +403,7 @@ def analyse_swift_scaling(
 
     if verbose_ranks:
         imbalance_text = _build_rank_imbalance_table(
-            scaling_data, selected_timers, timer_db
+            scaling_data, selected_timers
         )
         if imbalance_text is not None:
             print("\n" + imbalance_text)
@@ -550,48 +539,48 @@ def _extract_total_runtime_from_log(
     return total_runtime_ms, step_count
 
 
-def _aggregate_timer_totals(
-    instances_by_step: dict[int | None, list[TimerInstance]],
-    step_range: tuple[int, int] | None,
+def _exclusive_timer_totals(
+    log_file: str, step_range: tuple[int, int] | None
 ) -> tuple[
     dict[str, float],
     dict[str, int],
     dict[int, dict[str, float]],
     dict[int, dict[str, int]],
+    float,
 ]:
-    """Aggregate timer totals overall and per emitting rank."""
+    """Exclusive time and calls per timer, overall and per emitting rank.
+
+    Exclusive times (a timer's time minus the timers nested in it) come
+    from the per-step timer trees of each rank, so the totals of nested
+    timers do not overlap.
+
+    Returns:
+        (totals, calls, per-rank totals, per-rank calls, step time in ms
+        of the steps analysed).
+    """
+    db, status = resolve_timer_db(read_log_revision(log_file))
+    print(f"  Timer database: {status}")
+    scan = scan_log(log_file, db)
     timer_totals: dict[str, float] = defaultdict(float)
     timer_call_counts: dict[str, int] = defaultdict(int)
-    per_rank_totals: dict[int, dict[str, float]] = defaultdict(
-        lambda: defaultdict(float)
-    )
-    per_rank_call_counts: dict[int, dict[str, int]] = defaultdict(
-        lambda: defaultdict(int)
-    )
-
-    for step, instances in instances_by_step.items():
-        if step_range is not None:
-            if step is None or step < step_range[0] or step > step_range[1]:
-                continue
-        for instance in instances:
-            timer_totals[instance.timer_id] += instance.time_ms
-            timer_call_counts[instance.timer_id] += 1
-            per_rank_totals[instance.rank][instance.timer_id] += (
-                instance.time_ms
-            )
-            per_rank_call_counts[instance.rank][instance.timer_id] += 1
-
+    per_rank_totals: dict[int, dict[str, float]] = {}
+    per_rank_call_counts: dict[int, dict[str, int]] = {}
+    step_time = 0.0
+    for rank in sorted(scan.timer_ranks):
+        hierarchy = hierarchy_for(scan.steps, rank, db, step_range)
+        step_time = hierarchy.total
+        rows = hierarchy.flat()
+        per_rank_totals[rank] = {key: s.exclusive for key, s, _ in rows}
+        per_rank_call_counts[rank] = {key: s.calls for key, s, _ in rows}
+        for key, stats, _ in rows:
+            timer_totals[key] += stats.exclusive
+            timer_call_counts[key] += stats.calls
     return (
         dict(timer_totals),
         dict(timer_call_counts),
-        {
-            rank: dict(rank_totals)
-            for rank, rank_totals in per_rank_totals.items()
-        },
-        {
-            rank: dict(rank_counts)
-            for rank, rank_counts in per_rank_call_counts.items()
-        },
+        per_rank_totals,
+        per_rank_call_counts,
+        step_time,
     )
 
 
@@ -621,49 +610,9 @@ def _select_timer_ids(
     return [timer_id for timer_id, _, _ in selected]
 
 
-def _timer_display_name(timer_id: str, timer_db: dict[str, TimerDef]) -> str:
-    """Build a readable label for a timer."""
-    timer_def = timer_db[timer_id]
-    label_text = timer_def.label_text.strip()
-    if label_text in {*GENERIC_TIMER_LABELS, "(%s)"}:
-        return timer_def.function
-
-    label = _clean_timer_label_text(label_text)
-    if not label:
-        return timer_def.function
-    return f"{timer_def.function}: {label}"
-
-
-def _clean_timer_label_text(label_text: str) -> str:
-    """Remove timing boilerplate and format tokens from timer labels."""
-    label = label_text.strip()
-
-    # Prefer the descriptive part before the timing suffix when present.
-    if " took " in label:
-        label = label.split(" took ", maxsplit=1)[0]
-    elif label.startswith("took "):
-        label = label[5:]
-
-    label = label.replace("%.3f %s", "")
-    label = label.replace("%s", "")
-    label = label.replace("%d", "")
-    label = label.replace("%f", "")
-
-    # If the remaining text is just a parenthesized qualifier, keep the
-    # content rather than the wrapper punctuation.
-    paren_match = re.fullmatch(r"\((.*)\)\.??", label.strip())
-    if paren_match is not None:
-        label = paren_match.group(1)
-
-    label = re.sub(r"^took\b", "", label).strip()
-    label = re.sub(r"\s+", " ", label).strip(" .:;,-()")
-    return label
-
-
 def _create_scaling_plot(
     scaling_data: list[ScalingLogData],
     timer_ids: list[str],
-    timer_db: dict[str, TimerDef],
     output_path: str | Path | None,
     prefix: str | None,
     show_plot: bool,
@@ -676,9 +625,7 @@ def _create_scaling_plot(
 ) -> Path | None:
     """Create a scaling line plot for the selected timers."""
     include_total_reference = run_statistic == "sum"
-    legend_labels = _build_legend_labels(
-        timer_ids, timer_db, include_total_reference
-    )
+    legend_labels = _build_legend_labels(timer_ids, include_total_reference)
     series_count = len(legend_labels)
     legend_columns = _legend_columns(legend_labels)
     legend_rows = math.ceil(series_count / legend_columns)
@@ -807,16 +754,13 @@ def _legend_columns(labels: list[str]) -> int:
 
 def _build_legend_labels(
     timer_ids: list[str],
-    timer_db: dict[str, TimerDef],
     include_total_reference: bool = True,
 ) -> list[str]:
     """Build wrapped legend labels in plotting order."""
     labels: list[str] = []
     if include_total_reference:
         labels.extend(["Total", "Perfect scaling"])
-    labels.extend(
-        _timer_display_name(timer_id, timer_db) for timer_id in timer_ids
-    )
+    labels.extend(timer_ids)
     return [_wrap_legend_label(label) for label in labels]
 
 
@@ -914,13 +858,12 @@ def _style_scaling_axes(
 def _build_scaling_table(
     scaling_data: list[ScalingLogData],
     timer_ids: list[str],
-    timer_db: dict[str, TimerDef],
     min_percent_threshold: float,
     run_statistic: Literal["sum", "mean"],
     rank_source: Literal["root", "all"],
 ) -> str:
     """Build the main scaling summary table."""
-    headers = ["Timer", "Max %", "Slope", "Scaling"]
+    headers = ["Timer", "Max % of step", "Slope", "Scaling"]
     headers.extend(_log_column_labels(scaling_data))
 
     rows: list[list[str]] = []
@@ -954,7 +897,7 @@ def _build_scaling_table(
         )
         rows.append(
             [
-                _truncate(_timer_display_name(timer_id, timer_db), 64),
+                _truncate(timer_id, 64),
                 f"{max_percent:.1f}%",
                 _format_slope(slope),
                 _describe_scaling(slope),
@@ -976,7 +919,6 @@ def _build_scaling_table(
 def _build_scaling_analysis(
     scaling_data: list[ScalingLogData],
     timer_ids: list[str],
-    timer_db: dict[str, TimerDef],
     min_percent_threshold: float,
     used_log_scale: bool,
     run_statistic: Literal["sum", "mean"],
@@ -1053,8 +995,7 @@ def _build_scaling_analysis(
         lines.append(
             "- Strongest improving timers: "
             + ", ".join(
-                f"{_timer_display_name(timer_id, timer_db)} "
-                f"({_format_slope(slope)})"
+                f"{timer_id} ({_format_slope(slope)})"
                 for timer_id, slope in strongest
             )
             + "."
@@ -1064,8 +1005,7 @@ def _build_scaling_analysis(
         lines.append(
             "- Weakest or regressing timers: "
             + ", ".join(
-                f"{_timer_display_name(timer_id, timer_db)} "
-                f"({_format_slope(slope)})"
+                f"{timer_id} ({_format_slope(slope)})"
                 for timer_id, slope in weakest
             )
             + "."
@@ -1105,7 +1045,6 @@ def _build_scaling_analysis(
 def _build_rank_imbalance_table(
     scaling_data: list[ScalingLogData],
     timer_ids: list[str],
-    timer_db: dict[str, TimerDef],
 ) -> str | None:
     """Summarize per-rank imbalance for the largest run."""
     verbose_logs = [
@@ -1130,7 +1069,7 @@ def _build_rank_imbalance_table(
             continue
         rows.append(
             [
-                _truncate(_timer_display_name(timer_id, timer_db), 64),
+                _truncate(timer_id, 64),
                 _format_time(float(np.mean(positive_values))),
                 _format_time(max(positive_values)),
                 _format_time(min(positive_values)),
@@ -1148,7 +1087,6 @@ def _build_rank_imbalance_table(
 def _create_timer_rank_scaling_plot(
     scaling_data: list[ScalingLogData],
     timer_id: str,
-    timer_db: dict[str, TimerDef],
     ranks: list[int],
     output_path: str | Path | None,
     prefix: str | None,
@@ -1197,7 +1135,7 @@ def _create_timer_rank_scaling_plot(
 
     ax.set_ylabel("Summed Timer Time Over Run (ms)")
     ax.set_title(
-        f"{_timer_display_name(timer_id, timer_db)} Across Ranks",
+        f"{timer_id} Across Ranks",
     )
     _style_scaling_axes(
         ax,

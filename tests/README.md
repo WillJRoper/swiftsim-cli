@@ -9,8 +9,14 @@ tests/
 ├── conftest.py           # Pytest configuration and shared fixtures
 ├── unit/                 # Unit tests
 │   ├── test_cli.py       # CLI functionality tests  
-│   ├── test_src_parser.py        # Source parser tests
+│   ├── test_timer_db.py          # Timer parsing from C source
+│   ├── test_log_scan.py          # Log scanning and step assignment
+│   ├── test_timer_nesting.py     # Runtime timer trees
+│   ├── test_timing_hierarchy.py  # Call-path aggregation and tables
 │   └── test_utilities.py # Utility function tests
+├── data/
+│   ├── logs/             # Scrubbed excerpts of real SWIFT logs + synthetic logs
+│   └── swift_src/        # Synthetic SWIFT-like C tree matching the logs
 └── README.md            # This file
 ```
 
@@ -60,11 +66,12 @@ make test-fast     # Run tests quickly (no coverage)
 ### Unit Tests
 
 - **test_cli.py**: Tests the main CLI entry point and argument parsing
-- **test_src_parser.py**: Tests source code parsing functionality including:
-  - Timer definition extraction
-  - Log pattern compilation  
-  - Timer instance scanning
-  - Tree-sitter integration (when available)
+- **test_timer_db.py**: Timer formats, function/operation rule, call graph,
+  caching and revision matching (against `data/swift_src` and a temporary
+  git repository)
+- **test_log_scan.py**, **test_timer_nesting.py**,
+  **test_timing_hierarchy.py**, **test_log_timing.py**: the `analyse log`
+  pipeline on the log fixtures in `data/logs`
 - **test_utilities.py**: Tests utility functions including:
   - ASCII table creation
   - File system operations
@@ -75,11 +82,14 @@ make test-fast     # Run tests quickly (no coverage)
 The test suite uses pytest fixtures defined in `conftest.py`:
 
 - `temp_dir`: Temporary directory for file operations
-- `sample_timer_db`: Mock timer database for testing
-- `sample_nesting_db`: Mock nesting database for testing  
-- `sample_timer_instances`: Mock timer instances for testing
-- `sample_log_content`: Sample SWIFT log content for testing
-- `mock_swift_profile`: Mock SWIFT profile for testing
+- `logs_dir`: The log fixtures (`data/logs`)
+- `swift_src_dir`: The synthetic SWIFT source tree (`data/swift_src`)
+- `synthetic_db`: Timer database parsed from `swift_src_dir`
+
+The real-log fixtures are excerpts with job IDs, user names and host names
+replaced by placeholders. `data/swift_src/src/generated.c` was generated
+from the timers in those logs and their nesting at each log's SWIFT
+revision; `special_cases.c` holds hand-written parser edge cases.
 
 ## Coverage
 

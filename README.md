@@ -181,7 +181,7 @@ positional arguments:
                         checks.
     gravity-error-maps  Create hexbin error maps for gravity check files.
     log                 Analyse the timers in a SWIFT log file (run SWIFT with
-                        -v 1 for the most detail).
+                        -v 1 for rank 0 timers, -v 2 for every rank).
     task-counts         Plot the engine_print_task_counts output of SWIFT log
                         files per step and cumulatively.
     mpiuse              Analyse SWIFT mpiuse_report-rank*-step*.dat files and
@@ -242,6 +242,43 @@ Errors such as a missing file or an invalid option value are reported as a
 single `error: ...` line (exit code 1; a failed external command exits with
 its own code). Run with `swift-cli --debug ...` or set `SWIFT_CLI_DEBUG=1` to
 see the full traceback.
+
+### Log Timing Analysis
+
+`analyse log` shows where the time of a run goes, from the timers SWIFT
+prints with `-v 1` (rank 0) or `-v 2` (every rank):
+
+```bash
+swift-cli analyse log swift.log                     # rank 0, all steps
+swift-cli analyse log swift.log --steps 100 200 --top-n 10
+swift-cli analyse log swift.log --rank all          # per rank + imbalance
+swift-cli analyse log swift.log --hierarchy-functions engine_rebuild
+```
+
+- Timers are read from the SWIFT source with tree-sitter. By default the
+  source is taken at the revision printed in the log (extracted with
+  `git archive` from the profile's repository into the profile cache; the
+  checkout is not touched); `--no-match-revision` uses the checkout as it
+  is, and `--swift-src DIR` any other source tree. The parsed database is
+  cached and rebuilt only when the source changes (`--regenerate-db`
+  forces a rebuild). The share of timer lines matched to the source is
+  always reported.
+- The timers of each step are nested into the call tree that actually ran
+  (a function called from several places is attributed to the caller that
+  contained each call), so nothing is counted twice. All percentages are of
+  the step-table wall-clock time: the top-level breakdown, including the
+  untimed remainder, sums to 100%. Exclusive (self) times add up; inclusive
+  times of nested timers do not.
+- The table row SWIFT prints for step N comes at the start of step N+1, so
+  the timers before row N are step N's; those before row 0 are
+  initialisation.
+- MPI ranks are never summed: `--rank N` picks one rank (default 0) and
+  `--rank all` analyses each rank and compares them.
+
+The console shows a short summary; `log_analysis/analysis_tables.txt` has
+the call tree, the timers by exclusive time, the per-caller breakdown of the
+`--hierarchy-functions`, per-step coverage, initialisation, task categories
+and task counts, alongside the charts.
 
 ### MPI Use Analysis
 

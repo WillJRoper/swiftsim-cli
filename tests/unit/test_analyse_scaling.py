@@ -5,18 +5,18 @@ from typing import Any
 
 import pytest
 
+from swiftsim_cli.modes.analyse import scaling
 from swiftsim_cli.modes.analyse.scaling import (
     ScalingLogData,
-    _aggregate_timer_totals,
     _build_legend_labels,
     _build_main_series_dict,
     _build_perfect_scaling_series,
     _build_perfect_speedup_series,
     _build_scaling_analysis,
     _build_total_series,
-    _clean_timer_label_text,
     _collect_comparable_ranks,
     _compute_speedup_series,
+    _exclusive_timer_totals,
     _extract_rank_count_from_log,
     _fit_scaling_slope,
     _legend_columns,
@@ -31,7 +31,6 @@ from swiftsim_cli.modes.analyse.scaling import (
     _series_per_log,
     _wrap_legend_label,
 )
-from swiftsim_cli.src_parser import TimerDef, TimerInstance
 
 
 def test_extract_rank_count_from_log(tmp_path: Path):
@@ -45,41 +44,73 @@ def test_extract_rank_count_from_log(tmp_path: Path):
     assert _extract_rank_count_from_log(str(log_file)) == 16
 
 
-def test_aggregate_timer_totals_filters_by_step():
-    """Only instances within the requested step range are accumulated."""
-    instances_by_step = {
-        1: [
-            TimerInstance(
-                timer_id="timer_a",
-                function="func",
-                step=1,
-                time_ms=10.0,
-                line_index=0,
-                timer_type="timer",
-                rank=0,
-            )
-        ],
-        2: [
-            TimerInstance(
-                timer_id="timer_a",
-                function="func",
-                step=2,
-                time_ms=5.0,
-                line_index=1,
-                timer_type="timer",
-                rank=1,
-            )
-        ],
-    }
-
-    timer_totals, timer_call_counts, per_rank_totals, per_rank_call_counts = (
-        _aggregate_timer_totals(instances_by_step, (2, 2))
+@pytest.fixture
+def synthetic_scaling_db(monkeypatch, synthetic_db):
+    """Analyse the fixtures with the synthetic timer database."""
+    monkeypatch.setattr(
+        scaling, "resolve_timer_db", lambda revision: (synthetic_db, "test")
     )
 
-    assert timer_totals == {"timer_a": 5.0}
-    assert timer_call_counts == {"timer_a": 1}
-    assert per_rank_totals == {1: {"timer_a": 5.0}}
-    assert per_rank_call_counts == {1: {"timer_a": 1}}
+
+def test_exclusive_timer_totals_do_not_double_count(
+    synthetic_scaling_db, logs_dir
+):
+    """Timer totals are exclusive times of the analysed steps."""
+    totals, calls, per_rank, per_rank_calls, step_time = (
+        _exclusive_timer_totals(str(logs_dir / "sample.txt"), None)
+    )
+    assert step_time == pytest.approx(21399.138)
+    # engine_rebuild's own time, not the 5641 ms including its children
+    assert totals["engine_rebuild"] == pytest.approx(2.8, abs=0.1)
+    assert sum(totals.values()) <= step_time
+    assert per_rank == {0: totals}
+    assert calls["engine_launch (tasks)"] == 4
+    assert per_rank_calls[0] == calls
+
+
+def test_exclusive_timer_totals_filter_steps_and_ranks(
+    synthetic_scaling_db, logs_dir
+):
+    """--steps limits the steps; each emitting rank is kept apart."""
+    _, calls, _, _, step_time = _exclusive_timer_totals(
+        str(logs_dir / "sample.txt"), (2, 2)
+    )
+    assert calls["engine_launch (tasks)"] == 1
+    assert step_time == pytest.approx(7477.584)
+
+    totals, _, per_rank, _, _ = _exclusive_timer_totals(
+        str(logs_dir / "mpi_v2_two_rank.txt"), None
+    )
+    assert set(per_rank) == {0, 1}
+    key = "engine_launch (tasks)"
+    assert totals[key] == pytest.approx(per_rank[0][key] + per_rank[1][key])
+
+
+def test_scaling_percentages_are_shares_of_step_time(
+    synthetic_scaling_db, logs_dir, tmp_path, monkeypatch
+):
+    """Per-log timer percentages add up to at most 100%."""
+    captured = {}
+    real = scaling._select_timer_ids
+
+    def spy(data, threshold):
+        captured["data"] = data
+        return real(data, threshold)
+
+    monkeypatch.setattr(scaling, "_select_timer_ids", spy)
+    monkeypatch.setattr(scaling, "_create_scaling_plot", lambda **_: None)
+    monkeypatch.setattr(
+        scaling, "_create_timer_rank_scaling_plot", lambda **_: None
+    )
+    scaling.analyse_swift_scaling(
+        [str(logs_dir / "sample.txt"), str(logs_dir / "mpi4_v1.txt")],
+        output_path=tmp_path,
+    )
+    for log_data in captured["data"]:
+        assert 90.0 < sum(log_data.timer_percentages.values()) <= 100.0
+    assert (
+        tmp_path / "scaling_timers_analysis" / "scaling_summary.txt"
+    ).is_file()
 
 
 def test_select_timer_ids_uses_max_percentage_threshold():
@@ -242,39 +273,16 @@ def test_wrap_legend_label_breaks_long_labels_on_words():
 
 def test_build_legend_labels_adds_total_and_reference_entries():
     """Legend labels include the derived helper series first."""
-    timer_db = {
-        "timer_a": TimerDef(
-            timer_id="timer_a",
-            function="engine_rebuild",
-            log_pattern="pattern",
-            start_line=1,
-            end_line=2,
-            label_text="took %.3f %s.",
-            timer_type="timer",
-        )
-    }
-
-    labels = _build_legend_labels(["timer_a"], timer_db)
+    labels = _build_legend_labels(["engine_rebuild"])
 
     assert labels[0] == "Total"
     assert labels[1] == "Perfect scaling"
     assert labels[2] == "engine_rebuild"
 
     labels_without_total = _build_legend_labels(
-        ["timer_a"], timer_db, include_total_reference=False
+        ["engine_rebuild"], include_total_reference=False
     )
     assert labels_without_total == ["engine_rebuild"]
-
-
-def test_clean_timer_label_text_strips_timing_boilerplate():
-    """Display label cleanup removes timing-only wrappers and format tokens."""
-    assert _clean_timer_label_text("(%s)") == ""
-    assert (
-        _clean_timer_label_text(
-            "took %.3f %s (including unskip, rebuild and reweight)."
-        )
-        == "including unskip, rebuild and reweight"
-    )
 
 
 def test_main_series_supports_root_vs_all_and_sum_vs_mean():
@@ -471,31 +479,9 @@ def test_build_scaling_analysis_avoids_duplicate_weakest_entries():
             emitted_rank_count=1,
         ),
     ]
-    timer_db = {
-        "timer_a": TimerDef(
-            timer_id="timer_a",
-            function="engine_a",
-            log_pattern="pattern",
-            start_line=1,
-            end_line=2,
-            label_text="took %.3f %s.",
-            timer_type="timer",
-        ),
-        "timer_b": TimerDef(
-            timer_id="timer_b",
-            function="engine_b",
-            log_pattern="pattern",
-            start_line=1,
-            end_line=2,
-            label_text="took %.3f %s.",
-            timer_type="timer",
-        ),
-    }
-
     analysis = _build_scaling_analysis(
         scaling_data,
         ["timer_a", "timer_b"],
-        timer_db,
         min_percent_threshold=10.0,
         used_log_scale=False,
         run_statistic="sum",
@@ -514,24 +500,12 @@ def test_extract_rank_count_defaults_to_one_for_non_mpi(tmp_path: Path):
     assert _extract_rank_count_from_log(str(log_file)) == 1
 
 
-def _timer_def(timer_id: str, function: str) -> TimerDef:
-    return TimerDef(
-        timer_id=timer_id,
-        function=function,
-        log_pattern="pattern",
-        start_line=1,
-        end_line=2,
-        label_text="took %.3f %s.",
-        timer_type="timer",
-    )
-
-
 def _skipped_series_data() -> list[ScalingLogData]:
-    """Two logs where timer_a only appears once (so its series is skipped)."""
+    """Two logs where func_a only appears once (so its series is skipped)."""
     data = []
     for rank_count, totals in (
-        (2, {"timer_a": 5.0, "timer_b": 20.0}),
-        (4, {"timer_b": 10.0}),
+        (2, {"func_a": 5.0, "func_b": 20.0}),
+        (4, {"func_b": 10.0}),
     ):
         counts = {timer_id: 1 for timer_id in totals}
         data.append(
@@ -563,19 +537,11 @@ def test_scaling_plot_legend_survives_skipped_series(
     tmp_path: Path, monkeypatch, run_statistic, expected
 ):
     """A skipped series must not shift the labels of later series."""
-    from swiftsim_cli.modes.analyse import scaling
-
     figures: list[Any] = []
     monkeypatch.setattr(scaling.plt, "close", figures.append)
-    timer_db = {
-        "timer_a": _timer_def("timer_a", "func_a"),
-        "timer_b": _timer_def("timer_b", "func_b"),
-    }
-
     scaling._create_scaling_plot(
         scaling_data=_skipped_series_data(),
-        timer_ids=["timer_a", "timer_b"],
-        timer_db=timer_db,
+        timer_ids=["func_a", "func_b"],
         output_path=str(tmp_path),
         prefix=None,
         show_plot=False,

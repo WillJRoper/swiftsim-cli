@@ -72,7 +72,7 @@ dependencies = [
   "PyYAML",       # Added: used in profile.py and modes/profile.py
   "matplotlib >= 3.5",   # Added: used in analyse mode for plotting
   "pandas >= 1.5",        # Added: used for mpiuse report parsing
-  "tqdm >= 4.60",         # Added: used for progress bars in src_parser and analyse
+  "tqdm >= 4.60",         # Progress bars in task-plots
   "tree-sitter",           # For C code parsing
   "tree-sitter-c",         # C language support for tree-sitter
   "swiftsimio",            # Used for reading SWIFT snapshots in utils
