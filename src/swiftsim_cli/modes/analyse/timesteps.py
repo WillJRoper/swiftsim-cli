@@ -12,7 +12,7 @@ Key functions:
 import argparse
 import math
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any, NamedTuple, Sequence
 
 import numpy as np
 
@@ -25,11 +25,12 @@ from swiftsim_cli.modes.common_args import (
     resolve_labels,
 )
 from swiftsim_cli.utilities.io import create_output_path
-from swiftsim_cli.utilities.messages import warn
+from swiftsim_cli.utilities.messages import note, plural, warn
 from swiftsim_cli.utilities.plotting import save_figure
 from swiftsim_cli.utilities.step_table import (
     DEAD_TIME_COLUMN,
     WALLCLOCK_COLUMN,
+    StepRow,
     StepTableReader,
 )
 from swiftsim_cli.utilities.tables import create_ascii_table
@@ -44,11 +45,27 @@ TIME_COLUMNS = {
     "scale-factor": "Scale-factor",
     "redshift": "Redshift",
 }
+# "auto": the scale factor if it varies (cosmological runs), else time
+AUTO_TIME_COLUMN = "auto"
 
-_TIMESTEP_LABEL_ALIASES = {
-    "Time": "Time [Internal Units]",
+_AXIS_LABELS = {
+    "Step": "Step",
+    "Time": "Time [internal units]",
     "Scale-factor": "Scale factor",
+    "Redshift": "Redshift",
 }
+
+_MS_PER_HOUR = 1000 * 60 * 60
+
+
+class _Run(NamedTuple):
+    """One run's step series, cumulative times in hours."""
+
+    label: str
+    step: np.ndarray
+    x: np.ndarray
+    wall: np.ndarray
+    dead: np.ndarray | None
 
 
 def add_timestep_arguments(
@@ -60,7 +77,8 @@ def add_timestep_arguments(
         help="Plot the timestep files of one or more runs.",
         description="Plot the cumulative runtime and dead time of one or "
         "more runs from their timesteps files (or SWIFT logs, which "
-        "contain the same step table).",
+        "contain the same step table). Steps repeated after a restart "
+        "replace the earlier rows.",
     )
     timestep_parser.set_defaults(func=run_timestep)
 
@@ -75,10 +93,10 @@ def add_timestep_arguments(
 
     timestep_parser.add_argument(
         "--time-column",
-        choices=tuple(TIME_COLUMNS),
-        default="scale-factor",
-        help="Step-table column to use for the x-axis (default: "
-        "scale-factor).",
+        choices=(AUTO_TIME_COLUMN, *TIME_COLUMNS),
+        default=AUTO_TIME_COLUMN,
+        help="Step-table column to use for the x-axis (default: auto, "
+        "the scale factor if it varies, otherwise time).",
     )
     add_steps_argument(timestep_parser)
 
@@ -92,12 +110,14 @@ def add_timestep_arguments(
     )
 
     timestep_parser.add_argument(
-        "--threads-per-run",
+        "--cores-per-run",
+        dest="threads_per_run",
         nargs="+",
         metavar="N",
         help=(
-            "Number of threads used by each run, in the same order as files. "
-            "When given, wall-clock and dead time are converted to CPU time."
+            "Cores used by each run (MPI ranks x threads per rank), in the "
+            "same order as the files. When given, wall-clock and dead time "
+            "are multiplied by these to give core-hours."
         ),
         type=positive_int,
         default=None,
@@ -119,9 +139,302 @@ def run_timestep(args: argparse.Namespace) -> None:
     )
 
 
-def _normalise_timestep_label(label: str) -> str:
-    """Return a user-facing label for a timestep table header."""
-    return _TIMESTEP_LABEL_ALIASES.get(label, label)
+def _looks_like_row(line: str) -> bool:
+    """Whether an unparsed line starts like a step-table data row."""
+    tokens = line.split()
+    if tokens and tokens[0].startswith("["):  # MPI rank prefix
+        tokens = tokens[1:]
+    return bool(tokens) and tokens[0].isdigit()
+
+
+def _read_step_rows(file: str | Path) -> list[StepRow]:
+    """Read a file's step-table rows, resolving restarts.
+
+    A restarted run appends to its timesteps file, so steps rewind. A row
+    whose step is not above the previous one supersedes every earlier row
+    from that step on, leaving the latest occurrence of each step.
+
+    Args:
+        file: The timesteps file or SWIFT log.
+
+    Returns:
+        The rows in step order.
+    """
+    reader = StepTableReader()
+    rows: list[StepRow] = []
+    superseded = malformed = 0
+    with open(file, "r") as f:
+        for line in f:
+            row = reader.feed(line)
+            if row is None:
+                if _looks_like_row(line):
+                    malformed += 1
+                continue
+            while rows and rows[-1]["Step"] >= row["Step"]:
+                rows.pop()
+                superseded += 1
+            rows.append(row)
+    if malformed:
+        warn(
+            f"{file}: skipped {plural(malformed, 'malformed step-table row')} "
+            "(wrong number of columns or non-numeric values)."
+        )
+    if superseded:
+        warn(
+            f"{file}: {plural(superseded, 'row')} superseded by a restart "
+            "(repeated steps); using the latest occurrence of each step."
+        )
+    return rows
+
+
+def _choose_x_column(time_column: str, tables: list[list[StepRow]]) -> str:
+    """Return the step-table column to plot on the x-axis.
+
+    Args:
+        time_column: An `AUTO_TIME_COLUMN` or `TIME_COLUMNS` key.
+        tables: The rows of each input.
+
+    Returns:
+        The column name.
+    """
+    if time_column != AUTO_TIME_COLUMN:
+        return TIME_COLUMNS[time_column]
+    if all(len({row["Scale-factor"] for row in rows}) > 1 for rows in tables):
+        return "Scale-factor"
+    note("the scale factor is constant (non-cosmological run); using time.")
+    return "Time"
+
+
+def _build_run(
+    file: str | Path,
+    label: str,
+    rows: list[StepRow],
+    column: str,
+    time_scale: int,
+) -> _Run:
+    """Turn a file's rows into cumulative series.
+
+    Args:
+        file: The input (for messages).
+        label: The run label.
+        rows: The step rows.
+        column: The x-axis column.
+        time_scale: Cores per run (1 for wall-clock hours).
+
+    Returns:
+        The run's series.
+
+    Raises:
+        ValueError: If a required column is missing.
+    """
+    for name in (column, WALLCLOCK_COLUMN):
+        if any(name not in row for row in rows):
+            raise ValueError(f"'{file}' has no '{name}' column.")
+
+    def column_values(name: str) -> np.ndarray:
+        return np.array([row[name] for row in rows])
+
+    step = column_values("Step").astype(np.int64)
+    wall = np.cumsum(column_values(WALLCLOCK_COLUMN)) * time_scale
+    dead = None
+    if all(DEAD_TIME_COLUMN in row for row in rows):
+        dead = np.cumsum(column_values(DEAD_TIME_COLUMN)) * time_scale
+        dead /= _MS_PER_HOUR
+    else:
+        warn(f"{file}: no '{DEAD_TIME_COLUMN}' column; dead time not shown.")
+
+    gaps = np.flatnonzero(np.diff(step) > 1)
+    if gaps.size:
+        missing = int(np.sum(np.diff(step)[gaps] - 1))
+        warn(
+            f"{file}: {plural(missing, 'step')} missing in "
+            f"{plural(gaps.size, 'gap')} (first {step[gaps[0]]} -> "
+            f"{step[gaps[0] + 1]}); the lines are broken there."
+        )
+    return _Run(label, step, column_values(column), wall / _MS_PER_HOUR, dead)
+
+
+def _break_at_gaps(step: np.ndarray, values: np.ndarray) -> np.ndarray:
+    """Insert NaN where steps are missing so the plotted line breaks."""
+    gaps = np.flatnonzero(np.diff(step) > 1) + 1
+    return np.insert(values.astype(float), gaps, np.nan)
+
+
+def _compare_runtimes(
+    runs: list[_Run], files: Sequence[str | Path], match_runtimes: bool
+) -> tuple[float, list[tuple[str, float]]] | None:
+    """Compare runtimes at the shortest shared x-axis extent.
+
+    Args:
+        runs: The runs (trimmed in place of the list when
+            ``match_runtimes``).
+        files: The inputs, for messages.
+        match_runtimes: Whether to trim every run to the shared extent.
+
+    Returns:
+        ``(x_limit, [(label, runtime), ...])`` sorted fastest first, or
+        None if the runs cannot be compared.
+    """
+    for run, file in zip(runs, files):
+        if np.ptp(run.x) == 0:
+            warn(
+                f"x-axis column is constant in {file}; skipping the runtime "
+                "comparison and --match-runtimes (choose another "
+                "--time-column)."
+            )
+            return None
+    # Interpolating/truncating at a common x only makes sense when x grows
+    # monotonically (e.g. not for redshift).
+    if not all(np.all(np.diff(run.x) >= 0) for run in runs):
+        warn(
+            "x-axis column is not monotonically increasing; skipping the "
+            "runtime comparison and --match-runtimes."
+        )
+        return None
+
+    x_limit = float(min(run.x[-1] for run in runs))
+    if match_runtimes:
+        for i, run in enumerate(runs):
+            mask = run.x <= x_limit
+            runs[i] = _Run(
+                run.label,
+                run.step[mask],
+                run.x[mask],
+                run.wall[mask],
+                None if run.dead is None else run.dead[mask],
+            )
+    if len(runs) < 2:
+        return None
+    runtimes = sorted(
+        (
+            (run.label, float(np.interp(x_limit, run.x, run.wall)))
+            for run in runs
+        ),
+        key=lambda item: item[1],
+    )
+    if runtimes[0][1] <= 0:
+        return None
+    return x_limit, runtimes
+
+
+def _print_comparison(
+    x_label: str,
+    comparison: tuple[float, list[tuple[str, float]]],
+    cores: bool,
+) -> None:
+    """Print the runtime comparison table."""
+    x_limit, runtimes = comparison
+    slowest = runtimes[-1][1]
+    rows = [
+        [
+            label,
+            f"{runtime:.3f}",
+            f"{slowest / runtime:.2f}x",
+            f"{(slowest - runtime) / slowest * 100:.1f}",
+        ]
+        for label, runtime in runtimes
+    ]
+    header = "Core time [core-hrs]" if cores else "Runtime [hrs]"
+    print(
+        "\n"
+        + create_ascii_table(
+            ["Run", header, "Speedup vs slowest", "Less runtime [%]"],
+            rows,
+            title=f"RUNTIME COMPARISON AT SHARED {x_label} {x_limit:g}",
+        )
+    )
+
+
+def _plot_runs(
+    runs: list[_Run], x_label: str, cores: bool
+) -> tuple[Any, tuple[Any, Any]]:
+    """Plot cumulative runtime and dead-time fraction for each run.
+
+    Returns:
+        The figure and its two axes.
+    """
+    import matplotlib
+    import matplotlib.pyplot as plt
+    from matplotlib.lines import Line2D
+
+    place_legend_below = len(runs) > 3
+    figure_height = 8.0
+    if place_legend_below:
+        figure_height += 0.2 * math.ceil(len(runs) / 4)
+
+    fig, (ax1, ax2) = plt.subplots(
+        2,
+        1,
+        figsize=(10, figure_height),
+        gridspec_kw={"height_ratios": [3, 1]},
+        sharex=True,
+    )
+    ax1.grid(True, alpha=0.3)
+    ax2.grid(True, alpha=0.3)
+
+    cmap = matplotlib.colormaps["tab10" if len(runs) <= 10 else "tab20"]
+    for i, run in enumerate(runs):
+        color = cmap(i % cmap.N)
+        x = _break_at_gaps(run.step, run.x)
+        ax1.plot(
+            x,
+            _break_at_gaps(run.step, run.wall),
+            "-",
+            color=color,
+            linewidth=2,
+        )
+        if run.dead is None:
+            ax2.plot([], [], "-", color=color, label=run.label)
+            continue
+        ax1.plot(
+            x,
+            _break_at_gaps(run.step, run.dead),
+            "--",
+            color=color,
+            alpha=0.6,
+            linewidth=2,
+        )
+        with np.errstate(divide="ignore", invalid="ignore"):
+            fraction = np.where(run.wall != 0, run.dead / run.wall * 100, 0.0)
+        ax2.plot(
+            x,
+            _break_at_gaps(run.step, fraction),
+            "-",
+            color=color,
+            label=run.label,
+            linewidth=2,
+        )
+
+    ax1.set_ylabel(
+        "Cumulative core time [core-hrs]"
+        if cores
+        else "Cumulative wall-clock time [hrs]"
+    )
+    ax1.legend(
+        handles=[
+            Line2D([0], [0], color="black", linestyle="-", linewidth=2),
+            Line2D(
+                [0], [0], color="black", linestyle="--", linewidth=2, alpha=0.6
+            ),
+        ],
+        labels=["Wall-clock time", "Dead time"],
+        loc="best",
+    )
+
+    ax2.set_xlabel(x_label)
+    ax2.set_ylabel("Cumulative dead /\nwall-clock time [%]")
+    ax2.set_ylim(0, None)
+    if place_legend_below:
+        ax2.legend(
+            loc="upper center",
+            bbox_to_anchor=(0.5, -0.3),
+            ncol=min(4, len(runs)),
+        )
+        plt.tight_layout(rect=(0, 0.08, 1, 1))
+    else:
+        ax2.legend(loc="best")
+        plt.tight_layout()
+    return fig, (ax1, ax2)
 
 
 def analyse_timestep_files(
@@ -130,7 +443,7 @@ def analyse_timestep_files(
     output_path: str | Path | None = None,
     prefix: str | None = None,
     show_plot: bool = False,
-    time_column: str = "scale-factor",
+    time_column: str = AUTO_TIME_COLUMN,
     match_runtimes: bool = False,
     nthreads: list[int] | None = None,
     step_range: Sequence[int] | None = None,
@@ -144,79 +457,48 @@ def analyse_timestep_files(
             receives the plot. If None, the current directory is used.
         prefix: Optional prefix to add to the output filename.
         show_plot: Whether to display the plot.
-        time_column: The x-axis column, one of the `TIME_COLUMNS` keys.
+        time_column: The x-axis column: ``"auto"`` (the scale factor if it
+            varies in every input, otherwise time) or a `TIME_COLUMNS` key.
         match_runtimes: Whether to trim all plotted datasets to the shortest
             x-axis extent found in the inputs.
-        nthreads: Optional number of threads used by each run. If provided,
-            cumulative wall-clock and dead time are multiplied by these values
-            to show CPU time.
+        nthreads: Optional number of cores (MPI ranks x threads per rank)
+            used by each run. If provided, cumulative wall-clock and dead
+            time are multiplied by these values to give core-hours.
         step_range: Optional inclusive ``(start, end)`` step range.
 
     Raises:
         ValueError: If the number of files and labels do not match, or if a
             file contains no step-table rows.
     """
-    import matplotlib
-    import matplotlib.pyplot as plt
-    from matplotlib.lines import Line2D
-
-    # Make sure the number of files and labels match
     if len(files) != len(labels):
         raise ValueError("Number of files and labels must match.")
 
     if nthreads is not None:
         if len(files) != len(nthreads):
             raise ValueError(
-                "Number of files and threads-per-run entries must match."
+                "Number of files and cores-per-run entries must match."
             )
         if any(nthread <= 0 for nthread in nthreads):
             raise ValueError(
-                "threads-per-run entries must be positive integers."
+                "cores-per-run entries must be positive integers."
             )
 
-    if time_column not in TIME_COLUMNS:
+    if time_column != AUTO_TIME_COLUMN and time_column not in TIME_COLUMNS:
         raise ValueError(
-            f"time_column must be one of {', '.join(TIME_COLUMNS)}, got "
-            f"{time_column!r}."
+            f"time_column must be one of {AUTO_TIME_COLUMN}, "
+            f"{', '.join(TIME_COLUMNS)}, got {time_column!r}."
         )
-    column = TIME_COLUMNS[time_column]
 
-    place_legend_below = len(labels) > 3
-    figure_height = 8.0
-
-    if place_legend_below:
-        legend_rows = math.ceil(len(labels) / 4)
-        figure_height += 0.2 * legend_rows
-
-    # Loop over the lines in the file and extract the relevant data
-    x: list[np.ndarray[Any, Any]] = []
-    y: list[np.ndarray[Any, Any]] = []
-    deadtime: list[np.ndarray[Any, Any]] = []
-    x_label = _normalise_timestep_label(column)
-    runtime_comparison = None
-    for file_index, file in enumerate(files):
-        xi_values: list[float] = []
-        yi_values: list[float] = []
-        dti_values: list[float] = []
-        step_table = StepTableReader()
-        with open(file, "r") as f:
-            for line in f:
-                row = step_table.feed(line)
-                if row is None:
-                    continue
-
-                if step_range is not None and not (
-                    step_range[0] <= row["Step"] <= step_range[1]
-                ):
-                    continue
-                for name in (column, WALLCLOCK_COLUMN, DEAD_TIME_COLUMN):
-                    if name not in row:
-                        raise ValueError(f"'{file}' has no '{name}' column.")
-                xi_values.append(row[column])
-                yi_values.append(row[WALLCLOCK_COLUMN])
-                dti_values.append(row[DEAD_TIME_COLUMN])
-
-        if not xi_values:
+    tables = []
+    for file in files:
+        rows = _read_step_rows(file)
+        if step_range is not None:
+            rows = [
+                row
+                for row in rows
+                if step_range[0] <= row["Step"] <= step_range[1]
+            ]
+        if not rows:
             where = (
                 f" in steps {step_range[0]}-{step_range[1]}"
                 if step_range is not None
@@ -225,180 +507,28 @@ def analyse_timestep_files(
             raise ValueError(
                 f"No step-table rows could be parsed from '{file}'{where}."
             )
+        tables.append(rows)
 
-        time_scale = nthreads[file_index] if nthreads is not None else 1
-
-        # Convert to numpy arrays and compute cumulative sums in hours.
-        x.append(np.array(xi_values))
-        y.append(
-            np.cumsum(np.array(yi_values)) * time_scale / (1000 * 60 * 60)
+    column = _choose_x_column(time_column, tables)
+    x_label = _AXIS_LABELS[column]
+    runs = [
+        _build_run(
+            file,
+            label,
+            rows,
+            column,
+            nthreads[i] if nthreads is not None else 1,
         )
-        deadtime.append(
-            np.cumsum(np.array(dti_values)) * time_scale / (1000 * 60 * 60)
-        )
-
-    max_x_values = [series[-1] for series in x if len(series) > 0]
-    # Interpolating/truncating at a common x only makes sense when x grows
-    # monotonically (e.g. not for redshift).
-    x_is_monotonic = all(np.all(np.diff(series) >= 0) for series in x)
-    if max_x_values and not x_is_monotonic:
-        warn(
-            "x-axis column is not monotonically increasing; skipping the "
-            "runtime comparison and --match-runtimes."
-        )
-    elif max_x_values:
-        runtime_limit = min(max_x_values)
-        matched_runtimes = [
-            (label, float(np.interp(runtime_limit, xi, yi)))
-            for label, xi, yi in zip(labels, x, y)
-            if len(xi) > 0
-        ]
-        if len(matched_runtimes) > 1:
-            matched_runtimes.sort(key=lambda item: item[1])
-            if matched_runtimes[0][1] > 0:
-                runtime_comparison = (runtime_limit, matched_runtimes)
-
-        if match_runtimes:
-            for i, xi in enumerate(x):
-                mask = xi <= runtime_limit
-                x[i] = xi[mask]
-                y[i] = y[i][mask]
-                deadtime[i] = deadtime[i][mask]
-
-    # Create the figure with two subplots
-    fig, (ax1, ax2) = plt.subplots(
-        2,
-        1,
-        figsize=(10, figure_height),
-        gridspec_kw={"height_ratios": [3, 1]},
-        sharex=True,
-    )
-    ax1.grid(True, alpha=0.3)
-    ax2.grid(True, alpha=0.3)
-
-    # Colors for the plots
-    colors = matplotlib.colormaps["tab10"](np.linspace(0, 1, len(files)))
-
-    # Main plot - absolute times
-    for i, (xi, yi, dt, label, color) in enumerate(
-        zip(x, y, deadtime, labels, colors)
-    ):
-        # Plot wall clock time (solid lines)
-        ax1.plot(
-            xi,
-            yi,
-            "-",
-            color=color,
-            linewidth=2,
-        )
-        # Plot dead time (dashed lines with alpha) - make more visible
-        ax1.plot(xi, dt, "--", color=color, alpha=0.6, linewidth=2)
-
-    # Set labels and title for main plot
-    y_label = "CPU hrs" if nthreads is not None else "Time [hrs]"
-    ax1.set_ylabel(y_label)
-
-    if runtime_comparison is not None:
-        runtime_limit, matched_runtimes = runtime_comparison
-        slowest_runtime = matched_runtimes[-1][1]
-        rows = []
-        for label, runtime in matched_runtimes:
-            speedup = slowest_runtime / runtime
-            runtime_reduction = (
-                (slowest_runtime - runtime) / slowest_runtime * 100
-            )
-            rows.append(
-                [
-                    label,
-                    f"{runtime:.3f}",
-                    f"{speedup:.2f}x",
-                    f"{(speedup - 1) * 100:.1f}",
-                    f"{runtime_reduction:.1f}",
-                ]
-            )
-        runtime_header = (
-            "CPU time [hrs]" if nthreads is not None else "Runtime [hrs]"
-        )
-        print(
-            "\n"
-            + create_ascii_table(
-                [
-                    "Run",
-                    runtime_header,
-                    "Speedup vs slowest",
-                    "Faster [%]",
-                    "Less runtime [%]",
-                ],
-                rows,
-                title=(
-                    f"RUNTIME COMPARISON AT SHARED {x_label} {runtime_limit:g}"
-                ),
-            )
-        )
-
-    # Create custom legend with black lines showing line styles
-    legend_elements = [
-        Line2D(
-            [0],
-            [0],
-            color="black",
-            linestyle="-",
-            linewidth=2,
-            label="Wallclock Time",
-        ),
-        Line2D(
-            [0],
-            [0],
-            color="black",
-            linestyle="--",
-            linewidth=2,
-            alpha=0.6,
-            label="Dead Time",
-        ),
+        for i, (file, label, rows) in enumerate(zip(files, labels, tables))
     ]
-    ax1.legend(handles=legend_elements, loc="best")
 
-    # Deadtime percentage plot
-    for i, (xi, yi, dt, label, color) in enumerate(
-        zip(x, y, deadtime, labels, colors)
-    ):
-        # Calculate deadtime percentage: (deadtime / total_time) * 100
-        # Protect against division by zero
-        deadtime_percentage = np.where(yi != 0, (dt / yi) * 100, 0.0)
+    comparison = _compare_runtimes(runs, files, match_runtimes)
+    if comparison is not None:
+        _print_comparison(x_label, comparison, cores=nthreads is not None)
 
-        # Plot deadtime percentage
-        ax2.plot(
-            xi,
-            deadtime_percentage,
-            "-",
-            color=color,
-            label=f"{label}",
-            linewidth=2,
-        )
-
-    # Set labels and formatting for deadtime percentage plot
-    ax2.set_xlabel(x_label)
-    ax2.set_ylabel("Dead Time [%]")
-
-    if place_legend_below:
-        ax2.legend(
-            loc="upper center",
-            bbox_to_anchor=(0.5, -0.3),
-            ncol=min(4, len(labels)),
-        )
-    else:
-        ax2.legend(loc="best")
-
-    ax2.set_ylim(0, None)  # Start y-axis at 0 for percentage
-
-    # Adjust layout to prevent overlapping
-    if place_legend_below:
-        plt.tight_layout(rect=(0, 0.08, 1, 1))
-    else:
-        plt.tight_layout()
-
+    fig, _ = _plot_runs(runs, x_label, cores=nthreads is not None)
     output_file = create_output_path(
-        output_path, prefix, "timestep_analysis.png", OUT_SUBDIR
+        output_path, prefix, "timesteps_analysis.png", OUT_SUBDIR
     )
     save_figure(fig, output_file, show=show_plot)
     print(f"Plot saved to {output_file}")

@@ -151,7 +151,7 @@ def test_renamed_v1_flags():
     assert _parse(["profile", "--show"]).show == ""
     base = ["analyse", *_ANALYSE_ARGV["timesteps"]]
     assert _parse(base).threads_per_run is None
-    args = _parse([*base, "--threads-per-run", "4"])
+    args = _parse([*base, "--cores-per-run", "4"])
     assert args.threads_per_run == [4]
 
 

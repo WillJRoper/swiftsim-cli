@@ -28,7 +28,9 @@ def test_analyse_chain_runs_every_mode(logs_dir, tmp_path, capsys):
         ]
     )
 
-    assert (tmp_path / "out/timesteps_analysis/timestep_analysis.png").exists()
+    assert (
+        tmp_path / "out/timesteps_analysis/timesteps_analysis.png"
+    ).exists()
     counts = tmp_path / "out" / "task_counts_analysis"
     assert (counts / "task_counts_per_step.png").exists()
     assert "Found task counts for 3 steps" in capsys.readouterr().out
