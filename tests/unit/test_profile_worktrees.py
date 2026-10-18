@@ -31,9 +31,12 @@ def _answers(monkeypatch, *answers):
     """Script the interactive prompts; None accepts the default."""
     queue = list(answers)
 
-    def fake_ask(label, default="", kind="text", must_exist=False):
+    def fake_ask(label, default="", kind="text", must_exist=False, check=None):
         answer = queue.pop(0)
-        return default if answer is None else answer
+        answer = default if answer is None else answer
+        if check is not None:
+            check(answer)  # a real prompt would re-ask; here it raises
+        return answer
 
     monkeypatch.setattr(pm, "ask", fake_ask)
     return queue
@@ -186,12 +189,12 @@ class TestSwitchListShow:
         """The show mode can print the parameter file's cosmology."""
         gitsetup.store()
         pm.new_profile("dev")
-        show_mode.run(argparse.Namespace(cosmo=True, all=False))
+        show_mode.run(argparse.Namespace(name=None, cosmo=True, all=False))
         out = capsys.readouterr().out
         assert "PARAMETER FILE COSMOLOGY" in out
         assert "Omega_cdm" in out
         assert "PROFILE:" not in out
-        show_mode.run(argparse.Namespace(cosmo=False, all=True))
+        show_mode.run(argparse.Namespace(name=None, cosmo=False, all=True))
         out = capsys.readouterr().out
         assert "PROFILE: dev" in out and "Omega_cdm" in out
 
@@ -200,7 +203,7 @@ class TestEdit:
     """profile --edit."""
 
     def test_edit_upstream_and_flags(self, gitsetup, monkeypatch, capsys):
-        """Upstream changes re-point the branch; flags are just stored."""
+        """Upstream changes move the branch; flags are just stored."""
         gitsetup.store()
         pm.new_profile("dev")
         _answers(
@@ -216,6 +219,8 @@ class TestEdit:
         p = get_profile("dev")
         assert p.upstream == "origin/feature"
         assert _upstream(p.worktree, p.branch) == "origin/feature"
+        # No commits of its own, so the branch moved to the new upstream
+        assert (gitsetup.root / "dev" / "feature.c").exists()
         assert p.configure_flags == ["--enable-ipo", "--with-hydro=sphenix"]
         assert p.configured_flags is None
         assert p.data_dir == gitsetup.tmp.resolve()
@@ -305,7 +310,7 @@ class TestUpdate:
         assert _configure_runs(wt) == ["--enable-debug"]
 
         gitsetup.push("master", "src.c", "int x = 2;\n")
-        update_mode.run(argparse.Namespace(nr_threads=1))
+        update_mode.run(argparse.Namespace(nr_threads=1, no_build=False))
         assert (wt / "src.c").read_text() == "int x = 2;\n"
         assert len(_configure_runs(wt)) == 1
 
@@ -436,7 +441,7 @@ class TestConfig:
         gitsetup.store()
         pm.new_profile("dev")
         wt = gitsetup.root / "dev"
-        configure_profile(get_profile("dev"), [])
+        configure_profile(get_profile("dev"), ["--enable-debug"])
         cache = (
             profile_mod.PROFILE_FILE.parent
             / "cache"
@@ -509,11 +514,14 @@ class TestOverride:
         """An unknown --profile is a clean error."""
         gitsetup.store()
         pm.new_profile("a")
-        set_profile_override(
-            MultiModeCLIArgs(["--profile", "zzz", "make"]).global_args.profile
-        )
+        # Fails as soon as the override is set, before any mode runs
         with pytest.raises(ProfileError, match="Unknown profile 'zzz'"):
-            get_swiftsim_dir()
+            set_profile_override(
+                MultiModeCLIArgs(
+                    ["--profile", "zzz", "make"]
+                ).global_args.profile
+            )
+        assert get_swiftsim_dir() == gitsetup.root / "a"
 
 
 class TestInit:
@@ -558,9 +566,8 @@ class TestInit:
         assert list(load_store().profiles) == ["old"]
 
         _confirm(monkeypatch, True)
-        _answers(
-            monkeypatch, None, None, "second", None, "", None, "", None, None
-        )
+        # No clone prompt: existing profiles fix the main clone
+        _answers(monkeypatch, None, "second", None, "", None, "", None, None)
         pm.init_profiles()
         store = load_store()
         assert set(store.profiles) == {"old", "second"}

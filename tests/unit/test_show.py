@@ -10,56 +10,38 @@ class TestShowMode:
     """Tests for the show mode."""
 
     def test_add_arguments(self):
-        """Test that add_arguments adds cosmo and all flags."""
+        """Show takes an optional NAME, --cosmo and --all."""
         parser = argparse.ArgumentParser()
         show.add_arguments(parser)
 
-        # Test defaults
         args = parser.parse_args([])
+        assert args.name is None
         assert args.cosmo is False
         assert args.all is False
 
-        # Test --cosmo flag
-        args = parser.parse_args(["--cosmo"])
+        args = parser.parse_args(["dev", "--cosmo"])
+        assert args.name == "dev"
         assert args.cosmo is True
-        assert args.all is False
 
-        # Test --all flag
         args = parser.parse_args(["--all"])
-        assert args.cosmo is False
         assert args.all is True
 
     @patch("swiftsim_cli.modes.show.display_profile")
     def test_run_default(self, mock_display):
-        """Test the run function with default args (profile only)."""
-        args = argparse.Namespace(cosmo=False, all=False)
-
-        show.run(args)
-
-        mock_display.assert_called_once_with(
-            show_profile=True, show_cosmology=False
-        )
+        """By default show matches 'profile --show' (profile + cosmology)."""
+        show.run(argparse.Namespace(name=None, cosmo=False, all=False))
+        mock_display.assert_called_once_with(name=None)
 
     @patch("swiftsim_cli.modes.show.display_profile")
     def test_run_cosmo_only(self, mock_display):
-        """Test the run function with --cosmo flag."""
-        args = argparse.Namespace(cosmo=True, all=False)
-
-        show.run(args)
-
+        """--cosmo shows only the cosmology, of the named profile."""
+        show.run(argparse.Namespace(name="dev", cosmo=True, all=False))
         mock_display.assert_called_once_with(
-            print_header=False,
-            show_profile=False,
-            show_cosmology=True,
+            print_header=False, show_profile=False, name="dev"
         )
 
     @patch("swiftsim_cli.modes.show.display_profile")
     def test_run_all(self, mock_display):
-        """Test the run function with --all flag."""
-        args = argparse.Namespace(cosmo=False, all=True)
-
-        show.run(args)
-
-        mock_display.assert_called_once_with(
-            show_profile=True, show_cosmology=True
-        )
+        """--all is the default behaviour (kept for compatibility)."""
+        show.run(argparse.Namespace(name=None, cosmo=False, all=True))
+        mock_display.assert_called_once_with(name=None)

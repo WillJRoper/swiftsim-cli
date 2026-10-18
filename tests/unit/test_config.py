@@ -3,7 +3,9 @@
 import argparse
 from unittest.mock import Mock, patch
 
-from swiftsim_cli.modes.config import add_arguments, run
+import pytest
+
+from swiftsim_cli.modes.config import add_arguments, merge_flags, run
 
 
 class TestConfigMode:
@@ -63,7 +65,7 @@ class TestConfigMode:
         mock_show.assert_called_once_with()
 
     @patch("swiftsim_cli.modes.config.config_swiftsim")
-    def test_run_with_debug(self, mock_config, tmp_path):
+    def test_run_with_debug_build(self, mock_config, tmp_path):
         """Test the run function with --debug-build flag."""
         # Create mock args
         args = Mock()
@@ -230,3 +232,37 @@ class TestConfigMode:
         opts = call_args[1]["opts"]
         assert "--custom-opt1" in opts
         assert "--custom-opt2" in opts
+
+
+class TestPresetsAndMerging:
+    """Preset exclusivity and flag merging."""
+
+    def test_eagle_presets_are_exclusive(self, capsys):
+        """--eagle and --eaglexl set the subgrid model differently."""
+        parser = argparse.ArgumentParser()
+        add_arguments(parser)
+        with pytest.raises(SystemExit):
+            parser.parse_args(["--eagle", "--eaglexl"])
+        assert "not allowed with" in capsys.readouterr().err
+
+    def test_help_lists_preset_options(self):
+        """Preset help is generated from the one preset table."""
+        parser = argparse.ArgumentParser()
+        add_arguments(parser)
+        helps = {a.dest: a.help for a in parser._actions}
+        assert "--with-subgrid=EAGLE-XL" in str(helps["eaglexl"])
+
+    def test_later_value_wins_with_warning(self, capsys):
+        """A later value of an option overrides a preset's, with a warning."""
+        merged = merge_flags(
+            [
+                "--with-hydro=sphenix",
+                "--enable-ipo",
+                "--enable-ipo",
+                "--with-hydro=gadget2",
+                "CC=gcc",
+            ]
+        )
+        assert merged == ["--enable-ipo", "--with-hydro=gadget2", "CC=gcc"]
+        err = capsys.readouterr().err
+        assert "--with-hydro=gadget2 overrides --with-hydro=sphenix" in err

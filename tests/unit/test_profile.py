@@ -1,5 +1,9 @@
 """Unit tests for profile storage, resolution and configure parsing."""
 
+import os
+import subprocess
+import sys
+
 import pytest
 
 from swiftsim_cli import profile as profile_mod
@@ -7,6 +11,7 @@ from swiftsim_cli.profile import (
     ProfileError,
     ProfileStore,
     SWIFTCLIProfile,
+    check_new_profile_name,
     get_profile,
     get_profile_cache_dir,
     git,
@@ -89,6 +94,38 @@ class TestStore:
         with pytest.raises(ProfileError, match="--migrate"):
             load_swift_profile()
 
+    def test_permissions_follow_umask(self, tmp_path):
+        """The profile file is not created private (mkstemp's 0600)."""
+        old = os.umask(0o022)
+        try:
+            _store(tmp_path)
+        finally:
+            os.umask(old)
+        assert profile_mod.PROFILE_FILE.stat().st_mode & 0o777 == 0o644
+
+    @pytest.mark.parametrize(
+        "text, match",
+        [
+            ("version: 2\nworktree_root: /x\n", "missing key 'repo'"),
+            ("version: 2\nrepo: [\n", "Malformed"),
+            (
+                "version: 2\nrepo: /r\nworktree_root: /w\nprofiles: [1]\n",
+                "Malformed",
+            ),
+            (
+                "version: 2\nrepo: /r\nworktree_root: /w\n"
+                "profiles:\n  a:\n    softening_coeff: soft\n",
+                "Malformed",
+            ),
+        ],
+    )
+    def test_malformed_file_is_profile_error(self, text, match):
+        """Broken files give a ProfileError, not a traceback."""
+        profile_mod.PROFILE_FILE.parent.mkdir(parents=True)
+        profile_mod.PROFILE_FILE.write_text(text)
+        with pytest.raises(ProfileError, match=match):
+            load_store()
+
     def test_bad_version_and_malformed(self):
         """Unknown versions and non-mapping files are rejected."""
         profile_mod.PROFILE_FILE.parent.mkdir(parents=True)
@@ -121,9 +158,15 @@ class TestResolution:
     def test_unknown_profile_suggests(self, tmp_path):
         """Unknown names give a clean error with close matches."""
         _store(tmp_path)
-        set_profile_override("aa")
         with pytest.raises(ProfileError, match="Did you mean: a"):
-            get_profile()
+            get_profile("aa")
+
+    def test_unknown_override_fails_early(self, tmp_path):
+        """--profile NAME is checked when set, not when first used."""
+        _store(tmp_path)
+        with pytest.raises(ProfileError, match="Did you mean: a"):
+            set_profile_override("aa")
+        assert get_profile().name == "a"
 
     def test_no_current(self, tmp_path):
         """A store with no current profile errors cleanly."""
@@ -157,11 +200,32 @@ class TestHelpers:
         """Reasonable names pass."""
         validate_profile_name(name)
 
-    @pytest.mark.parametrize("name", ["", "-x", "a/b", "has space", "../x"])
+    @pytest.mark.parametrize(
+        "name",
+        [
+            "",
+            "-x",
+            "a/b",
+            "has space",
+            "../x",
+            "default.",
+            "foo.lock",
+            "foo..bar",
+        ],
+    )
     def test_invalid_names(self, name):
         """Names unusable as branch/directory names fail."""
         with pytest.raises(ProfileError, match="Invalid profile name"):
             validate_profile_name(name)
+
+    def test_new_name_case_clash(self, tmp_path):
+        """Names differing only in case clash (macOS file systems)."""
+        store = _store(tmp_path)
+        with pytest.raises(ProfileError, match="'a' already exists.*case"):
+            check_new_profile_name(store, "A")
+        with pytest.raises(ProfileError, match="'a' already exists\\.$"):
+            check_new_profile_name(store, "a")
+        check_new_profile_name(store, "c")
 
     def test_git_error_message(self, tmp_path):
         """Git failures surface git's stderr."""
@@ -199,7 +263,11 @@ class TestPrompts:
         from prompt_toolkit.input import create_pipe_input
         from prompt_toolkit.output import DummyOutput
 
-        with create_pipe_input() as inp:
+        with (
+            pytest.MonkeyPatch.context() as mp,
+            create_pipe_input() as inp,
+        ):
+            mp.setattr(sys.stdin, "isatty", lambda: True, raising=False)
             inp.send_text(keys)
             with create_app_session(input=inp, output=DummyOutput()):
                 return profile_mod.ask(*args, **kwargs)
@@ -212,6 +280,42 @@ class TestPrompts:
             "\r", "D: ", default=str(tmp_path), kind="dir", must_exist=True
         )
         assert answer == str(tmp_path)
+        assert self._ask("1.5\r", "F: ", check=float) == "1.5"
+
+    def _piped(self, monkeypatch, line, *args, **kwargs):
+        monkeypatch.setattr(sys.stdin, "isatty", lambda: False, raising=False)
+
+        def fake_input(label):
+            if line is None:
+                raise EOFError
+            return line
+
+        monkeypatch.setattr("builtins.input", fake_input)
+        return profile_mod.ask(*args, **kwargs)
+
+    def test_ask_piped(self, monkeypatch, tmp_path):
+        """Piped answers replace the default (blank keeps it) and are checked.
+
+        A closed stdin is an EOFError.
+        """
+        assert self._piped(monkeypatch, " x ", "Q: ", default="d") == "x"
+        assert self._piped(monkeypatch, "", "Q: ", default="d") == "d"
+        with pytest.raises(ProfileError, match="Soft: could not convert"):
+            self._piped(monkeypatch, "abc", "Soft: ", check=float)
+        with pytest.raises(ProfileError, match="does not exist"):
+            self._piped(
+                monkeypatch, str(tmp_path / "no"), "P: ", must_exist=True
+            )
+        with pytest.raises(EOFError):
+            self._piped(monkeypatch, None, "Q: ")
+
+    def test_prompt_toolkit_loaded_lazily(self):
+        """Importing the profile module does not import prompt_toolkit."""
+        code = (
+            "import sys, swiftsim_cli.profile; "
+            "sys.exit('prompt_toolkit' in sys.modules)"
+        )
+        subprocess.run([sys.executable, "-c", code], check=True)
 
     def test_confirm(self, monkeypatch):
         """Only an explicit yes confirms."""

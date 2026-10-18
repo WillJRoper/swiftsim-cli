@@ -62,7 +62,12 @@ def main(argv: list[str] | None = None) -> None:
         set_profile_override(multi_args.global_args.profile)
 
         # Execute each mode in sequence
-        for mode_name, args in multi_args.modes:
+        modes = multi_args.modes
+        for i, (mode_name, args) in enumerate(modes):
+            # Let a mode see what follows it (update skips its build when
+            # a later config/make in the chain will build anyway)
+            args.later_modes = [name for name, _ in modes[i + 1 :]]
+
             # Load the parameters if they exist (for modes that use them)
             clear_parameter_cache()
             clear_cosmology_cache()
@@ -83,4 +88,5 @@ def main(argv: list[str] | None = None) -> None:
     except USER_ERRORS as exc:
         if debug:
             raise
-        _fail(exc, 1, hint=True)
+        # A failed build command (CommandError) exits with its own code
+        _fail(exc, getattr(exc, "returncode", 1), hint=True)

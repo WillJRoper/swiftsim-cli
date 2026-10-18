@@ -29,19 +29,14 @@ import os
 import re
 import shlex
 import subprocess
-import tempfile
+import sys
 from dataclasses import dataclass, field
 from functools import lru_cache
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
-from prompt_toolkit import PromptSession
-from prompt_toolkit.completion import PathCompleter
-from prompt_toolkit.document import Document
-from prompt_toolkit.key_binding import KeyBindings, KeyPressEvent
-from prompt_toolkit.styles import Style
-from prompt_toolkit.validation import ValidationError, Validator
 from ruamel.yaml import YAML
+from ruamel.yaml.error import YAMLError
 
 # Define the path to the profile file
 PROFILE_FILE = Path.home() / ".swiftsim-utils" / "profiles.yaml"
@@ -198,7 +193,12 @@ def read_raw_profile_file() -> dict[str, Any] | None:
     """Read the raw profile file, returning None if missing or empty."""
     if not PROFILE_FILE.exists():
         return None
-    data = YAML(typ="safe").load(PROFILE_FILE)
+    try:
+        data = YAML(typ="safe").load(PROFILE_FILE)
+    except YAMLError as e:
+        raise ProfileError(
+            f"Malformed profile file {PROFILE_FILE}:\n{e}"
+        ) from e
     if not data:
         return None
     if not isinstance(data, dict):
@@ -230,15 +230,21 @@ def _load_store_cached(path: Path) -> ProfileStore:
             f"Unsupported profile file version {data['version']!r} in "
             f"{path} (expected {FORMAT_VERSION})."
         )
-    return ProfileStore(
-        repo=Path(data["repo"]),
-        worktree_root=Path(data["worktree_root"]),
-        current=data.get("current"),
-        profiles={
-            name: SWIFTCLIProfile.from_dict(name, entry or {})
-            for name, entry in (data.get("profiles") or {}).items()
-        },
-    )
+    try:
+        return ProfileStore(
+            repo=Path(data["repo"]),
+            worktree_root=Path(data["worktree_root"]),
+            current=data.get("current"),
+            profiles={
+                str(name): SWIFTCLIProfile.from_dict(str(name), entry or {})
+                for name, entry in (data.get("profiles") or {}).items()
+            },
+        )
+    except (KeyError, TypeError, ValueError, AttributeError) as e:
+        what = f"missing key {e}" if isinstance(e, KeyError) else str(e)
+        raise ProfileError(
+            f"Malformed profile file {path} ({what}). Fix it by hand."
+        ) from e
 
 
 def load_store() -> ProfileStore:
@@ -254,19 +260,20 @@ def load_store() -> ProfileStore:
 
 
 def save_store(store: ProfileStore) -> None:
-    """Atomically write the profile store and clear the load cache."""
+    """Atomically write the profile store and clear the load cache.
+
+    The file is created with normal permissions (subject to the umask).
+    """
     PROFILE_FILE.parent.mkdir(parents=True, exist_ok=True)
     yaml = YAML()
     yaml.default_flow_style = False
-    fd, tmp = tempfile.mkstemp(
-        dir=PROFILE_FILE.parent, prefix=".profiles-", suffix=".yaml"
-    )
+    tmp = PROFILE_FILE.with_name(f".{PROFILE_FILE.name}.{os.getpid()}.tmp")
     try:
-        with os.fdopen(fd, "w") as f:
+        with open(tmp, "w") as f:
             yaml.dump(store.to_dict(), f)
         os.replace(tmp, PROFILE_FILE)
     except BaseException:
-        Path(tmp).unlink(missing_ok=True)
+        tmp.unlink(missing_ok=True)
         raise
     finally:
         _load_store_cached.cache_clear()
@@ -276,8 +283,15 @@ def save_store(store: ProfileStore) -> None:
 
 
 def set_profile_override(name: str | None) -> None:
-    """Force all modes to use profile ``name`` (None = the current one)."""
+    """Force all modes to use profile ``name`` (None = the current one).
+
+    Raises:
+        ProfileError: If ``name`` is not a known profile, so a typo fails
+            before any mode runs.
+    """
     global _PROFILE_OVERRIDE
+    if name is not None:
+        load_store().get(name)
     _PROFILE_OVERRIDE = name
 
 
@@ -364,6 +378,7 @@ def git(*args: str, cwd: Path | None = None) -> str:
     if cwd is not None:
         cmd += ["-C", str(cwd)]
     cmd += list(args)
+    sys.stdout.flush()  # keep our messages ordered before git's
     try:
         result = subprocess.run(
             cmd, capture_output=True, text=True, check=True
@@ -378,11 +393,37 @@ def git(*args: str, cwd: Path | None = None) -> str:
 
 def validate_profile_name(name: str) -> None:
     """Check a profile name is usable as a branch and directory name."""
-    if not _NAME_RE.fullmatch(name):
+    if (
+        not _NAME_RE.fullmatch(name)
+        or ".." in name
+        or name.endswith((".", ".lock"))
+    ):
         raise ProfileError(
             f"Invalid profile name '{name}': use letters, digits, '.', '_' "
-            "and '-' (starting with a letter or digit)."
+            "and '-' (starting with a letter or digit, without '..', and not "
+            "ending in '.' or '.lock')."
         )
+
+
+def check_new_profile_name(store: ProfileStore, name: str) -> None:
+    """Check ``name`` is valid and not taken (ignoring case).
+
+    Names differing only in case would share a worktree directory on
+    case-insensitive file systems (the macOS default).
+    """
+    validate_profile_name(name)
+    for other in store.profiles:
+        if other.lower() == name.lower():
+            extra = (
+                "" if other == name else " (names may not differ only in case)"
+            )
+            raise ProfileError(f"Profile '{other}' already exists{extra}.")
+
+
+def main_clone_of(worktree: Path) -> Path:
+    """The main clone a git worktree belongs to."""
+    common = git("rev-parse", "--git-common-dir", cwd=worktree)
+    return (worktree / common).resolve().parent
 
 
 def fetch_for_upstream(repo: Path, upstream: str) -> None:
@@ -427,36 +468,71 @@ def add_profile(
     parameter_file: Path | None = None,
     softening_coeff: float = 0.04,
     softening_pivot_z: float = 2.7,
+    reuse_branch: bool = False,
 ) -> SWIFTCLIProfile:
     """Create a profile's branch and worktree and add it to ``store``.
 
     The store is not saved; the caller does that.
 
+    Args:
+        store: The store to add the profile to.
+        name: The new profile's name.
+        upstream: The branch the profile follows.
+        configure_flags: Flags for ``./configure``.
+        data_dir: Directory of additional data files.
+        parameter_file: Template parameter file (default: the worktree's
+            ``examples/parameter_example.yml``).
+        softening_coeff: Softening in units of the mean separation.
+        softening_pivot_z: Maximal softening pivot redshift.
+        reuse_branch: If the profile's branch (``swift-cli/<name>``) already
+            exists, check it out in the new worktree (re-pointing its
+            upstream) instead of failing; if its worktree already exists on
+            that branch, register it as is.
+
     Raises:
         ProfileError: For invalid/duplicate names, existing paths, or any
             git failure (e.g. unknown upstream, branch already exists).
     """
-    validate_profile_name(name)
-    if name in store.profiles:
-        raise ProfileError(f"Profile '{name}' already exists.")
+    check_new_profile_name(store, name)
     worktree = store.worktree_root / name
-    if worktree.exists():
-        raise ProfileError(f"Worktree path already exists: {worktree}")
     branch = BRANCH_PREFIX + name
 
-    fetch_for_upstream(store.repo, upstream)
-    print(f"Creating worktree {worktree} on {branch} (tracking {upstream})")
-    store.worktree_root.mkdir(parents=True, exist_ok=True)
-    git(
-        "worktree",
-        "add",
-        "--track",
-        "-b",
-        branch,
-        str(worktree),
-        upstream,
-        cwd=store.repo,
-    )
+    if worktree.exists():
+        if not (
+            reuse_branch
+            and list_worktrees(store.repo).get(worktree.resolve()) == branch
+        ):
+            raise ProfileError(f"Worktree path already exists: {worktree}")
+        print(f"Reusing existing worktree {worktree} on {branch}")
+    elif ref_exists(store.repo, f"refs/heads/{branch}"):
+        if not reuse_branch:
+            raise ProfileError(
+                f"Branch '{branch}' already exists (kept from an earlier "
+                f"profile '{name}'?). Use 'swift-cli profile --new {name} "
+                "--reuse-branch' to give the new profile that branch, or "
+                f"delete it with 'git -C {store.repo} branch -D {branch}'."
+            )
+        fetch_for_upstream(store.repo, upstream)
+        print(f"Creating worktree {worktree} on existing branch {branch}")
+        store.worktree_root.mkdir(parents=True, exist_ok=True)
+        git("worktree", "add", str(worktree), branch, cwd=store.repo)
+        git("branch", f"--set-upstream-to={upstream}", branch, cwd=worktree)
+    else:
+        fetch_for_upstream(store.repo, upstream)
+        print(
+            f"Creating worktree {worktree} on {branch} (tracking {upstream})"
+        )
+        store.worktree_root.mkdir(parents=True, exist_ok=True)
+        git(
+            "worktree",
+            "add",
+            "--track",
+            "-b",
+            branch,
+            str(worktree),
+            upstream,
+            cwd=store.repo,
+        )
 
     profile = SWIFTCLIProfile(
         name=name,
@@ -477,54 +553,49 @@ def add_profile(
 # ---------- interactive prompts ----------
 
 
-class PathExistsValidator(Validator):
-    """Validator to check if a given path exists."""
+@lru_cache(maxsize=None)
+def _prompt_toolkit_extras() -> tuple[Any, Any]:
+    """Build the prompt style and key bindings.
 
-    def validate(self, document: Document) -> None:
-        """Validate that the path exists."""
-        p = Path(document.text).expanduser()
-        if not p.exists():
-            raise ValidationError(
-                message="Path does not exist.",
-                cursor_position=len(document.text),
-            )
+    prompt_toolkit is slow to import, so it is only loaded for a prompt.
+    """
+    from prompt_toolkit.key_binding import KeyBindings, KeyPressEvent
+    from prompt_toolkit.styles import Style
 
+    style = Style.from_dict(
+        {
+            "completion-menu": "bg:#2b2e3b",
+            "completion-menu.completion": "bg:#2b2e3b #c0caf5",
+            "completion-menu.completion.current": "bg:#3b4252 #ffffff",
+            "scrollbar.background": "bg:#3b4252",
+            "scrollbar.button": "bg:#ffffff",
+            "prompt": "bold",
+        }
+    )
+    kb = KeyBindings()
 
-PTK_STYLE = Style.from_dict(
-    {
-        "completion-menu": "bg:#2b2e3b",
-        "completion-menu.completion": "bg:#2b2e3b #c0caf5",
-        "completion-menu.completion.current": "bg:#3b4252 #ffffff",
-        "scrollbar.background": "bg:#3b4252",
-        "scrollbar.button": "bg:#ffffff",
-        "prompt": "bold",
-    }
-)
-
-KB = KeyBindings()
-
-
-@KB.add("enter")
-def _(event: KeyPressEvent) -> None:
-    """Enter accepts current completion if menu is open, otherwise submits."""
-    buf = event.current_buffer
-    if getattr(buf, "completer", None) is not None and buf.complete_state:
-        comp = buf.complete_state.current_completion
-        if comp is not None:
-            buf.apply_completion(comp)
-    else:
-        buf.validate_and_handle()
-
-
-@KB.add("tab")
-def _(event: KeyPressEvent) -> None:
-    """Tab opens/cycles completions, if the current prompt has a completer."""
-    buf = event.current_buffer
-    if getattr(buf, "completer", None) is not None:
-        if buf.complete_state:
-            buf.complete_next()
+    @kb.add("enter")
+    def _(event: KeyPressEvent) -> None:
+        """Enter accepts the open completion, otherwise submits."""
+        buf = event.current_buffer
+        if getattr(buf, "completer", None) is not None and buf.complete_state:
+            comp = buf.complete_state.current_completion
+            if comp is not None:
+                buf.apply_completion(comp)
         else:
-            buf.start_completion(select_first=True)
+            buf.validate_and_handle()
+
+    @kb.add("tab")
+    def _(event: KeyPressEvent) -> None:
+        """Tab opens/cycles completions, if the prompt has a completer."""
+        buf = event.current_buffer
+        if getattr(buf, "completer", None) is not None:
+            if buf.complete_state:
+                buf.complete_next()
+            else:
+                buf.start_completion(select_first=True)
+
+    return style, kb
 
 
 def ask(
@@ -532,25 +603,68 @@ def ask(
     default: str = "",
     kind: str = "text",
     must_exist: bool = False,
+    check: Callable[[str], Any] | None = None,
 ) -> str:
     """Prompt the user for a value.
 
     Path prompts (``kind`` "dir" or "file") have tab completion; while the
-    completion menu is open Enter applies the highlighted completion.
+    completion menu is open Enter applies the highlighted completion. A bad
+    answer is reported and the question asked again.
+
+    When stdin is not a terminal (answers piped in), one line is read per
+    question and an empty line means the default; a bad answer is an error.
 
     Args:
         label: The prompt text.
         default: The pre-filled default value.
         kind: "text", "dir" or "file".
-        must_exist: Reject paths that do not exist.
+        must_exist: Reject paths that do not exist (blank is allowed).
+        check: Called with the answer; raising ValueError rejects it with
+            that message.
 
     Returns:
         str: The stripped answer.
+
+    Raises:
+        EOFError: If stdin is closed.
+        ProfileError: For a bad piped answer.
     """
+
+    def problem(text: str) -> str | None:
+        if must_exist and text and not Path(text).expanduser().exists():
+            return f"Path does not exist: {text}"
+        if check is not None:
+            try:
+                check(text)
+            except ValueError as e:
+                return str(e)
+        return None
+
+    if not sys.stdin.isatty():
+        text = input(label).strip() or default
+        error = problem(text)
+        if error:
+            raise ProfileError(f"{label.strip()} {error}")
+        return text
+
+    from prompt_toolkit import PromptSession
+    from prompt_toolkit.completion import PathCompleter
+    from prompt_toolkit.document import Document
+    from prompt_toolkit.validation import ValidationError, Validator
+
+    class _Check(Validator):
+        def validate(self, document: Document) -> None:
+            error = problem(document.text.strip())
+            if error:
+                raise ValidationError(
+                    message=error, cursor_position=len(document.text)
+                )
+
+    style, kb = _prompt_toolkit_extras()
     is_path = kind != "text"
     session: PromptSession[str] = PromptSession(
-        style=PTK_STYLE,
-        key_bindings=KB if is_path else None,
+        style=style,
+        key_bindings=kb if is_path else None,
         complete_while_typing=False,
         reserve_space_for_menu=8 if is_path else 0,
     )
@@ -563,7 +677,7 @@ def ask(
         [("class:prompt", label)],
         default=default,
         completer=completer,
-        validator=PathExistsValidator() if must_exist else None,
+        validator=_Check(),
         validate_while_typing=False,
     ).strip()
 
