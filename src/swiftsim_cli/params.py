@@ -7,6 +7,15 @@ from ruamel.yaml.constructor import DuplicateKeyError
 
 from swiftsim_cli.utilities.messages import warn
 
+# Limits of SWIFT's parameter parser (src/parser.h); a longer line is
+# split by fgets and the remainder rejected
+SWIFT_MAX_LINE_LENGTH = 255
+SWIFT_MAX_PARAMS = 700
+SWIFT_MAX_SECTIONS = 64
+
+# Values in SWIFT's parameter_example.yml that only document a default
+PLACEHOLDER_VALUES = {"FLT_MAX", "DBL_MAX", "INT_MAX", "LONG_MAX"}
+
 PARAMS: dict | None = None
 PARAMS_SOURCE: Path | None = None
 PARAMS_VERSION = 0
@@ -24,7 +33,8 @@ def round_trip_yaml() -> YAML:
     yaml = YAML()
     yaml.default_flow_style = False
     yaml.indent(mapping=4, sequence=4, offset=2)
-    yaml.width = 80
+    # SWIFT reads each "key: value" from a single line, so never wrap
+    yaml.width = 4096
     yaml.allow_unicode = True
     return yaml
 
@@ -145,3 +155,64 @@ def clear_parameter_cache() -> None:
 def get_parameter_cache_version() -> int:
     """Return a monotonically increasing parameter cache version."""
     return PARAMS_VERSION
+
+
+def check_swift_parameter_text(text: str) -> list[str]:
+    """Check a parameter file against the limits of SWIFT's parser.
+
+    SWIFT reads parameter files line by line (src/parser.c) and rejects
+    long lines, duplicate sections or parameters, and more than 700
+    parameters or 64 sections. Placeholder values such as FLT_MAX and
+    empty values are reported too, since SWIFT cannot parse them as
+    numbers.
+
+    Args:
+        text: The parameter file contents.
+
+    Returns:
+        One message per problem found (empty if the file is fine).
+    """
+    problems = []
+    sections: set[str] = set()
+    names: set[str] = set()
+    section = ""
+    for number, line in enumerate(text.splitlines(), start=1):
+        if len(line) > SWIFT_MAX_LINE_LENGTH:
+            problems.append(
+                f"line {number} is {len(line)} characters long (SWIFT "
+                f"reads at most {SWIFT_MAX_LINE_LENGTH})"
+            )
+        content = line.split("#", 1)[0].rstrip()
+        if not content.strip() or content.strip() in ("---", "..."):
+            continue
+        key, _, value = content.partition(":")
+        value = value.strip()
+        if not line[0].isspace():
+            if not value:
+                section = key
+                if key in sections:
+                    problems.append(f"line {number}: duplicate section {key}")
+                sections.add(key)
+                continue
+            section = ""
+        name = f"{section}:{key.strip()}" if section else key.strip()
+        if name in names:
+            problems.append(f"line {number}: duplicate parameter {name}")
+        names.add(name)
+        if not value:
+            problems.append(f"line {number}: {name} has no value")
+        elif value in PLACEHOLDER_VALUES:
+            problems.append(
+                f"line {number}: {name} is the placeholder {value}; give "
+                "a number or remove it"
+            )
+    if len(names) > SWIFT_MAX_PARAMS:
+        problems.append(
+            f"{len(names)} parameters (SWIFT reads at most {SWIFT_MAX_PARAMS})"
+        )
+    if len(sections) > SWIFT_MAX_SECTIONS:
+        problems.append(
+            f"{len(sections)} sections (SWIFT reads at most "
+            f"{SWIFT_MAX_SECTIONS})"
+        )
+    return problems

@@ -141,3 +141,40 @@ def test_empty_file_gives_no_parameters(tmp_path):
     param_file = tmp_path / "params.yml"
     param_file.write_text("")
     assert load_parameters(param_file) == {}
+
+
+def test_round_trip_yaml_never_wraps(tmp_path):
+    """Long values stay on their key's line (SWIFT reads line by line)."""
+    from io import StringIO
+
+    from swiftsim_cli.params import round_trip_yaml
+
+    value = "/a/very/long/path/" + "x" * 150
+    buffer = StringIO()
+    round_trip_yaml().dump({"Snapshots": {"subdir": value}}, buffer)
+    assert f"    subdir: {value}\n" in buffer.getvalue()
+
+
+def test_check_swift_parameter_text_finds_every_problem():
+    """Parser limits: line length, duplicates, placeholders, counts."""
+    from swiftsim_cli.params import check_swift_parameter_text
+
+    text = (
+        "# comment line\n---\nA:\n  x: 1   # trailing comment\n  x: 2\n"
+        "  empty:\n  big: FLT_MAX\nA:\n  y: 3\n"
+        f"B:\n  long: {'v' * 260}\n"
+    )
+    problems = check_swift_parameter_text(text)
+    assert any("duplicate parameter A:x" in p for p in problems)
+    assert any("duplicate section A" in p for p in problems)
+    assert any("A:empty has no value" in p for p in problems)
+    assert any("placeholder FLT_MAX" in p for p in problems)
+    assert any("characters long" in p for p in problems)
+    assert check_swift_parameter_text("A:\n  x: 1\nB:\n  y: [1, 2]\n") == []
+
+    many = "".join(f"S{i}:\n  p: 1\n" for i in range(65))
+    assert any("65 sections" in p for p in check_swift_parameter_text(many))
+    params = "A:\n" + "".join(f"  p{i}: 1\n" for i in range(701))
+    assert any(
+        "701 parameters" in p for p in check_swift_parameter_text(params)
+    )

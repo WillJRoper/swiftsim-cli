@@ -1,1112 +1,387 @@
-"""Output-times mode for generating output time lists."""
+"""Output-times mode for generating SWIFT output lists.
+
+The list is described by a first output, a spacing and a final output,
+each in its own unit (redshift, time or scale factor; the spacing can also
+be in log10 scale factor). The outputs are generated in the spacing's
+unit, converted to scale factor (through the run's cosmology where time is
+involved) to merge snapshots and snipshots, sort them and drop
+duplicates, then converted once to the list's unit and written.
+"""
 
 from __future__ import annotations
 
 import argparse
+from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 import numpy as np
+from numpy.typing import ArrayLike
 
 from swiftsim_cli.cosmology import (
-    convert_redshift_to_scale_factor,
     convert_redshift_to_time,
-    convert_scale_factor_to_redshift,
     convert_time_to_redshift,
     get_cosmology,
     internal_time_unit_in_gyr,
 )
-from swiftsim_cli.modes.common_args import add_params_argument
+from swiftsim_cli.modes.common_args import add_params_argument, positive_float
 from swiftsim_cli.params import load_parameters
+from swiftsim_cli.utilities.messages import note
 
-if TYPE_CHECKING:
-    from astropy.cosmology import FlatLambdaCDM
+# Units of the first/final outputs, and of the spacings
+POINT_UNITS = ("z", "time", "scale_factor")
+DELTA_UNITS = ("z", "time", "scale_factor", "log_scale_factor")
 
-# Times are ages of the Universe in Gyr when a cosmology is available (the
-# conversions go through astropy), otherwise they are taken as given. A
-# cosmological time list is written in SWIFT's internal time units, which is
-# what SWIFT's output_list.c expects for a "# Time" list.
+# List units (--list-units value -> internal unit, file header)
+LIST_UNITS = {
+    "redshift": ("z", "Redshift"),
+    "time": ("time", "Time"),
+    "scale-factor": ("scale_factor", "Scale Factor"),
+}
+
+UNIT_NAMES = {
+    "z": "redshift",
+    "time": "time",
+    "scale_factor": "scale factor",
+    "log_scale_factor": "log10 scale factor",
+}
+
 TIME_UNITS_HELP = (
-    "as the age of the Universe in Gyr if the parameter file has a "
-    "Cosmology section (written to the list in internal units), otherwise "
-    "in internal units"
+    "in Gyr since the Big Bang for a cosmological run (written to the list "
+    "in internal time units), otherwise in internal time units"
 )
+
+# Relative tolerance in scale factor for two outputs to be the same (the
+# time <-> scale factor conversion is accurate to ~1e-8)
+DUPLICATE_RTOL = 1e-7
 
 
 def add_arguments(parser: argparse.ArgumentParser) -> None:
     """Add arguments for the 'output-times' mode."""
-    # We always need the output file
     parser.add_argument(
         "--output-list",
         type=Path,
         default=Path("output_list.txt"),
         metavar="FILE",
-        help="File to write the list of times to (default: output_list.txt).",
+        help="File to write the list to (default: output_list.txt).",
     )
-
-    # We can optionally provide a parameter file, this will be used to
-    # get cosmology parameters and other settings.
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Overwrite an existing output list.",
+    )
     add_params_argument(parser)
-
-    # We will always need one definition of the first snapshot but this can be
-    # defined in terms of redshift, time, or scale factor.
     parser.add_argument(
-        "--first-snap-z",
-        type=float,
-        metavar="Z",
-        default=None,
-        help="Redshift of the first snapshot to include.",
-    )
-    parser.add_argument(
-        "--first-snap-time",
-        type=float,
-        metavar="T",
-        default=None,
-        help=f"Time of the first snapshot ({TIME_UNITS_HELP}).",
-    )
-    parser.add_argument(
-        "--first-snap-scale-factor",
-        type=float,
-        metavar="A",
-        default=None,
-        help="Scale factor of the first snapshot to include.",
+        "--no-cosmology",
+        action="store_true",
+        help="Ignore the parameter file's Cosmology section (treat the run "
+        "as non-cosmological).",
     )
 
-    # Similarly with the delta between snapshots, we can define this in terms
-    # of redshift, time, scale factor, or logarithmic scale factor.
-    parser.add_argument(
-        "--delta-z",
-        type=float,
-        metavar="DZ",
-        default=None,
-        help="Redshift interval between snapshots.",
-    )
-    parser.add_argument(
-        "--delta-time",
-        type=float,
-        metavar="DT",
-        default=None,
-        help=f"Time interval between snapshots ({TIME_UNITS_HELP}).",
-    )
-    parser.add_argument(
-        "--delta-scale-factor",
-        type=float,
-        metavar="DA",
-        default=None,
-        help="Scale factor interval between snapshots.",
-    )
-    parser.add_argument(
-        "--delta-log-scale-factor",
-        type=float,
-        metavar="DLNA",
-        default=None,
-        help="Logarithmic scale factor interval between snapshots.",
-    )
-
-    # If we want snipshots, in between we just define a smaller delta for these
-    # (again, in terms of redshift, time, scale factor, or
-    # logarithmic scale factor).
-    parser.add_argument(
-        "--snipshot-delta-z",
-        type=float,
-        metavar="DZ",
-        default=None,
-        help="Redshift interval between snipshots.",
-    )
-    parser.add_argument(
-        "--snipshot-delta-time",
-        type=float,
-        metavar="DT",
-        default=None,
-        help=f"Time interval between snipshots ({TIME_UNITS_HELP}).",
-    )
-    parser.add_argument(
-        "--snipshot-delta-scale-factor",
-        type=float,
-        metavar="DA",
-        default=None,
-        help="Scale factor interval between snipshots.",
-    )
-    parser.add_argument(
-        "--snipshot-delta-log-scale-factor",
-        type=float,
-        metavar="DLNA",
-        default=None,
-        help="Logarithmic scale factor interval between snipshots.",
-    )
-
-    # We will also need to the final snapshot. These default to None so we
-    # can fall back to a_end from the parameter file (or z=0 / a=1).
-    parser.add_argument(
-        "--final-snap-z",
-        type=float,
-        metavar="Z",
-        default=None,
-        help=(
-            "Redshift of the final snapshot to include (default: a_end from "
-            "the parameter file, otherwise 0.0)."
+    first = parser.add_mutually_exclusive_group()
+    final = parser.add_mutually_exclusive_group()
+    for group, which, extra in (
+        (first, "first", ""),
+        (
+            final,
+            "final",
+            " (default: Cosmology:a_end, for a cosmological run)",
         ),
-    )
-    parser.add_argument(
-        "--final-snap-time",
-        type=float,
-        metavar="T",
-        default=None,
-        help=f"Time of the final snapshot ({TIME_UNITS_HELP}).",
-    )
-    parser.add_argument(
-        "--final-snap-scale-factor",
-        type=float,
-        metavar="A",
-        default=None,
-        help=(
-            "Scale factor of the final snapshot to include (default: a_end "
-            "from the parameter file, otherwise 1.0)."
-        ),
-    )
+    ):
+        group.add_argument(
+            f"--{which}-snap-z",
+            type=float,
+            metavar="Z",
+            help=f"Redshift of the {which} output{extra}.",
+        )
+        group.add_argument(
+            f"--{which}-snap-time",
+            type=float,
+            metavar="T",
+            help=f"Time of the {which} output, {TIME_UNITS_HELP}.",
+        )
+        group.add_argument(
+            f"--{which}-snap-scale-factor",
+            type=float,
+            metavar="A",
+            help=f"Scale factor of the {which} output{extra}.",
+        )
+
+    delta = parser.add_mutually_exclusive_group()
+    snip = parser.add_mutually_exclusive_group()
+    for group, prefix, what in (
+        (delta, "delta", "snapshots"),
+        (snip, "snipshot-delta", "snipshots"),
+    ):
+        group.add_argument(
+            f"--{prefix}-z",
+            type=positive_float,
+            metavar="DZ",
+            help=f"Redshift interval between {what}.",
+        )
+        group.add_argument(
+            f"--{prefix}-time",
+            type=positive_float,
+            metavar="DT",
+            help=f"Time interval between {what}, {TIME_UNITS_HELP}.",
+        )
+        group.add_argument(
+            f"--{prefix}-scale-factor",
+            type=positive_float,
+            metavar="DA",
+            help=f"Scale factor interval between {what}.",
+        )
+        group.add_argument(
+            f"--{prefix}-log-scale-factor",
+            type=positive_float,
+            metavar="DLOGA",
+            help=f"Interval in log10(scale factor) between {what}.",
+        )
     parser.add_argument(
         "--list-units",
-        type=str,
+        choices=list(LIST_UNITS),
         default=None,
-        choices=["redshift", "time", "scale-factor"],
         metavar="UNITS",
-        help=(
-            "Override the units of the output file (redshift, time, or "
-            "scale-factor)."
-        ),
+        help="Units of the list: redshift, time or scale-factor (default: "
+        "those of --delta-*). Lists with snipshots need "
+        "Snapshots:select_output_on and a select-output file in SWIFT.",
     )
 
 
-def _get_out_list_z(
-    first_snap: float, delta: float, final_snap: float
-) -> np.ndarray:
-    """Generate an output list in redshift."""
-    if delta > 0:
-        delta = -delta
-    return np.arange(first_snap, final_snap + delta, delta)
+@dataclass
+class Point:
+    """A value in one of the output units."""
+
+    unit: str
+    value: float
 
 
-def _get_out_list_time(
-    first_snap: float, delta: float, final_snap: float
-) -> np.ndarray:
-    """Generate an output list in time."""
-    if delta < 0:
-        delta = -delta
-    return np.arange(first_snap, final_snap + delta, delta)
+def _given(args: dict, prefix: str, units: tuple[str, ...]) -> Point | None:
+    """Return the one ``<prefix>_<unit>`` option given, if any."""
+    given = [
+        Point(unit, float(args[f"{prefix}_{unit}"]))
+        for unit in units
+        if args.get(f"{prefix}_{unit}") is not None
+    ]
+    if len(given) > 1:
+        names = ", ".join(UNIT_NAMES[p.unit] for p in given)
+        raise ValueError(f"give the {prefix} in one unit only, not {names}")
+    return given[0] if given else None
 
 
-def _get_out_list_scale_factor(
-    first_snap: float, delta: float, final_snap: float
-) -> np.ndarray:
-    """Generate an output list in scale factor."""
-    if delta < 0:
-        delta = -delta
-    return np.arange(first_snap, final_snap + 1e-9, delta)
+class Converter:
+    """Convert between output units through the scale factor.
 
-
-def _get_out_list_log_scale_factor(
-    first_snap: float, delta: float, final_snap: float
-) -> np.ndarray:
-    """Generate an output list in logarithmic scale factor."""
-    if delta < 0:
-        delta = -delta
-    return 10 ** np.arange(
-        np.log10(first_snap), np.log10(final_snap) + 1e-9, delta
-    )
-
-
-def write_output_list(
-    out_file: str | Path,
-    snapshot_times: np.ndarray,
-    snipshot_times: np.ndarray,
-    doing_z: bool = False,
-    doing_time: bool = False,
-    doing_scale_factor: bool = False,
-) -> None:
-    """Write the output list to a file.
-
-    This function will clean up the snapshot and snipshot times, sort them,
-    and write them to the specified output file in a two-column format.
-
-    Args:
-        out_file: The name of the output file.
-        snapshot_times: An array of times for the snapshots.
-        snipshot_times: An array of times for the snipshots.
-        doing_z: Whether the times are in redshift.
-        doing_time: Whether the times are in time units.
-        doing_scale_factor: Whether the times are in scale factor units.
+    Redshift and scale factor convert without a cosmology. Time needs one;
+    without one, time can only be used on its own and is passed through
+    unchanged (it orders outputs just as the scale factor would).
     """
-    # No point in doubling up on snapshots and snipshots, remove any snipshots
-    # that are already in the snapshot list.
-    snipshot_times = snipshot_times[~np.isin(snipshot_times, snapshot_times)]
 
-    # Do we have mixed output types?
-    mixed_output = len(snapshot_times) > 0 and len(snipshot_times) > 0
+    def __init__(self, cosmological: bool) -> None:
+        """Create a converter (with or without a cosmology)."""
+        self.cosmological = cosmological
 
-    # Define the first line of the output text file (with two columns)
-    output_lines = []
-    header = "# "
-    if doing_z:
-        header += "Redshift"
-    elif doing_time:
-        header += "Time"
-    elif doing_scale_factor:
-        header += "Scale Factor"
-    else:
-        raise ValueError(
-            "Shouldn't be able to get here, something went wrong with "
-            "the input parameters and all the consistency checks."
-        )
+    def to_a(self, unit: str, values: ArrayLike) -> np.ndarray:
+        """Convert values in a unit to scale factor."""
+        values = np.asarray(values, dtype=float)
+        if unit == "z":
+            return 1.0 / (1.0 + values)
+        if unit == "time" and self.cosmological:
+            return 1.0 / (1.0 + np.asarray(convert_time_to_redshift(values)))
+        return values
 
-    if mixed_output:
-        header += ", Select Output"
-    output_lines.append(header)
+    def from_a(self, unit: str, a: ArrayLike) -> np.ndarray:
+        """Convert scale factors to a unit."""
+        a = np.asarray(a, dtype=float)
+        if unit == "z":
+            z = 1.0 / a - 1.0
+            return np.where(np.abs(z) < 1e-12, 0.0, z)
+        if unit == "time" and self.cosmological:
+            return np.asarray(convert_redshift_to_time(1.0 / a - 1.0))
+        return a
 
-    # Report how many snapshots and snipshots we have
-    print(f"Generated {len(snapshot_times)} snapshots")
-    if len(snipshot_times) > 0:
-        print(f"Generated {len(snipshot_times)} snipshots")
-    print(
-        "In total, this will generate "
-        f"{len(snapshot_times) + len(snipshot_times)} outputs."
-    )
-
-    # Create the select output column
-    select_output_snap = ["Snapshot"] * len(snapshot_times)
-    select_output_snip = ["Snipshot"] * len(snipshot_times)
-
-    # Combine the times and select output into lines
-    times = np.concatenate((snapshot_times, snipshot_times))
-    select_output = np.concatenate((select_output_snap, select_output_snip))
-
-    # Sort the times and select output together (here we need to treat redshift
-    # as descending and time/scale factor as ascending)
-    if doing_z:
-        sorted_indices = np.argsort(times)[::-1]
-    else:
-        sorted_indices = np.argsort(times)
-    sorted_times = times[sorted_indices]
-    sorted_select_output = select_output[sorted_indices]
-
-    # Create the output lines
-    for time, select in zip(sorted_times, sorted_select_output):
-        # Round to remove floating point precision artifacts
-        time_rounded = round(time, 10)
-        if mixed_output:
-            output_lines.append(f"{time_rounded}, {select}")
-        else:
-            output_lines.append(f"{time_rounded}")
-
-    # Write the output to the file
-    with open(out_file, "w") as f:
-        f.write("\n".join(output_lines) + "\n")
-
-    print(f"Output list written to {out_file}.")
+    def convert(self, point: Point, unit: str) -> float:
+        """Convert a single value to another unit."""
+        if point.unit == unit:
+            return point.value
+        return float(self.from_a(unit, self.to_a(point.unit, point.value)))
 
 
-def _generate_output_list_no_cosmo(args: dict) -> None:
-    """Generate an output list file containing times for each snapshot.
+def generate_times(
+    unit: str, first: float, delta: float, final: float
+) -> np.ndarray:
+    """Generate evenly spaced outputs from first to final (inclusive).
 
-    This is the version used when the user has not provided a parameter file
-    and this cosmology is not available. With no cosmology, we can't convert
-    so everything must be provided consistently and the end must be given.
+    Redshifts count down, everything else counts up. ``first`` and
+    ``final`` are in ``unit``, except for log_scale_factor, where they are
+    scale factors. No output goes past ``final``.
 
     Args:
-        args: Command-line arguments containing the configuration for the
-                output list generation.
-    """
-    # Unpack the arguments
-    out_file = args.get("output_list", "output_list.txt")
-    first_snap_z = args.get("first_snap_z", None)
-    first_snap_time = args.get("first_snap_time", None)
-    first_snap_scale_factor = args.get("first_snap_scale_factor", None)
-    delta_z = args.get("delta_z", None)
-    delta_time = args.get("delta_time", None)
-    delta_scale_factor = args.get("delta_scale_factor", None)
-    delta_log_scale_factor = args.get("delta_log_scale_factor", None)
-    snip_delta_z = args.get("snipshot_delta_z", None)
-    snip_delta_time = args.get("snipshot_delta_time", None)
-    snip_delta_scale_factor = args.get("snipshot_delta_scale_factor", None)
-    snip_delta_log_scale_factor = args.get(
-        "snipshot_delta_log_scale_factor", None
-    )
-    final_snap_z = args.get("final_snap_z", None)
-    final_snap_time = args.get("final_snap_time", None)
-    final_snap_scale_factor = args.get("final_snap_scale_factor", None)
-
-    # Check if the user wants to convert units (which we can't do without a
-    # cosmology)
-    if args.get("list_units") is not None:
-        raise ValueError(
-            "Cannot convert output units without cosmology parameters. "
-            "Please provide a parameter file with -P/--params."
-        )
-
-    # Are we doing redshift, time, or scale factor?
-    doing_z = first_snap_z is not None
-    doing_time = first_snap_time is not None
-    doing_scale_factor = first_snap_scale_factor is not None
-    # Were we given a start?
-    if not (doing_z or doing_time or doing_scale_factor):
-        raise ValueError(
-            "You must specify the first snapshot in terms of redshift, "
-            "time, or scale factor."
-        )
-
-    # Were we given a delta?
-    if not (
-        delta_z or delta_time or delta_scale_factor or delta_log_scale_factor
-    ):
-        raise ValueError(
-            "You must specify the delta between snapshots in terms of "
-            "redshift, time, scale factor, or logarithmic scale factor."
-        )
-
-    # Do we have everything we need?
-    if doing_z and not delta_z:
-        raise ValueError(
-            "If you specify the first snapshot redshift, you must also "
-            "specify the delta in terms of redshift."
-        )
-    if doing_time and not delta_time:
-        raise ValueError(
-            "If you specify the first snapshot time, you must also "
-            "specify the delta in terms of time."
-        )
-    if (
-        doing_scale_factor
-        and delta_scale_factor is None
-        and delta_log_scale_factor is None
-    ):
-        raise ValueError(
-            "If you specify the first snapshot scale factor, you must also "
-            "specify the delta in terms of scale factor or logarithmic"
-            " scale factor."
-        )
-
-    # Collapse the variables into a simpler set now we know we have what
-    # we need.
-    first_snap = (
-        first_snap_z
-        if first_snap_z is not None
-        else first_snap_time
-        if first_snap_time is not None
-        else first_snap_scale_factor
-    )
-    delta = (
-        delta_z
-        if delta_z is not None
-        else delta_time
-        if delta_time is not None
-        else delta_scale_factor
-        if delta_scale_factor is not None
-        else delta_log_scale_factor
-    )
-    snip_delta = (
-        snip_delta_z
-        if snip_delta_z is not None
-        else snip_delta_time
-        if snip_delta_time is not None
-        else snip_delta_scale_factor
-        if snip_delta_scale_factor is not None
-        else snip_delta_log_scale_factor
-    )
-
-    # Make sure we use the right final snapshot time, redshift and scale
-    # factor have well defined defaults (z=0, a=1), time does not
-    final_snap = None
-    if doing_z:
-        final_snap = 0.0 if final_snap_z is None else final_snap_z
-    elif doing_time:
-        final_snap = final_snap_time
-    elif doing_scale_factor:
-        final_snap = (
-            1.0 if final_snap_scale_factor is None else final_snap_scale_factor
-        )
-
-    # Ensure we have a meaningful final snapshot
-    if final_snap is None:
-        raise ValueError(
-            "You must specify the final snapshot time, redshift, or scale "
-            "factor."
-        )
-
-    # Validate that we have the required inputs
-    if first_snap is None:
-        raise ValueError(
-            "You must specify the first snapshot time, redshift, or "
-            "scale factor."
-        )
-    if delta is None:
-        raise ValueError("You must specify a delta for snapshots.")
-
-    # Is our delta logarithmic? This will require special handling.
-    doing_log_scale_factor = delta_log_scale_factor is not None
-    doing_snip_log_scale_factor = snip_delta_log_scale_factor is not None
-
-    # Do we have snipshots?
-    has_snipshots = snip_delta is not None
-
-    # Make sure our snipshot delta is the same type as our delta if we have it.
-    if has_snipshots:
-        if doing_z and snip_delta_z is None:
-            raise ValueError(
-                "Snipshot delta must be given in terms of redshift."
-            )
-        if doing_time and snip_delta_time is None:
-            raise ValueError("Snipshot delta must be given in terms of time.")
-        if (
-            doing_scale_factor
-            and snip_delta_scale_factor is None
-            and snip_delta_log_scale_factor is None
-        ):
-            raise ValueError(
-                "Snipshot delta must be given in terms of scale factor or "
-                "logarithmic scale factor."
-            )
-
-    # OK, we seem to have what we need. Lets tell the user what we have
-    print("Generating output list with the following parameters:")
-    print(f"  First snapshot: {first_snap} ", end="")
-    if doing_z:
-        print(" (Redshift)")
-    elif doing_time:
-        print(" (Time in internal units)")
-    elif doing_scale_factor:
-        print(" (Scale factor)")
-    print(f"  Delta: {delta} ", end="")
-    if doing_z:
-        print(" (Redshift)")
-    elif doing_time:
-        print(" (Time in internal units)")
-    elif doing_scale_factor and not doing_log_scale_factor:
-        print(" (Scale factor)")
-    elif doing_scale_factor and doing_log_scale_factor:
-        print(" (Logarithmic scale factor)")
-    if has_snipshots:
-        print(f"  Snipshot delta: {snip_delta} ", end="")
-        if doing_z:
-            print(" (Redshift)")
-        elif doing_time:
-            print(" (Time in internal units)")
-        elif doing_scale_factor and not doing_snip_log_scale_factor:
-            print(" (Scale factor)")
-        elif doing_scale_factor and doing_snip_log_scale_factor:
-            print(" (Logarithmic scale factor)")
-    print(f"  Final snapshot: {final_snap} ", end="")
-    if doing_z:
-        print(" (Redshift)")
-    elif doing_time:
-        print(" (Time in internal units)")
-    elif doing_scale_factor:
-        print(" (Scale factor)")
-
-    # Get the output list of times for the snapshots
-    if doing_z:
-        snapshot_times = _get_out_list_z(first_snap, delta, final_snap)
-    elif doing_time:
-        snapshot_times = _get_out_list_time(first_snap, delta, final_snap)
-    elif doing_scale_factor and not doing_log_scale_factor:
-        snapshot_times = _get_out_list_scale_factor(
-            first_snap, delta, final_snap
-        )
-    elif doing_scale_factor and doing_log_scale_factor:
-        snapshot_times = _get_out_list_log_scale_factor(
-            first_snap, delta, final_snap
-        )
-    else:
-        raise ValueError(
-            "You must specify the first snapshot, final snapshot, and delta"
-            " in terms of redshift, time, scale factor, or logarithmic "
-            "scale factor."
-        )
-
-    # If we are getting them, get the snipshot times
-    if has_snipshots:
-        assert snip_delta is not None, (
-            "snip_delta must be provided when has_snipshots is True"
-        )
-        if doing_z:
-            snipshot_times = _get_out_list_z(
-                first_snap, snip_delta, final_snap
-            )
-        elif doing_time:
-            snipshot_times = _get_out_list_time(
-                first_snap, snip_delta, final_snap
-            )
-        elif doing_scale_factor and not doing_snip_log_scale_factor:
-            snipshot_times = _get_out_list_scale_factor(
-                first_snap, snip_delta, final_snap
-            )
-        elif doing_scale_factor and doing_snip_log_scale_factor:
-            snipshot_times = _get_out_list_log_scale_factor(
-                first_snap, snip_delta, final_snap
-            )
-        else:
-            raise ValueError(
-                "You must specify the first snapshot, final snapshot, and "
-                "snipshot delta in terms of redshift, time, scale factor, or "
-                "logarithmic scale factor."
-            )
-    else:
-        snipshot_times = np.array([])
-
-    # Write the output list to the file
-    write_output_list(
-        out_file,
-        snapshot_times,
-        snipshot_times,
-        doing_z=doing_z,
-        doing_time=doing_time,
-        doing_scale_factor=doing_scale_factor,
-    )
-
-
-def unify_snapshot_times(
-    first_snap_z: float | None = None,
-    first_snap_time: float | None = None,
-    first_snap_scale_factor: float | None = None,
-    final_snap_z: float | None = None,
-    final_snap_time: float | None = None,
-    final_snap_scale_factor: float | None = None,
-    doing_z: bool = False,
-    doing_time: bool = False,
-    doing_scale_factor: bool = False,
-    doing_log_scale_factor: bool = False,
-) -> tuple[float, float]:
-    """Convert the start and finish snapshots to a common type.
-
-    This function will convert the start and finish snapshots to the same type
-    (redshift, time, or scale factor) based on the provided parameters. It will
-    raise an error if the parameters are inconsistent or if the first snapshot
-    is not specified in any of the supported formats.
-
-    Args:
-        first_snap_z: The redshift of the first snapshot.
-        first_snap_time: The time of the first snapshot in Gyr.
-        first_snap_scale_factor: The scale factor of the first snapshot.
-        final_snap_z: The redshift of the final snapshot.
-        final_snap_time: The time of the final snapshot in Gyr.
-        final_snap_scale_factor: The scale factor of the final snapshot.
-        doing_z: Whether we are working in redshift.
-        doing_time: Whether we are working in time.
-        doing_scale_factor: Whether we are working in scale factor.
-        doing_log_scale_factor: Whether we are working in logarithmic scale
-            factor.
+        unit: The unit of the spacing.
+        first: The first output.
+        delta: The (positive) spacing.
+        final: The final output.
 
     Returns:
-        A tuple containing the first and final snapshots in the common type.
-
-    Raises:
-        ValueError: If the parameters are inconsistent or if the first snapshot
-                    is not specified in any of the supported formats.
+        The outputs, in ``unit`` (scale factor for log_scale_factor).
     """
-    # Convert start and finishes to appropriate types
-    if doing_z:
-        # Convert the first snapshot to redshift
-        if first_snap_z is not None:
-            first_snap = first_snap_z
-        elif first_snap_time is not None:
-            first_snap = float(convert_time_to_redshift(first_snap_time))
-        elif first_snap_scale_factor is not None:
-            first_snap = float(
-                convert_scale_factor_to_redshift(first_snap_scale_factor)
-            )
-        else:
-            raise ValueError(
-                "You must specify the first snapshot in terms of redshift, "
-                "time, or scale factor."
-            )
-
-        # Convert the final snapshot to redshift
-        if final_snap_z is not None:
-            final_snap = final_snap_z
-        elif final_snap_time is not None:
-            final_snap = float(convert_time_to_redshift(final_snap_time))
-        elif final_snap_scale_factor is not None:
-            final_snap = float(
-                convert_scale_factor_to_redshift(final_snap_scale_factor)
-            )
-        else:
-            raise ValueError(
-                "You must specify the final snapshot in terms of redshift, "
-                "time, or scale factor."
-            )
-    elif doing_time:
-        # Convert the first snapshot to time
-        if first_snap_time is not None:
-            first_snap = first_snap_time
-        elif first_snap_z is not None:
-            first_snap = float(convert_redshift_to_time(first_snap_z))
-        elif first_snap_scale_factor is not None:
-            first_snap = float(
-                convert_redshift_to_time(
-                    float(
-                        convert_scale_factor_to_redshift(
-                            first_snap_scale_factor
-                        )
-                    )
-                )
-            )
-        else:
-            raise ValueError(
-                "You must specify the first snapshot in terms of redshift, "
-                "time, or scale factor."
-            )
-
-        # Convert the final snapshot to time
-        if final_snap_time is not None:
-            final_snap = final_snap_time
-        elif final_snap_z is not None:
-            final_snap = float(convert_redshift_to_time(final_snap_z))
-        elif final_snap_scale_factor is not None:
-            final_snap = float(
-                convert_redshift_to_time(
-                    float(
-                        convert_scale_factor_to_redshift(
-                            final_snap_scale_factor
-                        )
-                    )
-                )
-            )
-        else:
-            raise ValueError(
-                "You must specify the final snapshot in terms of redshift, "
-                "time, or scale factor."
-            )
-    elif doing_scale_factor or doing_log_scale_factor:
-        # Convert the first snapshot to scale factor
-        if first_snap_scale_factor is not None:
-            first_snap = first_snap_scale_factor
-        elif first_snap_z is not None:
-            first_snap = float(convert_redshift_to_scale_factor(first_snap_z))
-        elif first_snap_time is not None:
-            first_snap = float(
-                convert_redshift_to_scale_factor(
-                    float(convert_time_to_redshift(first_snap_time))
-                )
-            )
-        else:
-            raise ValueError(
-                "You must specify the first snapshot in terms of redshift, "
-                "time, or scale factor."
-            )
-
-        # Convert the final snapshot to scale factor
-        if final_snap_scale_factor is not None:
-            final_snap = final_snap_scale_factor
-        elif final_snap_z is not None:
-            final_snap = float(convert_redshift_to_scale_factor(final_snap_z))
-        elif final_snap_time is not None:
-            final_snap = float(
-                convert_redshift_to_scale_factor(
-                    float(convert_time_to_redshift(final_snap_time))
-                )
-            )
-        else:
-            raise ValueError(
-                "You must specify the final snapshot in terms of redshift, "
-                "time, or scale factor."
-            )
+    if delta <= 0:
+        raise ValueError(f"the spacing must be positive, got {delta}")
+    if unit == "log_scale_factor":
+        start, stop = np.log10(first), np.log10(final)
     else:
+        start, stop = first, final
+    sign = -1.0 if unit == "z" else 1.0
+    span = sign * (stop - start)
+    if span < 0:
         raise ValueError(
-            "Found no valid snapshot type. You must specify the first "
-            "snapshot in terms of redshift, time, or scale factor."
+            f"the final output ({final:g}) comes before the first "
+            f"({first:g}) in {UNIT_NAMES[unit]}"
         )
-
-    # Ensure values are not None before returning
-    if first_snap is None:
-        raise ValueError("Failed to determine first snapshot value")
-    if final_snap is None:
-        raise ValueError("Failed to determine final snapshot value")
-
-    return first_snap, final_snap
+    steps = int(np.floor(span / delta + 1e-9))
+    values = start + sign * delta * np.arange(steps + 1)
+    return 10**values if unit == "log_scale_factor" else values
 
 
-def _generate_output_list_with_cosmo(args: dict, cosmo: FlatLambdaCDM) -> None:
-    """Generate an output list file containing times for each snapshot.
+def _merge(
+    snapshots: np.ndarray, snipshots: np.ndarray
+) -> tuple[np.ndarray, np.ndarray]:
+    """Merge outputs (scale factors), sorted, without duplicates.
 
-    Args:
-        args: Command-line arguments containing the configuration for the
-              output list generation.
-        cosmo: Cosmology object to use for conversions.
+    Snapshots win over snipshots at the same time.
+
+    Returns:
+        The scale factors and a matching array of "Snapshot"/"Snipshot".
     """
-    # Get the parameter file (if we have a cosmology we already know we have
-    # one)
-    params = load_parameters()
-
-    # Unpack the arguments
-    out_file = args.get("output_list", "output_list.txt")
-    first_snap_z = args.get("first_snap_z", None)
-    first_snap_time = args.get("first_snap_time", None)
-    first_snap_scale_factor = args.get("first_snap_scale_factor", None)
-    delta_z = args.get("delta_z", None)
-    delta_time = args.get("delta_time", None)
-    delta_scale_factor = args.get("delta_scale_factor", None)
-    delta_log_scale_factor = args.get("delta_log_scale_factor", None)
-    snip_delta_z = args.get("snipshot_delta_z", None)
-    snip_delta_time = args.get("snipshot_delta_time", None)
-    snip_delta_scale_factor = args.get("snipshot_delta_scale_factor", None)
-    snip_delta_log_scale_factor = args.get(
-        "snipshot_delta_log_scale_factor", None
+    a = np.concatenate([snapshots, snipshots])
+    kind = np.array(
+        ["Snapshot"] * len(snapshots) + ["Snipshot"] * len(snipshots)
     )
-    final_snap_z = args.get("final_snap_z", None)
-    final_snap_time = args.get("final_snap_time", None)
-    final_snap_scale_factor = args.get("final_snap_scale_factor", None)
-
-    # Will we do snipshots?
-    has_snipshots = (
-        snip_delta_z is not None
-        or snip_delta_time is not None
-        or snip_delta_scale_factor is not None
-        or snip_delta_log_scale_factor is not None
-    )
-
-    # Compute the end if we need to
-    if (
-        final_snap_z is None
-        and final_snap_time is None
-        and final_snap_scale_factor is None
-    ):
-        final_snap_scale_factor = float(params["Cosmology"].get("a_end", 1.0))
-
-    # When we have a cosmology, the delta defines what quantity we work in
-    doing_z = delta_z is not None
-    doing_time = delta_time is not None
-    doing_scale_factor = delta_scale_factor is not None
-    doing_log_scale_factor = delta_log_scale_factor is not None
-
-    # And same consideration for snipshots?
-    snip_doing_z = snip_delta_z is not None
-    snip_doing_time = snip_delta_time is not None
-    snip_doing_scale_factor = snip_delta_scale_factor is not None
-    snip_doing_log_scale_factor = snip_delta_log_scale_factor is not None
-
-    # Convert the first and final snapshots to the appropriate type
-    first_snap, final_snap = unify_snapshot_times(
-        first_snap_z=first_snap_z,
-        first_snap_time=first_snap_time,
-        first_snap_scale_factor=first_snap_scale_factor,
-        final_snap_z=final_snap_z,
-        final_snap_time=final_snap_time,
-        final_snap_scale_factor=final_snap_scale_factor,
-        doing_z=doing_z,
-        doing_time=doing_time,
-        doing_scale_factor=doing_scale_factor,
-        doing_log_scale_factor=doing_log_scale_factor,
-    )
-
-    # Only convert snipshot times if we're actually doing snipshots
-    if has_snipshots:
-        snip_first_snap, snip_final_snap = unify_snapshot_times(
-            first_snap_z=first_snap_z,
-            first_snap_time=first_snap_time,
-            first_snap_scale_factor=first_snap_scale_factor,
-            final_snap_z=final_snap_z,
-            final_snap_time=final_snap_time,
-            final_snap_scale_factor=final_snap_scale_factor,
-            doing_z=snip_doing_z,
-            doing_time=snip_doing_time,
-            doing_scale_factor=snip_doing_scale_factor,
-            doing_log_scale_factor=snip_doing_log_scale_factor,
-        )
-    else:
-        snip_first_snap, snip_final_snap = None, None
-
-    # Check that this first snap is after a_begin in the parameter file
-    a_begin = params["Cosmology"]["a_begin"]
-    if doing_z and convert_redshift_to_scale_factor(first_snap) < a_begin:
-        z_begin = convert_scale_factor_to_redshift(a_begin)
-        raise ValueError(
-            f"The first snapshot redshift ({first_snap}) is before the "
-            f"beginning of the simulation ({z_begin})."
-        )
-    elif (
-        doing_time
-        and convert_redshift_to_scale_factor(
-            convert_time_to_redshift(first_snap)
-        )
-        < a_begin
-    ):
-        t_begin = convert_redshift_to_time(
-            convert_scale_factor_to_redshift(a_begin)
-        )
-        raise ValueError(
-            f"The first snapshot time ({first_snap}) is before the "
-            f"beginning of the simulation ({t_begin})."
-        )
-    elif (
-        doing_scale_factor or doing_log_scale_factor
-    ) and first_snap < a_begin:
-        raise ValueError(
-            f"The first snapshot scale factor ({first_snap}) is before the "
-            f"beginning of the simulation ({a_begin})."
-        )
-    else:
-        pass  # nothing to do, we are good
-
-    # Check that this final snap is before a_end in the parameter file
-    a_end = float(params["Cosmology"].get("a_end", 1.0))
-    if doing_z and convert_redshift_to_scale_factor(final_snap) > a_end:
-        z_end = convert_scale_factor_to_redshift(a_end)
-        raise ValueError(
-            f"The final snapshot redshift ({final_snap}) is after the "
-            f"end of the simulation ({z_end})."
-        )
-    elif (
-        doing_time
-        and convert_redshift_to_scale_factor(
-            convert_time_to_redshift(final_snap)
-        )
-        > a_end
-    ):
-        t_end = convert_redshift_to_time(
-            convert_scale_factor_to_redshift(a_end)
-        )
-        raise ValueError(
-            f"The final snapshot time ({final_snap}) is after the "
-            f"end of the simulation ({t_end})."
-        )
-    elif (doing_scale_factor or doing_log_scale_factor) and final_snap > a_end:
-        raise ValueError(
-            f"The final snapshot scale factor ({final_snap}) is after the "
-            f"end of the simulation ({a_end})."
-        )
-    else:
-        pass  # nothing to do, we are good
-
-    # Get the output list of times for the snapshots
-    if doing_z:
-        assert delta_z is not None, (
-            "delta_z must be provided when doing_z is True"
-        )
-        snapshot_times = _get_out_list_z(first_snap, delta_z, final_snap)
-    elif doing_time:
-        assert delta_time is not None, (
-            "delta_time must be provided when doing_time is True"
-        )
-        snapshot_times = _get_out_list_time(first_snap, delta_time, final_snap)
-    elif doing_scale_factor:
-        assert delta_scale_factor is not None, (
-            "delta_scale_factor must be provided when "
-            "doing_scale_factor is True"
-        )
-        snapshot_times = _get_out_list_scale_factor(
-            first_snap, delta_scale_factor, final_snap
-        )
-    elif doing_log_scale_factor:
-        assert delta_log_scale_factor is not None, (
-            "delta_log_scale_factor must be provided when "
-            "doing_log_scale_factor is True"
-        )
-        snapshot_times = _get_out_list_log_scale_factor(
-            first_snap, delta_log_scale_factor, final_snap
-        )
-    else:
-        raise ValueError(
-            "You must specify the first snapshot, final snapshot, and delta"
-            " in terms of redshift, time, scale factor, or logarithmic "
-            "scale factor."
-        )
-
-    # If we are getting them, get the snipshot times
-    if has_snipshots:
-        assert snip_first_snap is not None and snip_final_snap is not None
-        if snip_doing_z:
-            assert snip_delta_z is not None, (
-                "snip_delta_z must be provided when snip_doing_z is True"
-            )
-            snipshot_times = _get_out_list_z(
-                snip_first_snap, snip_delta_z, snip_final_snap
-            )
-        elif snip_doing_time:
-            assert snip_delta_time is not None, (
-                "snip_delta_time must be provided when snip_doing_time is True"
-            )
-            snipshot_times = _get_out_list_time(
-                snip_first_snap, snip_delta_time, snip_final_snap
-            )
-        elif snip_doing_scale_factor:
-            assert snip_delta_scale_factor is not None, (
-                "snip_delta_scale_factor must be provided when "
-                "snip_doing_scale_factor is True"
-            )
-            snipshot_times = _get_out_list_scale_factor(
-                snip_first_snap, snip_delta_scale_factor, snip_final_snap
-            )
-        elif snip_doing_log_scale_factor:
-            assert snip_delta_log_scale_factor is not None, (
-                "snip_delta_log_scale_factor must be provided when "
-                "snip_doing_log_scale_factor is True"
-            )
-            snipshot_times = _get_out_list_log_scale_factor(
-                snip_first_snap, snip_delta_log_scale_factor, snip_final_snap
-            )
+    order = np.argsort(a, kind="stable")
+    a, kind = a[order], kind[order]
+    keep = np.ones(len(a), dtype=bool)
+    last = -1
+    for i, value in enumerate(a):
+        if last >= 0 and np.isclose(
+            value, a[last], rtol=DUPLICATE_RTOL, atol=0
+        ):
+            keep[i] = False
+            if kind[i] == "Snapshot":  # the snapshot's value wins
+                a[last], kind[last] = value, kind[i]
         else:
-            raise ValueError(
-                "You must specify the first snapshot, final snapshot, and "
-                "snipshot delta in terms of redshift, time, scale factor, or "
-                "logarithmic scale factor."
-            )
-
-        # We also need to make sure that the snapshots and snipshots are in
-        # the same units
-        if doing_z and snip_doing_z:
-            pass  # nothing to do
-        elif doing_time and snip_doing_time:
-            pass  # nothing to do
-        elif doing_scale_factor and snip_doing_scale_factor:
-            pass  # nothing to do
-        elif doing_log_scale_factor and snip_doing_log_scale_factor:
-            pass  # nothing to do
-        elif doing_scale_factor and snip_doing_log_scale_factor:
-            pass  # nothing to do (result is still in scale factor)
-        elif doing_log_scale_factor and snip_doing_scale_factor:
-            pass  # nothing to do (result is still in scale factor)
-        elif doing_z and snip_doing_time:
-            snipshot_times = np.asarray(
-                convert_time_to_redshift(snipshot_times)
-            )
-        elif doing_z and (
-            snip_doing_scale_factor or snip_doing_log_scale_factor
-        ):
-            snipshot_times = np.asarray(
-                convert_scale_factor_to_redshift(snipshot_times)
-            )
-        elif doing_time and snip_doing_z:
-            snipshot_times = np.asarray(
-                convert_redshift_to_time(snipshot_times)
-            )
-        elif doing_time and (
-            snip_doing_scale_factor or snip_doing_log_scale_factor
-        ):
-            snipshot_times = np.asarray(
-                convert_redshift_to_time(
-                    np.asarray(
-                        convert_scale_factor_to_redshift(snipshot_times)
-                    )
-                )
-            )
-        elif (doing_scale_factor or doing_log_scale_factor) and snip_doing_z:
-            snipshot_times = np.asarray(
-                convert_redshift_to_scale_factor(snipshot_times)
-            )
-        elif (
-            doing_scale_factor or doing_log_scale_factor
-        ) and snip_doing_time:
-            snipshot_times = np.asarray(
-                convert_redshift_to_scale_factor(
-                    np.asarray(convert_time_to_redshift(snipshot_times))
-                )
-            )
-    else:
-        snipshot_times = np.array([])
-
-    # Handle unit conversion override
-    list_units = args.get("list_units")
-    if list_units is not None:
-        if list_units == "redshift":
-            if doing_time:
-                snapshot_times = np.asarray(
-                    convert_time_to_redshift(snapshot_times)
-                )
-                snipshot_times = np.asarray(
-                    convert_time_to_redshift(snipshot_times)
-                )
-            elif doing_scale_factor or doing_log_scale_factor:
-                snapshot_times = np.asarray(
-                    convert_scale_factor_to_redshift(snapshot_times)
-                )
-                snipshot_times = np.asarray(
-                    convert_scale_factor_to_redshift(snipshot_times)
-                )
-            doing_z = True
-            doing_time = False
-            doing_scale_factor = False
-            doing_log_scale_factor = False
-
-        elif list_units == "time":
-            if doing_z:
-                snapshot_times = np.asarray(
-                    convert_redshift_to_time(snapshot_times)
-                )
-                snipshot_times = np.asarray(
-                    convert_redshift_to_time(snipshot_times)
-                )
-            elif doing_scale_factor or doing_log_scale_factor:
-                # scale factor -> redshift -> time
-                snapshot_times = np.asarray(
-                    convert_redshift_to_time(
-                        convert_scale_factor_to_redshift(snapshot_times)
-                    )
-                )
-                snipshot_times = np.asarray(
-                    convert_redshift_to_time(
-                        convert_scale_factor_to_redshift(snipshot_times)
-                    )
-                )
-            doing_z = False
-            doing_time = True
-            doing_scale_factor = False
-            doing_log_scale_factor = False
-
-        elif list_units == "scale-factor":
-            if doing_z:
-                snapshot_times = np.asarray(
-                    convert_redshift_to_scale_factor(snapshot_times)
-                )
-                snipshot_times = np.asarray(
-                    convert_redshift_to_scale_factor(snipshot_times)
-                )
-            elif doing_time:
-                # time -> redshift -> scale factor
-                snapshot_times = np.asarray(
-                    convert_redshift_to_scale_factor(
-                        convert_time_to_redshift(snapshot_times)
-                    )
-                )
-                snipshot_times = np.asarray(
-                    convert_redshift_to_scale_factor(
-                        convert_time_to_redshift(snipshot_times)
-                    )
-                )
-            doing_z = False
-            doing_time = False
-            doing_scale_factor = True
-    # SWIFT reads a cosmological "# Time" list as the age of the Universe
-    # in internal time units, so convert from Gyr before writing
-    if doing_time:
-        time_unit_gyr = internal_time_unit_in_gyr(params)
-        snapshot_times = np.asarray(snapshot_times) / time_unit_gyr
-        snipshot_times = np.asarray(snipshot_times) / time_unit_gyr
-
-    # Write the output list to the file
-    write_output_list(
-        out_file,
-        snapshot_times,
-        snipshot_times,
-        doing_z=doing_z,
-        doing_time=doing_time,
-        doing_scale_factor=doing_scale_factor or doing_log_scale_factor,
-    )
+            last = i
+    return a[keep], kind[keep]
 
 
 def generate_output_list(args: dict) -> None:
-    """Generate an output list file containing times for each snapshot.
+    """Generate and write a SWIFT output list.
 
     Args:
-        args: Command-line arguments containing the configuration for the
-              output list generation.
+        args: The mode's arguments (as a dict).
     """
-    # Get a cosmology (None if no parameters were passed)
-    cosmo = get_cosmology()
+    out_file = Path(args.get("output_list") or "output_list.txt")
+    if out_file.exists() and not args.get("force"):
+        raise FileExistsError(
+            f"{out_file} already exists, use --force to overwrite."
+        )
 
-    # If we have a cosmology we can convert all the users inputs to redshift
-    # which is simpler and more flexible
-    if cosmo is not None:
-        _generate_output_list_with_cosmo(args, cosmo)
-    else:
-        _generate_output_list_no_cosmo(args)
+    params = load_parameters()
+    cosmological = not args.get("no_cosmology") and get_cosmology() is not None
+    convert = Converter(cosmological)
+
+    first = _given(args, "first_snap", POINT_UNITS)
+    final = _given(args, "final_snap", POINT_UNITS)
+    delta = _given(args, "delta", DELTA_UNITS)
+    snip = _given(args, "snipshot_delta", DELTA_UNITS)
+    if first is None:
+        raise ValueError("give the first output with --first-snap-*")
+    if delta is None:
+        raise ValueError("give the snapshot spacing with --delta-*")
+
+    a_begin = a_end = None
+    if cosmological:
+        cosmo = params["Cosmology"]
+        a_end = float(cosmo.get("a_end", 1.0))
+        if cosmo.get("a_begin") is not None:
+            a_begin = float(cosmo["a_begin"])
+    if final is None:
+        if a_end is None:
+            raise ValueError(
+                "give the final output with --final-snap-* (it defaults to "
+                "Cosmology:a_end only for a cosmological run)"
+            )
+        final = Point("scale_factor", a_end)
+
+    list_units = args.get("list_units")
+    if list_units is None:
+        list_units = {"z": "redshift", "time": "time"}.get(
+            delta.unit, "scale-factor"
+        )
+    unit, header = LIST_UNITS[list_units]
+    units = {first.unit, final.unit, delta.unit, unit}
+    if snip is not None:
+        units.add(snip.unit)
+    if not cosmological and "time" in units and len(units) > 1:
+        raise ValueError(
+            "converting between time and redshift or scale factor needs a "
+            "cosmology: give a parameter file with a Cosmology section "
+            "(-P/--params), or give everything in time"
+        )
+
+    # Check the range against the run's
+    a_first = float(convert.to_a(first.unit, first.value))
+    a_final = float(convert.to_a(final.unit, final.value))
+    if a_begin is not None and a_first < a_begin * (1 - 1e-9):
+        raise ValueError(
+            f"the first output (a={a_first:.6g}) is before the start of the "
+            f"run (Cosmology:a_begin={a_begin:.6g})"
+        )
+    if a_end is not None and a_final > a_end * (1 + 1e-9):
+        raise ValueError(
+            f"the final output (a={a_final:.6g}) is after the end of the "
+            f"run (Cosmology:a_end={a_end:.6g})"
+        )
+
+    def outputs(spacing: Point) -> np.ndarray:
+        """Generate outputs natively and return them as scale factors."""
+        unit = spacing.unit
+        native = "scale_factor" if unit == "log_scale_factor" else unit
+        values = generate_times(
+            unit,
+            convert.convert(first, native),
+            spacing.value,
+            convert.convert(final, native),
+        )
+        return convert.to_a(native, values)
+
+    a, kind = _merge(outputs(delta), outputs(snip) if snip else np.array([]))
+    if len(a) < 2:
+        raise ValueError(
+            f"only {len(a)} output between the first and final outputs; "
+            "SWIFT needs at least 2 (use a smaller spacing)"
+        )
+
+    # Convert once to the list's unit
+    values = convert.from_a(unit, a)
+    if unit == "time" and cosmological:
+        # SWIFT reads a cosmological time list in internal time units
+        values = values / internal_time_unit_in_gyr(params)
+
+    mixed = snip is not None and "Snipshot" in kind
+    lines = [f"# {header}" + (", Select Output" if mixed else "")]
+    for value, label in zip(values, kind):
+        lines.append(f"{value:.12g}" + (f", {label}" if mixed else ""))
+    out_file.write_text("\n".join(lines) + "\n")
+
+    n_snip = int(np.sum(kind == "Snipshot"))
+    print(f"Generated {len(a) - n_snip} snapshots")
+    if n_snip:
+        print(f"Generated {n_snip} snipshots")
+        note(
+            "SWIFT needs Snapshots:select_output_on: 1 and a "
+            "Snapshots:select_output file defining the Snipshot output "
+            "selection to use this list"
+        )
+    print(f"Output list written to {out_file}.")
 
 
 def run(args: argparse.Namespace) -> None:

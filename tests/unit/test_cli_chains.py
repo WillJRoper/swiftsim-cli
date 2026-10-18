@@ -82,3 +82,38 @@ def test_usage_error_in_a_later_mode_runs_nothing(logs_dir, tmp_path):
         )
     assert excinfo.value.code == 2
     assert not out.exists()
+
+
+def test_new_then_output_times(tmp_path, monkeypatch, write_tiny_ics):
+    """output-times later in the chain reads the params.yml new writes.
+
+    The tiny ICs (Time = 0.1, a Units group) give a cosmological run from
+    the cosmo-hydro template, whose Cosmology and a_end the list uses.
+    """
+    monkeypatch.chdir(tmp_path)
+    write_tiny_ics(tmp_path / "cosmo.hdf5", time=0.1)
+
+    main(
+        [
+            "new",
+            "-o",
+            "run",
+            "--ics",
+            "cosmo.hdf5",
+            "output-times",
+            "-P",
+            "run/params.yml",
+            "--first-snap-scale-factor",
+            "0.2",
+            "--delta-scale-factor",
+            "0.2",
+            "--output-list",
+            "run/output_list.txt",
+        ]
+    )
+
+    lines = (tmp_path / "run" / "output_list.txt").read_text().splitlines()
+    assert lines[0] == "# Scale Factor"
+    assert [float(x) for x in lines[1:]] == pytest.approx(
+        [0.2, 0.4, 0.6, 0.8, 1.0]
+    )
