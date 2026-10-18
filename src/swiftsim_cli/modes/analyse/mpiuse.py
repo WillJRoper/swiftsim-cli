@@ -20,6 +20,8 @@ from swiftsim_cli.utilities.messages import plural, warn
 from swiftsim_cli.utilities.plotting import save_figure, should_use_log_scale
 from swiftsim_cli.utilities.tables import create_ascii_table
 
+from .task_plot_metadata import distinct_colours
+
 if TYPE_CHECKING:
     import pandas as pd
     from matplotlib.axes import Axes
@@ -55,8 +57,11 @@ class MpiuseData(TypedDict):
     skipped_files: int
     ranks: list[int]
     steps: list[int]
+    direction: str
     total_bytes: int
     total_count: int
+    recv_bytes: int
+    recv_count: int
     per_step_detail: pd.DataFrame
     per_step_totals: pd.DataFrame
     per_subtype: pd.DataFrame
@@ -166,8 +171,6 @@ def analyse_swift_mpiuse(
         per_rank: Whether to produce per-rank summaries and plots.
         output_format: ``ascii``, ``csv``, or ``both``.
     """
-    import matplotlib
-
     print(f"Analysing mpiuse reports from {plural(len(inputs), 'input')}")
 
     if step_range is not None and step_range[0] > step_range[1]:
@@ -177,10 +180,10 @@ def analyse_swift_mpiuse(
 
     out_dir = OUT_SUBDIR
     markers = ["o", "s", "^", "D", "v", "<", ">", "p", "*", "h"]
-    cmap = matplotlib.colormaps["tab20"]
 
     all_data: list[MpiuseData] = []
     csv_rows: list[pd.DataFrame] = []
+    seen_subtypes: set[str] = set()
 
     for input_path, label in zip(inputs, labels):
         files = _discover_files(input_path)
@@ -193,6 +196,7 @@ def analyse_swift_mpiuse(
             step_range=step_range,
             subtype_filter=subtype_filter,
             per_rank=per_rank,
+            seen_subtypes=seen_subtypes,
         )
         if aggregated is None:
             warn(
@@ -208,8 +212,11 @@ def analyse_swift_mpiuse(
             "skipped_files": int(aggregated["skipped_files"]),
             "ranks": aggregated["ranks"],
             "steps": aggregated["steps"],
+            "direction": aggregated["direction"],
             "total_bytes": int(aggregated["total_bytes"]),
             "total_count": int(aggregated["total_count"]),
+            "recv_bytes": int(aggregated["recv_bytes"]),
+            "recv_count": int(aggregated["recv_count"]),
             "per_step_detail": aggregated["per_step_detail"],
             "per_step_totals": aggregated["per_step_totals"],
             "per_subtype": aggregated["per_subtype"],
@@ -252,6 +259,13 @@ def analyse_swift_mpiuse(
             )
             rank_path.write_text(rank_table + "\n", encoding="utf-8")
 
+    if subtype_filter is not None and seen_subtypes:
+        unknown = sorted(set(subtype_filter) - seen_subtypes)
+        if unknown:
+            raise ValueError(
+                f"unknown subtype(s) {', '.join(unknown)}; the reports "
+                "list: " + ", ".join(sorted(seen_subtypes))
+            )
     if not all_data:
         raise ValueError(
             "no usable mpiuse data found in any input (expected "
@@ -273,7 +287,8 @@ def analyse_swift_mpiuse(
     if output_format in {"csv", "both"}:
         _write_csv(csv_rows, output_path, prefix, out_dir)
 
-    colors = cmap(np.linspace(0, 1, max(1, len(all_data))))
+    colors = distinct_colours(len(all_data))
+    side = "sent" if all_data[0]["direction"] == "send" else "received"
 
     plot_args = (colors, markers, output_path, prefix, out_dir, show_plot)
     step_totals = [data["per_step_totals"] for data in all_data]
@@ -283,8 +298,9 @@ def analyse_swift_mpiuse(
         "bytes",
         *plot_args,
         filename="mpiuse_total_bytes_per_step.png",
-        ylabel="Total bytes per step",
-        title="MPI communication volume per step",
+        ylabel=f"Bytes {side} per step",
+        title=f"MPI communication volume per step (bytes {side}, each "
+        "message once)",
         force_log=True,
     )
     _plot_step_series(
@@ -293,8 +309,8 @@ def analyse_swift_mpiuse(
         "count",
         *plot_args,
         filename="mpiuse_total_count_per_step.png",
-        ylabel="MPI requests per step",
-        title="MPI request count per step",
+        ylabel=f"Messages {side} per step",
+        title=f"MPI message count per step ({side})",
     )
     _plot_subtype_bars(
         all_data,
@@ -305,8 +321,8 @@ def analyse_swift_mpiuse(
         show_plot,
         value_column="bytes",
         filename="mpiuse_bytes_by_subtype.png",
-        ylabel="Total bytes",
-        title="MPI bytes by subtype",
+        ylabel=f"Bytes {side}",
+        title=f"MPI bytes {side} by subtype",
     )
     _plot_subtype_bars(
         all_data,
@@ -317,8 +333,8 @@ def analyse_swift_mpiuse(
         show_plot,
         value_column="count",
         filename="mpiuse_count_by_subtype.png",
-        ylabel="Request count",
-        title="MPI request count by subtype",
+        ylabel=f"Messages {side}",
+        title=f"MPI messages {side} by subtype",
     )
     if _has_gpart(all_data):
         _plot_step_series(
@@ -327,8 +343,8 @@ def analyse_swift_mpiuse(
             "bytes",
             *plot_args,
             filename="mpiuse_gpart_per_step.png",
-            ylabel="gpart bytes per step",
-            title="MPI gpart communication volume per step",
+            ylabel=f"gpart bytes {side} per step",
+            title=f"MPI gpart communication volume per step ({side})",
         )
     _plot_step_series(
         all_data,
@@ -336,8 +352,9 @@ def analyse_swift_mpiuse(
         "inflight_max",
         *plot_args,
         filename="mpiuse_inflight_max.png",
-        ylabel="Max in-flight bytes",
-        title="MPI in-flight high-water mark per step",
+        ylabel="Max in-flight bytes (any rank)",
+        title="MPI in-flight high-water mark per step"
+        + (f" ({', '.join(subtype_filter)})" if subtype_filter else ""),
     )
     if per_rank:
         _plot_per_rank_totals(
@@ -425,7 +442,19 @@ def _aggregate(
     step_range: Sequence[int] | None,
     subtype_filter: list[str] | None,
     per_rank: bool,
+    seen_subtypes: set[str] | None = None,
 ) -> dict[str, Any] | None:
+    """Aggregate activation rows of the given report files.
+
+    Each message appears twice (a send on one rank, a recv on another),
+    so volumes are reported per direction: the totals, per-step and
+    per-subtype plots use the send side (the recv side when no sends were
+    logged), never the sum of both.
+
+    The in-flight high-water mark is the largest running total of message
+    sizes on any rank in a step: SWIFT's ``sum`` column, or, with a
+    subtype filter, the running total of the selected subtypes alone.
+    """
     import pandas as pd
 
     activation_frames: list[pd.DataFrame] = []
@@ -435,57 +464,57 @@ def _aggregate(
 
     for path in files:
         raw = _read_mpiuse_raw_file(path)
-        if raw.empty:
-            skipped_files += 1
-            continue
-
+        if seen_subtypes is not None:
+            seen_subtypes.update(raw["subtype"].astype(str))
         if step_range is not None:
             raw = raw.loc[
                 (raw["step"] >= step_range[0]) & (raw["step"] <= step_range[1])
-            ].copy()
-
-        if raw.empty:
-            skipped_files += 1
-            continue
-
-        activation = raw.loc[raw["activation"] == 1].copy()
+            ]
         if subtype_filter is not None:
-            activation = activation.loc[
-                activation["subtype"].isin(subtype_filter)
-            ].copy()
-
+            raw = raw.loc[raw["subtype"].isin(subtype_filter)]
+        activation = raw.loc[raw["activation"] == 1]
         if activation.empty:
             skipped_files += 1
             continue
 
         activation_frames.append(activation)
+        if subtype_filter is None:
+            running = raw["sum"]
+        else:
+            # ponytail: starts from 0 at the report start, so messages
+            # still in flight from before it are not counted.
+            running = raw.groupby(["step", "rank"])["size"].cumsum()
         inflight_frames.append(
-            raw.groupby(["step", "rank"], as_index=False)["sum"]
+            raw.assign(inflight_max=running)
+            .groupby(["step", "rank"], as_index=False)["inflight_max"]
             .max()
-            .rename(columns={"sum": "inflight_max"})
         )
         used_files.append(path)
 
     if not activation_frames:
         return None
 
-    activation_data = pd.concat(activation_frames, ignore_index=True)
+    data = pd.concat(activation_frames, ignore_index=True)
     inflight_data = pd.concat(inflight_frames, ignore_index=True)
+    direction = "send" if (data["type"] == "send").any() else "recv"
+    primary = data.loc[data["type"] == direction]
+    recv = data.loc[data["type"] == "recv"]
+
+    def totals(frame: pd.DataFrame, keys: list[str]) -> pd.DataFrame:
+        return (
+            frame.groupby(keys, as_index=False)
+            .agg(bytes=("size", "sum"), count=("size", "size"))
+            .sort_values(keys)
+            .reset_index(drop=True)
+        )
 
     per_step_detail = (
-        activation_data.groupby(["step", "type", "subtype"], as_index=False)
-        .agg(bytes=("size", "sum"), count=("size", "size"))
+        totals(data, ["step", "type", "subtype"])
         .sort_values(["step", "bytes"], ascending=[True, False])
         .reset_index(drop=True)
     )
-    per_step_totals = (
-        activation_data.groupby("step", as_index=False)
-        .agg(bytes=("size", "sum"), count=("size", "size"))
-        .sort_values("step")
-        .reset_index(drop=True)
-    )
     per_subtype = (
-        activation_data.groupby(["type", "subtype"], as_index=False)
+        data.groupby(["type", "subtype"], as_index=False)
         .agg(
             bytes=("size", "sum"),
             count=("size", "size"),
@@ -505,34 +534,40 @@ def _aggregate(
     per_rank_detail: pd.DataFrame | None = None
     per_rank_totals: pd.DataFrame | None = None
     if per_rank:
-        per_rank_detail = (
-            activation_data.groupby(
-                ["rank", "type", "subtype"], as_index=False
-            )
-            .agg(bytes=("size", "sum"), count=("size", "size"))
-            .sort_values(["rank", "bytes"], ascending=[True, False])
-            .reset_index(drop=True)
-        )
+        per_rank_detail = totals(primary, ["rank", "type", "subtype"])
         per_rank_totals = (
-            activation_data.groupby("rank", as_index=False)
-            .agg(bytes=("size", "sum"), count=("size", "size"))
-            .sort_values("rank")
-            .reset_index(drop=True)
+            data.pivot_table(
+                index="rank",
+                columns="type",
+                values="size",
+                aggfunc=["sum", "size"],
+                fill_value=0,
+            )
+            .reindex(
+                columns=pd.MultiIndex.from_product(
+                    [["sum", "size"], ["send", "recv"]]
+                ),
+                fill_value=0,
+            )
+            .set_axis(
+                ["sent_bytes", "recv_bytes", "sent_count", "recv_count"],
+                axis=1,
+            )
+            .reset_index()
         )
 
     return {
         "files": used_files,
         "skipped_files": skipped_files,
-        "ranks": sorted(
-            int(value) for value in activation_data["rank"].unique()
-        ),
-        "steps": sorted(
-            int(value) for value in activation_data["step"].unique()
-        ),
-        "total_bytes": int(activation_data["size"].sum()),
-        "total_count": int(len(activation_data)),
+        "ranks": sorted(int(value) for value in data["rank"].unique()),
+        "steps": sorted(int(value) for value in data["step"].unique()),
+        "direction": direction,
+        "total_bytes": int(primary["size"].sum()),
+        "total_count": int(len(primary)),
+        "recv_bytes": int(recv["size"].sum()),
+        "recv_count": int(len(recv)),
         "per_step_detail": per_step_detail,
-        "per_step_totals": per_step_totals,
+        "per_step_totals": totals(primary, ["step"]),
         "per_subtype": per_subtype,
         "inflight_per_step": inflight_per_step,
         "per_rank_detail": per_rank_detail,
@@ -543,19 +578,34 @@ def _aggregate(
 def _format_headline(data: MpiuseData) -> str:
     step_min = min(data["steps"])
     step_max = max(data["steps"])
+    sent = (
+        f"Bytes sent: {data['total_bytes']:,} "
+        f"({data['total_bytes'] / 1024**2:.3f} MB) in "
+        f"{data['total_count']:,} messages"
+        if data["direction"] == "send"
+        else "Bytes sent: none logged"
+    )
     return (
         f"mpiuse summary: {data['label']}\n"
         f"Files parsed: {len(data['files'])} "
         f"(skipped: {data['skipped_files']}), "
         f"steps: {step_min}-{step_max}, ranks: {data['ranks']}\n"
-        f"Total bytes communicated: {data['total_bytes']:,} "
-        f"({data['total_bytes'] / 1024**2:.3f} MB)\n"
-        f"Total MPI request count: {data['total_count']:,}"
+        f"{sent}\n"
+        f"Bytes received: {data['recv_bytes']:,} "
+        f"({data['recv_bytes'] / 1024**2:.3f} MB) in "
+        f"{data['recv_count']:,} messages\n"
+        "(each message is logged as a send and a recv; totals and plots "
+        f"use the {data['direction']} side)"
     )
 
 
 def _format_summary_table(data: MpiuseData) -> str:
-    total_bytes = max(data["total_bytes"], 1)
+    direction_totals = {
+        "send": max(
+            data["total_bytes"] if data["direction"] == "send" else 0, 1
+        ),
+        "recv": max(data["recv_bytes"], 1),
+    }
     headers = [
         "Type",
         "Subtype",
@@ -564,10 +614,11 @@ def _format_summary_table(data: MpiuseData) -> str:
         "Total MB",
         "Mean bytes",
         "Max bytes",
-        "% of total",
+        "% of type",
     ]
     rows: list[list[str]] = []
     for row in data["per_subtype"].itertuples(index=False):
+        share = direction_totals.get(str(row.type), 1)
         rows.append(
             [
                 str(row.type),
@@ -577,22 +628,26 @@ def _format_summary_table(data: MpiuseData) -> str:
                 f"{float(row.bytes) / 1024**2:.3f}",
                 f"{float(row.mean_bytes):.1f}",
                 f"{int(row.max_bytes):,}",
-                f"{100.0 * float(row.bytes) / total_bytes:.2f}",
+                f"{100.0 * float(row.bytes) / share:.2f}",
             ]
         )
-
-    rows.append(
-        [
-            "TOTAL",
-            "",
-            f"{data['total_count']:,}",
-            f"{data['total_bytes']:,}",
-            f"{data['total_bytes'] / 1024**2:.3f}",
-            "-",
-            "-",
-            "100.00",
-        ]
-    )
+    per_type = data["per_subtype"].groupby("type")
+    for kind in ("send", "recv"):
+        if kind not in per_type.groups:
+            continue
+        group = per_type.get_group(kind)
+        rows.append(
+            [
+                f"TOTAL {kind}",
+                "",
+                f"{int(group['count'].sum()):,}",
+                f"{int(group['bytes'].sum()):,}",
+                f"{float(group['bytes'].sum()) / 1024**2:.3f}",
+                "-",
+                "-",
+                "100.00",
+            ]
+        )
     return create_ascii_table(
         headers,
         rows,
@@ -601,29 +656,32 @@ def _format_summary_table(data: MpiuseData) -> str:
 
 
 def _format_per_rank_table(data: MpiuseData) -> str:
-    assert data["per_rank_totals"] is not None
-    headers = ["Rank", "Count", "Total bytes", "Total MB"]
+    totals = data["per_rank_totals"]
+    assert totals is not None
+    headers = ["Rank", "Sent", "Sent bytes", "Received", "Received bytes"]
     rows = [
         [
             str(int(row.rank)),
-            f"{int(row.count):,}",
-            f"{int(row.bytes):,}",
-            f"{float(row.bytes) / 1024**2:.3f}",
+            f"{int(row.sent_count):,}",
+            f"{int(row.sent_bytes):,}",
+            f"{int(row.recv_count):,}",
+            f"{int(row.recv_bytes):,}",
         ]
-        for row in data["per_rank_totals"].itertuples(index=False)
+        for row in totals.itertuples(index=False)
     ]
     rows.append(
         [
             "TOTAL",
-            f"{data['total_count']:,}",
-            f"{data['total_bytes']:,}",
-            f"{data['total_bytes'] / 1024**2:.3f}",
+            f"{int(totals['sent_count'].sum()):,}",
+            f"{int(totals['sent_bytes'].sum()):,}",
+            f"{int(totals['recv_count'].sum()):,}",
+            f"{int(totals['recv_bytes'].sum()):,}",
         ]
     )
     return create_ascii_table(
         headers,
         rows,
-        title=f"mpiuse per-rank totals: {data['label']}",
+        title=f"mpiuse per-rank messages: {data['label']}",
     )
 
 
@@ -664,7 +722,7 @@ def _format_comparison_table(all_data: list[MpiuseData]) -> str:
             row.extend([f"{delta:,}", f"{delta_pct:.2f}"])
         rows.append(row)
 
-    total_row = ["TOTAL", ""]
+    total_row = [f"TOTAL {reference['direction']}", ""]
     totals = [data["total_bytes"] for data in all_data]
     total_row.extend(f"{value:,}" for value in totals)
     for value in totals[1:]:
@@ -746,6 +804,7 @@ def _plot_step_series(
 
     if len(all_data) > 1:
         ax.legend()
+    ax.xaxis.get_major_locator().set_params(integer=True)  # type: ignore[call-arg]
     ax.set_xlabel("Step number")
     ax.set_ylabel(ylabel)
     ax.set_title(title)
@@ -773,6 +832,17 @@ def _plot_subtype_bars(
     title: str,
 ) -> None:
     import matplotlib.pyplot as plt
+
+    # One direction only, so each message is counted once.
+    all_data = [
+        {
+            **data,
+            "per_subtype": data["per_subtype"].loc[
+                data["per_subtype"]["type"] == data["direction"]
+            ],
+        }
+        for data in all_data
+    ]
 
     subtype_keys = sorted(
         {
@@ -846,7 +916,10 @@ def _gpart_bytes_per_step(data: MpiuseData) -> pd.DataFrame:
     """Sum gpart communication bytes per step for one input."""
     return (
         data["per_step_detail"]
-        .loc[data["per_step_detail"]["subtype"] == "gpart"]
+        .loc[
+            (data["per_step_detail"]["subtype"] == "gpart")
+            & (data["per_step_detail"]["type"] == data["direction"])
+        ]
         .groupby("step", as_index=False)["bytes"]
         .sum()
         .sort_values("step")
@@ -860,7 +933,6 @@ def _plot_per_rank_totals(
     out_dir: str,
     show_plot: bool,
 ) -> None:
-    import matplotlib
     import matplotlib.pyplot as plt
 
     with_rank_data = [
@@ -886,9 +958,7 @@ def _plot_per_rank_totals(
             for row in rank_detail.itertuples(index=False)
         )
     subtype_keys = sorted(subtype_keys_set)
-    colors = matplotlib.colormaps["tab20"](
-        np.linspace(0, 1, max(1, len(subtype_keys)))
-    )
+    colors = distinct_colours(len(subtype_keys))
 
     for axis, data in zip(axes.flat, with_rank_data):
         _draw_rank_stack(axis, data, subtype_keys, colors)
@@ -942,11 +1012,17 @@ def _draw_rank_stack(
     axis.set_xticks(x)
     axis.set_xticklabels([str(rank) for rank in ranks])
     axis.set_xlabel("Rank")
-    axis.set_ylabel("Total bytes")
-    axis.set_title(f"MPI bytes per rank: {data['label']}")
+    side = "sent" if data["direction"] == "send" else "received"
+    axis.set_ylabel(f"Bytes {side}")
+    axis.set_title(f"MPI bytes {side} per rank: {data['label']}")
     axis.grid(True, axis="y", alpha=0.3, linestyle="--")
-    if len(subtype_keys) <= 12:
-        axis.legend(fontsize=8, ncol=2)
+    axis.legend(
+        fontsize="small",
+        loc="upper left",
+        bbox_to_anchor=(1.01, 1.0),
+        ncol=max(1, -(-len(subtype_keys) // 20)),
+        borderaxespad=0.0,
+    )
 
 
 def _has_gpart(all_data: list[MpiuseData]) -> bool:

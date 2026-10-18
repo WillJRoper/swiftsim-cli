@@ -179,13 +179,15 @@ class TestAnalyseSwiftTaskCounts:
 
     def test_series_from_fixture(self, logs_dir):
         """Task counts are taken from the step each block was printed in."""
-        steps, times, totals, series = task_count_series(
-            str(logs_dir / "sample.txt")
-        )
+        counts = task_count_series(str(logs_dir / "sample.txt"))
+        steps, times, totals = counts.steps, counts.sim_times, counts.totals
         # One block per rebuild: init (row 0) and steps 1-4.
         assert steps == [0, 1, 2, 3, 4]
         assert times[0] == pytest.approx(1.225990e-05)
-        assert all(len(v) == len(steps) for v in series.values())
+        assert all(len(v) == len(steps) for v in counts.task_series.values())
+        assert "skipped" not in counts.task_series
+        assert len(counts.skipped) == len(steps)
+        assert not counts.partial
         # The block printed before row N belongs to step N (init keeps the
         # last of its blocks).
         assert totals == [297700, 297896, 297876, 296337, 296207]
@@ -199,7 +201,8 @@ class TestAnalyseSwiftTaskCounts:
             + _block(0, "Total = 9 (per cell = 1.0)", "sort=4 pair=5")
             + ROW.format(n=2)
         )
-        steps, _, totals, series = task_count_series(str(log))
+        counts = task_count_series(str(log))
+        steps, totals, series = counts.steps, counts.totals, counts.task_series
         assert steps == [1, 2]
         assert totals == [5, 9]
         assert series["self"].tolist() == [3, 0]
@@ -214,10 +217,11 @@ class TestAnalyseSwiftTaskCounts:
             + _block(0, "Total = 10 (per cell = 1.0)", "self=10")
             + ROW.format(n=1)
         )
-        _, _, totals, series = task_count_series(str(log))
-        assert totals == [17]
-        assert series["self"].tolist() == [17]
-        _, _, filtered, _ = task_count_series(str(log), ["self", "pair"])
+        counts = task_count_series(str(log))
+        assert counts.totals == [17]
+        assert counts.task_series["self"].tolist() == [17]
+        assert counts.ranks_seen == [0, 1]
+        filtered = task_count_series(str(log), ["self", "pair"]).totals
         assert filtered == [17]
 
     def test_incomplete_step_skipped(self, tmp_path):
@@ -228,11 +232,10 @@ class TestAnalyseSwiftTaskCounts:
             + ROW.format(n=1)
             + _block(0, "Total = 6 (per cell = 1.0)", "self=6")
         )
-        steps, _, _, _ = task_count_series(str(log))
-        assert steps == [1]
+        assert task_count_series(str(log)).steps == [1]
 
     def test_end_to_end(self, logs_dir, tmp_path):
-        """Writes the three plots for one or more logs."""
+        """Writes the two plots (no cumulative plot) for several logs."""
         log = str(logs_dir / "sample.txt")
         analyse_swift_task_counts(
             log_files=[log, log],
@@ -241,19 +244,16 @@ class TestAnalyseSwiftTaskCounts:
             task_filter=["self", "pair"],
         )
         out = tmp_path / "task_counts_analysis"
-        for name in [
-            "task_counts_per_step.png",
-            "task_counts_cumulative.png",
-            "task_counts_by_type.png",
-        ]:
+        for name in ["task_counts_per_step.png", "task_counts_by_type.png"]:
             assert (out / name).is_file()
+        assert not (out / "task_counts_cumulative.png").exists()
 
     def test_series_step_range(self, logs_dir):
         """--steps keeps only the blocks of the requested steps."""
-        steps, *_ = task_count_series(
+        counts = task_count_series(
             str(logs_dir / "sample.txt"), step_range=(1, 2)
         )
-        assert steps == [1, 2]
+        assert counts.steps == [1, 2]
 
     def test_no_data(self, tmp_path, capsys):
         """A log without task counts is an error and makes no plots."""
@@ -267,6 +267,53 @@ class TestAnalyseSwiftTaskCounts:
         assert not (tmp_path / "task_counts_analysis").exists() or not any(
             (tmp_path / "task_counts_analysis").iterdir()
         )
+
+    def test_system_total_preferred(self, tmp_path):
+        """MPI totals use SWIFT's System total, not the local Total (T5)."""
+        p = "[0000] [00001.0] engine_print_task_counts"
+        log = tmp_path / "log.txt"
+        log.write_text(
+            "[0000] [00000.0] main: MPI is up and running with 2 node(s).\n"
+            f"{p}: System total: 1000, no. cells: 10\n"
+            + _block(0, "Total = 400 (per cell = 1.0)", "self=300 skipped=100")
+            + ROW.format(n=1)
+        )
+        counts = task_count_series(str(log))
+        assert counts.totals == [1000]
+        assert counts.system_total
+        assert counts.partial and counts.n_ranks == 2
+        assert counts.skipped.tolist() == [100]
+
+    def test_rank0_only_log_warns(self, logs_dir, tmp_path, capsys):
+        """A rank-0-only log of a 4-rank run says so (T5)."""
+        counts = task_count_series(str(logs_dir / "mpi4_v1.txt"))
+        assert counts.ranks_seen == [0] and counts.n_ranks == 4
+        analyse_swift_task_counts(
+            [str(logs_dir / "mpi4_v1.txt")], output_path=tmp_path
+        )
+        err = capsys.readouterr().err
+        assert "rank(s) 0 only, of 4 ranks" in err
+
+    def test_unknown_task_name(self, logs_dir, tmp_path):
+        """Unknown --tasks names list the valid ones (T17)."""
+        with pytest.raises(ValueError, match="unknown task name.*bogus"):
+            analyse_swift_task_counts(
+                [str(logs_dir / "sample.txt")],
+                output_path=tmp_path,
+                task_filter=["self", "bogus"],
+            )
+
+    def test_summary_labels(self, logs_dir, tmp_path, capsys):
+        """The summary says what the totals count (T13, T17)."""
+        log = str(logs_dir / "sample.txt")
+        analyse_swift_task_counts([log], output_path=tmp_path)
+        out = capsys.readouterr().out
+        assert "ALL (incl. skipped)" in out
+        assert "skipped (any type)" in out
+        analyse_swift_task_counts(
+            [log], output_path=tmp_path, task_filter=["self"]
+        )
+        assert "SELECTED (self)" in capsys.readouterr().out
 
 
 ROW = (

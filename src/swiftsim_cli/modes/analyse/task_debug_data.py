@@ -1,295 +1,436 @@
-"""Parser for SWIFT task-debug ``thread_info`` files."""
+"""Parser for SWIFT task-debug ``thread_info`` dumps.
+
+``task_dump_all`` (SWIFT_DEBUG_TASKS) writes one header row per rank
+followed by that rank's tasks. The layouts seen in the wild:
+
+* 11 columns: upstream, non-MPI (``thread type subtype self tic toc``
+  plus particle counts and ``sid``)
+* 13 columns: upstream, MPI (a leading rank and a ``flags`` column)
+* 17 columns: older zoom-branch MPI rows (13 + 4 floats, no cell
+  metadata) under a 13-column header
+* 19 / 21 columns: zoom branch, non-MPI / MPI (base + cell type, cell
+  subtype and depth for ci and cj, plus two distances)
+
+The header row is read separately (it may be shorter than the task rows)
+and holds the step's tic/toc and the CPU frequency. Columns are read
+vectorised with pandas; ticks stay int64 (they exceed 2^53).
+"""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING, Iterable
 
 import numpy as np
-from tqdm.auto import tqdm
 
-from swiftsim_cli.utilities.messages import reading
+from swiftsim_cli.utilities.messages import reading, warn
 
-from .task_plot_metadata import (
-    subtype_name,
-    task_colour,
-    task_label,
-    task_type_name,
+from .task_names import TaskNames, resolve_task_names
+
+if TYPE_CHECKING:
+    import pandas as pd
+
+CELL_FIELDS = (
+    "ci_type",
+    "cj_type",
+    "ci_subtype",
+    "cj_subtype",
+    "ci_depth",
+    "cj_depth",
 )
 
 
 @dataclass(frozen=True)
-class TaskRecord:
-    """A single task interval from a task-debug file."""
+class TaskFilter:
+    """Filter options for selecting task-debug intervals.
 
-    rank: int
-    thread: int
-    task_type: str
-    subtype: str
-    label: str
-    colour: str
-    start_ms: float
-    end_ms: float
-    ci_type: int
-    cj_type: int
-    ci_subtype: int
-    cj_subtype: int
-    ci_depth: int
-    cj_depth: int
+    Cell (sub)types are names or integers; names are resolved against the
+    dump's tables when the filter is applied.
+    """
+
+    tasks: tuple[str, ...] | None = None
+    c_type: int | str | None = None
+    ci_type: int | str | None = None
+    cj_type: int | str | None = None
+    c_subtype: int | str | None = None
+    ci_subtype: int | str | None = None
+    cj_subtype: int | str | None = None
+    depth: int | None = None
+
+    @property
+    def uses_cells(self) -> bool:
+        """Whether any cell metadata filter is set."""
+        return any(
+            value is not None
+            for value in (
+                self.c_type,
+                self.ci_type,
+                self.cj_type,
+                self.c_subtype,
+                self.ci_subtype,
+                self.cj_subtype,
+                self.depth,
+            )
+        )
 
 
 @dataclass(frozen=True)
-class TaskFilter:
-    """Filter options for selecting task-debug intervals."""
+class DumpLayout:
+    """Column layout of a task dump."""
 
-    tasks: tuple[str, ...] | None = None
-    c_type: int | None = None
-    ci_type: int | None = None
-    cj_type: int | None = None
-    c_subtype: int | None = None
-    ci_subtype: int | None = None
-    cj_subtype: int | None = None
-    depth: int | None = None
+    is_mpi: bool
+    ncols: int
+    header_cols: int
+
+    @property
+    def base(self) -> int:
+        """Columns of the upstream layout (11 non-MPI, 13 MPI)."""
+        return 13 if self.is_mpi else 11
+
+    @property
+    def has_cells(self) -> bool:
+        """Whether rows carry cell type/subtype/depth columns."""
+        return self.ncols == self.base + 8
+
+    def column(self, name: str) -> int:
+        """Index of a named column."""
+        offset = 1 if self.is_mpi else 0
+        fixed = {"thread": 0, "type": 1, "subtype": 2, "tic": 4, "toc": 5}
+        if name == "rank":
+            return 0
+        if name == "cpufreq":
+            return self.base - 1
+        if name in CELL_FIELDS:
+            return self.base + CELL_FIELDS.index(name)
+        return fixed[name] + offset
 
 
-# Column counts written by SWIFT's task_dump_all (SWIFT_DEBUG_TASKS).
-NON_MPI_COLUMNS = 19
-MPI_COLUMNS = 21
+def detect_layout(path: Path) -> DumpLayout:
+    """Work out a dump's layout from its header and first task row.
+
+    Raises:
+        ValueError: For an empty file or an unknown layout.
+    """
+    lines: list[list[str]] = []
+    with open(path, encoding="utf-8", errors="replace") as handle:
+        for line in handle:
+            tokens = line.split()
+            if tokens and not tokens[0].startswith("#"):
+                lines.append(tokens)
+                if len(lines) == 2:
+                    break
+    if not lines:
+        raise ValueError("task-debug file is empty")
+    header = lines[0]
+    ncols = len(lines[1]) if len(lines) > 1 else len(header)
+    if len(header) in (11, 19):
+        is_mpi = False
+    elif len(header) in (13, 21):
+        is_mpi = True
+    else:
+        # Non-MPI headers start "-2 -1 -1 1"; MPI ones with the rank.
+        is_mpi = header[0] != "-2"
+    layout = DumpLayout(is_mpi, ncols, len(header))
+    if ncols not in (layout.base, layout.base + 4, layout.base + 8):
+        raise ValueError(
+            f"unrecognised task-debug layout: {len(header)}-column header, "
+            f"{ncols}-column rows (expected SWIFT's 11/19 non-MPI or "
+            "13/17/21 MPI columns)"
+        )
+    return layout
 
 
 class TaskDebugData:
-    """Parsed task-debug data for one ``thread_info`` file."""
+    """Columnar task-debug data for one ``thread_info`` dump.
 
-    def __init__(self, file_path: str | Path):
-        """Read and parse a SWIFT task-debug file."""
+    Attributes:
+        layout: The dump's column layout.
+        names: Name tables used to decode indices.
+        file_ranks: Every rank with a header in the file.
+        ranks: The ranks that were loaded (``ranks`` argument).
+        tasks: One row per task of the loaded ranks with columns ``rank,
+            thread`` (contiguous per rank), ``type, subtype, label``,
+            ``start_ms, end_ms`` (relative to the rank's step start) and
+            the cell columns (-1 when the dump has none).
+        thread_counts: Threads per loaded rank.
+    """
+
+    def __init__(
+        self,
+        file_path: str | Path,
+        ranks: Iterable[int] | None = None,
+        names: TaskNames | None = None,
+        swift_src: Path | None = None,
+    ):
+        """Read a dump, keeping only ``ranks`` (default: all)."""
+        import pandas as pd
+
         self.file_path = Path(file_path)
         print(f"Loading task-debug data from {self.file_path}...", flush=True)
         with reading(self.file_path):
-            self.data = np.loadtxt(self.file_path)
-        if self.data.ndim != 2:
-            raise ValueError(
-                "Task-debug file "
-                f"{self.file_path} does not contain tabular data"
-            )
+            self.layout = detect_layout(self.file_path)
+            frame = self._read()
 
-        ncols = self.data.shape[1]
-        if ncols not in (NON_MPI_COLUMNS, MPI_COLUMNS):
-            raise ValueError(
-                f"Task-debug file {self.file_path} has {ncols} columns; "
-                f"expected {NON_MPI_COLUMNS} (non-MPI thread_info) or "
-                f"{MPI_COLUMNS} (thread_info_MPI)."
-            )
-        self.is_mpi = ncols == MPI_COLUMNS
-        self._columns = self._define_columns()
-        self.cpu_clock_khz = (
-            float(self.data[0, self._columns["cpu_clock"]]) / 1000.0
+        layout = self.layout
+        nrows = len(frame)
+
+        def take(name: str) -> np.ndarray:
+            # pop frees each column as it is converted
+            return frame.pop(layout.column(name)).to_numpy()
+
+        rank_col = (
+            take("rank").astype(np.int32)
+            if layout.is_mpi
+            else np.zeros(nrows, dtype=np.int32)
         )
+        types = take("type").astype(np.int32)
+        tic = take("tic").astype(np.int64)
+        toc = take("toc").astype(np.int64)
+        cpufreq = take("cpufreq")
+
+        # Header rows: task type -1 (non-MPI) or 0 (MPI).
+        header = types <= 0
+        self.step_ticks: dict[int, tuple[int, int]] = {}
         self.cpu_clock_khz_by_rank: dict[int, float] = {}
-        self._records_by_rank = self._parse_records()
-        self.ranks = sorted(self._records_by_rank)
-        self.records = [
-            record
-            for rank in self.ranks
-            for record in self._rank_records(rank)
-        ]
-        self.thread_counts = {
-            rank: len({record.thread for record in self._rank_records(rank)})
-            for rank in self.ranks
-        }
-
-    def _define_columns(self) -> dict[str, int]:
-        """Return the relevant column offsets for this file format."""
-        if self.is_mpi:
-            return {
-                "rank": 0,
-                "thread": 1,
-                "task": 2,
-                "subtask": 3,
-                "tic": 5,
-                "toc": 6,
-                "ci_type": 13,
-                "cj_type": 14,
-                "ci_subtype": 15,
-                "cj_subtype": 16,
-                "ci_depth": 17,
-                "cj_depth": 18,
-                "cpu_clock": 12,
-            }
-        return {
-            "rank": -1,
-            "thread": 0,
-            "task": 1,
-            "subtask": 2,
-            "tic": 4,
-            "toc": 5,
-            "ci_type": 11,
-            "cj_type": 12,
-            "ci_subtype": 13,
-            "cj_subtype": 14,
-            "ci_depth": 15,
-            "cj_depth": 16,
-            "cpu_clock": 10,
-        }
-
-    def _parse_records(self) -> dict[int, list[TaskRecord]]:
-        """Convert rows into per-rank task records with contiguous threads.
-
-        SWIFT writes one header row per rank (task type ``none`` in MPI
-        dumps, ``-1`` in non-MPI dumps) holding the step tic/toc and the
-        CPU frequency. Header rows are dropped and each rank's ticks are
-        converted with that rank's own CPU frequency.
-        """
-        rows = self.data
-        task_index = self._columns["task"]
-        tic_index = self._columns["tic"]
-        toc_index = self._columns["toc"]
-        clock_index = self._columns["cpu_clock"]
-
-        if self.is_mpi:
-            raw_ranks = rows[:, self._columns["rank"]].astype(int)
-        else:
-            raw_ranks = np.zeros(len(rows), dtype=int)
-
-        header_mask = rows[:, task_index] <= 0
-        for row, rank in zip(rows[header_mask], raw_ranks[header_mask]):
+        for rank, t0, t1, freq in zip(
+            rank_col[header], tic[header], toc[header], cpufreq[header]
+        ):
+            self.step_ticks.setdefault(int(rank), (int(t0), int(t1)))
             self.cpu_clock_khz_by_rank.setdefault(
-                int(rank), float(row[clock_index]) / 1000.0
+                int(rank), float(freq) / 1000.0
             )
+        if not self.step_ticks:
+            raise ValueError(f"{self.file_path}: no header row found")
+        self.file_ranks = sorted(self.step_ticks)
 
-        keep = (
-            ~header_mask
-            & (rows[:, tic_index] != 0)
-            & (rows[:, toc_index] != 0)
-        )
-        rows = rows[keep]
-        raw_ranks = raw_ranks[keep]
-
-        thread_index = self._columns["thread"]
-        records_by_rank: dict[int, list[TaskRecord]] = {}
-
-        for rank in (int(value) for value in np.unique(raw_ranks)):
-            rank_rows = rows[raw_ranks == rank]
-            clock_khz = self.cpu_clock_khz_by_rank.setdefault(
-                rank, self.cpu_clock_khz
+        selected = self.file_ranks if ranks is None else sorted(set(ranks))
+        absent = [r for r in selected if r not in self.step_ticks]
+        if absent:
+            raise ValueError(
+                f"rank {absent[0]} not present in {self.file_path} "
+                f"(ranks: {_rank_list(self.file_ranks)})"
             )
-            raw_threads = [int(value) for value in rank_rows[:, thread_index]]
-            thread_map = {
-                thread_id: mapped_id
-                for mapped_id, thread_id in enumerate(sorted(set(raw_threads)))
-            }
+        self.ranks = selected
 
-            rank_records: list[TaskRecord] = []
-            for row, raw_thread in tqdm(
-                zip(rank_rows, raw_threads),
-                total=len(rank_rows),
-                desc=f"Parsing task records (rank {rank})",
-                unit="task",
-            ):
-                task_type_index = int(row[task_index])
-                subtype_index = int(row[self._columns["subtask"]])
-                task_type = task_type_name(task_type_index)
-                subtype = subtype_name(subtype_index)
-
-                rank_records.append(
-                    TaskRecord(
-                        rank=rank,
-                        thread=thread_map[raw_thread],
-                        task_type=task_type,
-                        subtype=subtype,
-                        label=task_label(task_type_index, subtype_index),
-                        colour=task_colour(task_type, subtype),
-                        start_ms=float(row[tic_index]) / clock_khz,
-                        end_ms=float(row[toc_index]) / clock_khz,
-                        ci_type=int(row[self._columns["ci_type"]]),
-                        cj_type=int(row[self._columns["cj_type"]]),
-                        ci_subtype=int(row[self._columns["ci_subtype"]]),
-                        cj_subtype=int(row[self._columns["cj_subtype"]]),
-                        ci_depth=int(row[self._columns["ci_depth"]]),
-                        cj_depth=int(row[self._columns["cj_depth"]]),
-                    )
+        keep = ~header & (tic != 0) & (toc != 0)
+        if ranks is not None:
+            keep &= np.isin(rank_col, selected)
+        rank_col, tic, toc = rank_col[keep], tic[keep], toc[keep]
+        task_type = types[keep].astype(np.int16)
+        subtype = take("subtype")[keep].astype(np.int16)
+        thread = _contiguous_threads(rank_col, take("thread")[keep])
+        cells = {
+            field: (
+                take(field)[keep].astype(np.int16)
+                if layout.has_cells
+                else np.full(rank_col.size, -1, dtype=np.int16)
+            )
+            for field in CELL_FIELDS
+        }
+        del types, header, keep
+        if names is None:
+            max_cell = int(
+                max(
+                    cells["ci_type"].max(initial=0),
+                    cells["cj_type"].max(initial=0),
                 )
-            records_by_rank[rank] = rank_records
+            )
+            names = resolve_task_names(swift_src, layout.has_cells, max_cell)
+        self.names = names
 
-        return records_by_rank
+        # Subtract in int64 first: ticks exceed float precision.
+        start = np.empty(rank_col.size)
+        end = np.empty(rank_col.size)
+        for rank in selected:
+            mask = rank_col == rank
+            origin = self.step_ticks[rank][0]
+            khz = self.cpu_clock_khz_by_rank[rank]
+            start[mask] = (tic[mask] - origin) / khz
+            end[mask] = (toc[mask] - origin) / khz
+        del tic, toc
 
-    def _rank_records(self, rank: int) -> list[TaskRecord]:
-        """Return all (unfiltered) task records for one rank."""
-        if rank not in self._records_by_rank:
-            raise ValueError(f"Rank {rank} not present in {self.file_path}")
-        return self._records_by_rank[rank]
-
-    def mintic_to_ms(self, mintic: int, rank: int | None = None) -> float:
-        """Convert an absolute tick to milliseconds.
-
-        Args:
-            mintic: Absolute tick value.
-            rank: Rank whose CPU frequency to use (default: first header).
-        """
-        if rank is None:
-            return float(mintic) / self.cpu_clock_khz
-        return float(mintic) / self.cpu_clock_khz_by_rank[rank]
-
-    def rank_bounds_ms(self, rank: int) -> tuple[float, float]:
-        """Return the min/max absolute times for a rank."""
-        rank_records = self._rank_records(rank)
-        return (
-            min(record.start_ms for record in rank_records),
-            max(record.end_ms for record in rank_records),
+        self.tasks = pd.DataFrame(
+            {
+                "rank": rank_col,
+                "thread": thread,
+                "type": task_type,
+                "subtype": subtype,
+                "label": self._labels(task_type, subtype),
+                "start_ms": start,
+                "end_ms": end,
+                **cells,
+            },
+            copy=False,
         )
+        self._warn_out_of_range(task_type, subtype, cells)
+        counts = self.tasks.groupby("rank")["thread"].max() + 1
+        self.thread_counts = {
+            rank: int(counts.get(rank, 0)) for rank in selected
+        }
 
-    def get_rank_records(
+    def _read(self) -> pd.DataFrame:
+        """Read the needed columns of every row (header rows included)."""
+        import pandas as pd
+
+        layout = self.layout
+        fields = ["thread", "type", "subtype", "tic", "toc", "cpufreq"]
+        if layout.is_mpi:
+            fields.append("rank")
+        if layout.has_cells:
+            fields.extend(CELL_FIELDS)
+        usecols = sorted({layout.column(f) for f in fields})
+        # Columns missing from a short header row read as NaN, so only
+        # columns the header has are read as int64.
+        wide = {layout.column(f) for f in ("tic", "toc", "cpufreq")}
+        dtype = {
+            col: (
+                (np.int64 if col in wide else np.int32)
+                if col < layout.header_cols
+                else np.float64
+            )
+            for col in usecols
+        }
+        try:
+            return pd.read_csv(
+                self.file_path,
+                sep=r"\s+",
+                header=None,
+                names=list(range(layout.ncols)),
+                usecols=usecols,
+                dtype=dtype,
+                comment="#",
+                engine="c",
+            )
+        except (ValueError, pd.errors.ParserError) as error:
+            raise ValueError(f"malformed task-debug file: {error}") from error
+
+    def _labels(
+        self, task_type: np.ndarray, subtype: np.ndarray
+    ) -> pd.Categorical:
+        """Vectorised ``type/subtype`` labels as a categorical."""
+        import pandas as pd
+
+        pairs = task_type.astype(np.int64) * 1_000_000 + subtype
+        unique, inverse = np.unique(pairs, return_inverse=True)
+        labels = [
+            self.names.label(int(p // 1_000_000), int(p % 1_000_000))
+            for p in unique
+        ]
+        # Labels can repeat for distinct pairs only if names repeat.
+        categories = list(dict.fromkeys(labels))
+        codes = np.array([categories.index(lbl) for lbl in labels])[inverse]
+        return pd.Categorical.from_codes(codes, categories=categories)
+
+    def _warn_out_of_range(
         self,
-        rank: int,
-        task_filter: TaskFilter | None = None,
-    ) -> list[TaskRecord]:
-        """Return task records for one rank after applying filters."""
-        rank_records = self._rank_records(rank)
-        if task_filter is None:
-            return list(rank_records)
+        task_type: np.ndarray,
+        subtype: np.ndarray,
+        cells: dict[str, np.ndarray],
+    ) -> None:
+        """Warn about indices the name tables do not cover."""
+        names = self.names
+        checks = [
+            ("task type", task_type, len(names.task_types)),
+            ("task subtype", subtype, len(names.subtypes)),
+            (
+                "cell type",
+                np.concatenate([cells["ci_type"], cells["cj_type"]]),
+                len(names.cell_types),
+            ),
+            (
+                "cell subtype",
+                np.concatenate([cells["ci_subtype"], cells["cj_subtype"]]),
+                len(names.cell_subtypes),
+            ),
+        ]
+        for kind, values, size in checks:
+            bad = np.unique(values[values >= size])
+            if bad.size:
+                warn(
+                    f"{kind} indices {', '.join(map(str, bad))} are outside "
+                    f"the {size}-name table ({names.source}); shown as "
+                    "unknown_<index>. The dump may come from another SWIFT "
+                    "version (pass --swift-src)."
+                )
 
-        return [
-            record
-            for record in rank_records
-            if _matches_filter(record, task_filter)
+    def step_duration_ms(self, rank: int) -> float:
+        """Step length from the rank's header tic/toc."""
+        tic, toc = self.step_ticks[rank]
+        return (toc - tic) / self.cpu_clock_khz_by_rank[rank]
+
+    def tick_to_ms(self, tick: int, rank: int) -> float:
+        """Absolute tick to ms relative to the rank's step start."""
+        return (tick - self.step_ticks[rank][0]) / self.cpu_clock_khz_by_rank[
+            rank
         ]
 
+    def rank_tasks(
+        self, rank: int, task_filter: TaskFilter | None = None
+    ) -> pd.DataFrame:
+        """Tasks of one loaded rank after applying a filter."""
+        if rank not in self.ranks:
+            raise ValueError(
+                f"rank {rank} was not loaded from {self.file_path}"
+            )
+        tasks = self.tasks
+        mask = (tasks["rank"] == rank).to_numpy()
+        if task_filter is not None:
+            mask &= self.filter_mask(task_filter)
+        return tasks.loc[mask]
 
-def _matches_filter(record: TaskRecord, task_filter: TaskFilter) -> bool:
-    """Return whether a task record passes the provided task filter."""
-    if task_filter.tasks is not None and record.label not in task_filter.tasks:
-        return False
+    def filter_mask(self, task_filter: TaskFilter) -> np.ndarray:
+        """Boolean mask of ``tasks`` rows passing a filter.
 
-    if task_filter.ci_type is not None and (
-        record.ci_type != task_filter.ci_type
-    ):
-        return False
-    if task_filter.cj_type is not None and (
-        record.cj_type != task_filter.cj_type
-    ):
-        return False
-    if task_filter.c_type is not None and task_filter.c_type not in (
-        record.ci_type,
-        record.cj_type,
-    ):
-        return False
-    if task_filter.ci_subtype is not None and (
-        record.ci_subtype != task_filter.ci_subtype
-    ):
-        return False
-    if task_filter.cj_subtype is not None and (
-        record.cj_subtype != task_filter.cj_subtype
-    ):
-        return False
-    if task_filter.c_subtype is not None and task_filter.c_subtype not in (
-        record.ci_subtype,
-        record.cj_subtype,
-    ):
-        return False
+        Raises:
+            ValueError: For unknown task labels or cell names, or a cell
+                filter on a dump without cell columns.
+        """
+        tasks = self.tasks
+        mask = np.ones(len(tasks), dtype=bool)
+        if task_filter.tasks is not None:
+            self.names.validate_labels(task_filter.tasks)
+            mask &= tasks["label"].isin(task_filter.tasks).to_numpy()
+        if task_filter.uses_cells and not self.layout.has_cells:
+            raise ValueError(
+                f"{self.file_path} has no cell metadata "
+                f"({self.layout.ncols}-column dump); cell type, subtype and "
+                "depth filters need a zoom-branch dump (19/21 columns)"
+            )
 
-    if task_filter.depth is not None and task_filter.depth not in (
-        record.ci_depth,
-        record.cj_depth,
-    ):
-        return False
+        def col(name: str) -> np.ndarray:
+            return tasks[name].to_numpy()
 
-    return True
+        for value, fields, subtype in (
+            (task_filter.ci_type, ("ci_type",), False),
+            (task_filter.cj_type, ("cj_type",), False),
+            (task_filter.c_type, ("ci_type", "cj_type"), False),
+            (task_filter.ci_subtype, ("ci_subtype",), True),
+            (task_filter.cj_subtype, ("cj_subtype",), True),
+            (task_filter.c_subtype, ("ci_subtype", "cj_subtype"), True),
+        ):
+            if value is None:
+                continue
+            index = self.names.cell_index(value, subtype)
+            mask &= np.logical_or.reduce([col(f) == index for f in fields])
+        if task_filter.depth is not None:
+            mask &= (col("ci_depth") == task_filter.depth) | (
+                col("cj_depth") == task_filter.depth
+            )
+        return mask
+
+
+def _contiguous_threads(ranks: np.ndarray, threads: np.ndarray) -> np.ndarray:
+    """Renumber thread ids 0..n-1 within each rank (sorted order kept)."""
+    out = np.empty(threads.shape, dtype=np.int32)
+    for rank in np.unique(ranks):
+        mask = ranks == rank
+        out[mask] = np.unique(threads[mask], return_inverse=True)[1]
+    return out
+
+
+def _rank_list(ranks: list[int]) -> str:
+    """Compact rank list, e.g. ``0-15``."""
+    if ranks == list(range(ranks[0], ranks[-1] + 1)) and len(ranks) > 2:
+        return f"{ranks[0]}-{ranks[-1]}"
+    return ", ".join(map(str, ranks))

@@ -21,7 +21,12 @@ _ANALYSE_ARGV = {
     "log": ["log", "swift.log"],
     "task-counts": ["task-counts", "swift.log"],
     "mpiuse": ["mpiuse", "reports"],
-    "task-plots": ["task-plots", "tasks.dat", "threadpool.dat"],
+    "task-plots": [
+        "task-plots",
+        "tasks.dat",
+        "--threadpool",
+        "threadpool.dat",
+    ],
     "scaling timers": ["scaling", "timers", "a.log", "b.log"],
     "scaling runtime": ["scaling", "runtime", "a.log", "b.log"],
 }

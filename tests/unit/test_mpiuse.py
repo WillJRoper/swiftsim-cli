@@ -226,8 +226,11 @@ class TestMpiuseHelpers:
         )
 
         assert aggregated is not None
-        assert aggregated["total_bytes"] == 390
-        assert aggregated["total_count"] == 5
+        # Totals use the send side only (each message is logged twice).
+        assert aggregated["direction"] == "send"
+        assert aggregated["total_bytes"] == 300
+        assert aggregated["total_count"] == 3
+        assert (aggregated["recv_bytes"], aggregated["recv_count"]) == (90, 2)
         assert aggregated["steps"] == [1, 2]
         assert aggregated["ranks"] == [0, 1]
 
@@ -238,14 +241,61 @@ class TestMpiuseHelpers:
         assert int(per_subtype.loc[("recv", "xv"), "bytes"]) == 40
 
         per_step = aggregated["per_step_totals"].set_index("step")
-        assert int(per_step.loc[1, "bytes"]) == 270
-        assert int(per_step.loc[1, "count"]) == 3
-        assert int(per_step.loc[2, "bytes"]) == 120
-        assert int(per_step.loc[2, "count"]) == 2
+        assert int(per_step.loc[1, "bytes"]) == 220
+        assert int(per_step.loc[1, "count"]) == 2
+        assert int(per_step.loc[2, "bytes"]) == 80
+        assert int(per_step.loc[2, "count"]) == 1
+
+        ranks = aggregated["per_rank_totals"].set_index("rank")
+        assert ranks.loc[0, ["sent_bytes", "recv_bytes"]].tolist() == [180, 90]
+        assert ranks.loc[1, ["sent_bytes", "recv_bytes"]].tolist() == [120, 0]
 
         inflight = aggregated["inflight_per_step"].set_index("step")
         assert int(inflight.loc[1, "inflight_max"]) == 120
         assert int(inflight.loc[2, "inflight_max"]) == 80
+
+    def test_message_counted_once(self, tmp_path):
+        """A message logged as send (rank 0) and recv (rank 1) counts once."""
+        _write_mpiuse_file(
+            tmp_path, 0, 1, ["1 2 0 1 0 1 send 1 gpart 4 1 9 500 500"]
+        )
+        _write_mpiuse_file(
+            tmp_path, 1, 1, ["1 2 0 1 1 0 recv 2 gpart 4 1 9 500 500"]
+        )
+        aggregated = _aggregate(_discover_files(tmp_path), None, None, False)
+        assert aggregated is not None
+        assert aggregated["total_bytes"] == 500
+        assert aggregated["recv_bytes"] == 500
+
+    def test_recv_only_reports_use_recv_side(self, tmp_path):
+        """Without logged sends the totals fall back to the recv side."""
+        _write_mpiuse_file(
+            tmp_path, 1, 1, ["1 2 0 1 1 0 recv 2 gpart 4 1 9 500 500"]
+        )
+        aggregated = _aggregate(_discover_files(tmp_path), None, None, False)
+        assert aggregated is not None
+        assert aggregated["direction"] == "recv"
+        assert aggregated["total_bytes"] == 500
+
+    def test_inflight_honours_subtype_filter(self, tmp_path):
+        """The high-water mark only counts the selected subtypes (T15)."""
+        _write_mpiuse_file(
+            tmp_path,
+            0,
+            1,
+            [
+                "1 2 0 1 0 1 send 1 gpart 4 1 9 1000 1000",
+                "2 3 0 1 0 1 send 1 tend 5 1 9 30 1030",
+                "3 4 0 1 0 1 send 1 tend 5 1 9 20 1050",
+                "4 5 1 1 0 1 send 1 tend 5 0 9 -30 1020",
+            ],
+        )
+        files = _discover_files(tmp_path)
+        full = _aggregate(files, None, None, False)
+        tend = _aggregate(files, None, ["tend"], False)
+        assert full is not None and tend is not None
+        assert int(full["inflight_per_step"]["inflight_max"].iloc[0]) == 1050
+        assert int(tend["inflight_per_step"]["inflight_max"].iloc[0]) == 50
 
 
 class TestAnalyseSwiftMpiuse:
@@ -346,6 +396,25 @@ class TestAnalyseSwiftMpiuse:
         captured = capsys.readouterr()
         assert "warning: no usable mpiuse data remained" in captured.err
         assert not (tmp_path / "mpiuse_analysis").exists()
+
+    def test_unknown_subtype_lists_valid_ones(self, tmp_path):
+        """Unknown --subtypes names are an error naming the valid ones."""
+        run_dir = _make_sample_input(tmp_path / "run_a")
+        with pytest.raises(ValueError, match="bogus.*gpart"):
+            analyse_swift_mpiuse(
+                inputs=[str(run_dir)],
+                output_path=str(tmp_path),
+                subtype_filter=["gpart", "bogus"],
+            )
+
+    def test_headline_reports_each_direction(self, tmp_path, capsys):
+        """The headline gives sent and received bytes separately (T4)."""
+        run_dir = _make_sample_input(tmp_path / "run_a")
+        analyse_swift_mpiuse(inputs=[str(run_dir)], output_path=str(tmp_path))
+        out = capsys.readouterr().out
+        assert "Bytes sent: 300 " in out
+        assert "Bytes received: 90 " in out
+        assert "TOTAL send" in out and "TOTAL recv" in out
 
     def test_unmatched_input_is_a_warning(self, tmp_path, capsys):
         """An input matching nothing is skipped when others work."""

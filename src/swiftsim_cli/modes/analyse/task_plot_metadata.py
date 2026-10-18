@@ -1,8 +1,18 @@
-"""Metadata and colour helpers for SWIFT task-debug plots."""
+"""Built-in SWIFT task/cell name tables and colour helpers for task plots.
+
+The tables here are only a fallback: :mod:`.task_names` reads the names
+from the SWIFT source the dump was written by whenever a checkout is
+available. Two snapshots are kept because the zoom branch inserts a
+``progeny`` subtype (shifting every later subtype index) and adds cell
+type/subtype columns to the dump.
+"""
 
 from __future__ import annotations
 
-TASKTYPES = [
+from typing import Sequence
+
+# taskID_names in src/task.c (identical on master and the zoom branch).
+TASK_TYPES = (
     "none",
     "sort",
     "self",
@@ -77,18 +87,18 @@ TASKTYPES = [
     "rt_transport_out",
     "rt_tchem",
     "rt_advance_cell_time",
-    "rt_sort",
+    "rt_sorts",
     "rt_collect_times",
-]
+)
 
-SUBTYPES = [
+# subtaskID_names in src/task.c on upstream master.
+UPSTREAM_SUBTYPES = (
     "none",
     "density",
     "gradient",
     "force",
     "limiter",
     "grav",
-    "progeny",
     "fof",
     "external_grav",
     "tend",
@@ -119,173 +129,49 @@ SUBTYPES = [
     "sink_do_gas_swallow",
     "rt_gradient",
     "rt_transport",
-]
+)
 
-CELL_TYPES = ["Regular", "Zoom", "Background"]
-CELL_SUBTYPES = ["Regular", "Neighbour", "Void"]
+# The zoom branch adds "progeny" after "grav".
+ZOOM_SUBTYPES = (*UPSTREAM_SUBTYPES[:6], "progeny", *UPSTREAM_SUBTYPES[6:])
 
-FULLTYPES = [
-    "self/limiter",
-    "self/force",
-    "self/gradient",
-    "self/density",
-    "self/grav",
-    "pair/limiter",
-    "pair/force",
-    "pair/gradient",
-    "pair/density",
-    "pair/grav",
-    "recv/xv",
-    "send/xv",
-    "recv/rho",
-    "send/rho",
-    "recv/tend_part",
-    "send/tend_part",
-    "recv/tend_gpart",
-    "send/tend_gpart",
-    "recv/tend_spart",
-    "send/tend_spart",
-    "recv/tend_bpart",
-    "send/tend_bpart",
-    "recv/gpart",
-    "send/gpart",
-    "recv/spart",
-    "send/spart",
-    "send/sf_counts",
-    "recv/sf_counts",
-    "recv/bpart",
-    "send/bpart",
-    "recv/limiter",
-    "send/limiter",
-    "pack/limiter",
-    "unpack/limiter",
-    "self/stars_density",
-    "pair/stars_density",
-    "self/stars_prep1",
-    "pair/stars_prep1",
-    "self/stars_prep2",
-    "pair/stars_prep2",
-    "self/stars_feedback",
-    "pair/stars_feedback",
-    "self/bh_density",
-    "pair/bh_density",
-    "self/bh_swallow",
-    "pair/bh_swallow",
-    "self/do_swallow",
-    "pair/do_swallow",
-    "self/bh_feedback",
-    "pair/bh_feedback",
-    "self/rt_gradient",
-    "pair/rt_gradient",
-    "self/rt_transport",
-    "pair/rt_transport",
-    "self/sink_density",
-    "pair/sink_density",
-    "self/sink_swallow",
-    "pair/sink_swallow",
-    "self/sink_do_swallow",
-    "pair/sink_do_swallow",
-    "self/sink_do_gas_swallow",
-    "pair/sink_do_gas_swallow",
-]
-
-COLOURS = [
-    "cyan",
-    "lightgray",
-    "darkblue",
-    "yellow",
-    "tan",
-    "dodgerblue",
-    "sienna",
-    "aquamarine",
-    "bisque",
-    "blue",
-    "green",
-    "lightgreen",
-    "brown",
-    "purple",
-    "moccasin",
-    "olivedrab",
-    "chartreuse",
-    "olive",
-    "darkgreen",
-    "green",
-    "mediumseagreen",
-    "mediumaquamarine",
-    "darkslategrey",
-    "mediumturquoise",
-    "black",
-    "cadetblue",
-    "skyblue",
-    "red",
-    "slategray",
-    "gold",
-    "slateblue",
-    "blueviolet",
-    "mediumorchid",
-    "firebrick",
-    "magenta",
-    "hotpink",
-    "pink",
-    "orange",
-    "lightgreen",
-]
+# enum cell_types / cell_subtypes in the zoom branch's src/cell.h. Older
+# zoom dumps had a buffer cell type, so background was 3.
+ZOOM_CELL_TYPES = ("Regular", "Zoom", "Background")
+LEGACY_ZOOM_CELL_TYPES = ("Regular", "Zoom", "Buffer", "Background")
+ZOOM_CELL_SUBTYPES = ("Regular", "Neighbour", "Void")
 
 
-def _assign_palette(labels: list[str], start_index: int = 0) -> dict[str, str]:
-    """Assign colours to labels, recycling the SWIFT palette when needed."""
-    colour_map: dict[str, str] = {}
-    palette_size = len(COLOURS)
-    for index, label in enumerate(labels):
-        colour_map[label] = COLOURS[(start_index + index) % palette_size]
-    return colour_map
+def distinct_colours(count: int) -> list[str]:
+    """Return ``count`` visually distinct colours as hex strings.
+
+    The first 30 are the saturated halves of matplotlib's tab20, tab20b
+    and tab20c maps, then their light halves; beyond 60 the hue circle is
+    sampled evenly.
+    """
+    from matplotlib import colormaps
+    from matplotlib.colors import hsv_to_rgb, to_hex
+
+    maps = [
+        [to_hex(colormaps[name](i)) for i in range(20)]
+        for name in ("tab20", "tab20b", "tab20c")
+    ]
+    palette = [c for m in maps for c in m[::2]] + [
+        c for m in maps for c in m[1::2]
+    ]
+    if count <= len(palette):
+        return palette[:count]
+    return [
+        to_hex(tuple(hsv_to_rgb((i / count, 0.75, 0.6 + 0.3 * (i % 2)))))
+        for i in range(count)
+    ]
 
 
-TASK_COLOURS = _assign_palette(TASKTYPES)
+def colour_map(labels: Sequence[str]) -> dict[str, str]:
+    """Map labels to distinct colours in the order given.
 
-_subtype_colours = _assign_palette(FULLTYPES + SUBTYPES, len(TASKTYPES))
-SUB_COLOURS = {
-    label: _subtype_colours[label] for label in FULLTYPES + SUBTYPES
-}
-
-
-def _name_or_unknown(names: list[str], index: int) -> str:
-    """Return ``names[index]``, or ``unknown_<index>`` if out of range."""
-    if 0 <= index < len(names):
-        return names[index]
-    return f"unknown_{index}"
-
-
-def task_type_name(task_type_index: int) -> str:
-    """Return the task type name for an integer task type ID."""
-    return _name_or_unknown(TASKTYPES, task_type_index)
-
-
-def subtype_name(subtype_index: int) -> str:
-    """Return the task subtype name for an integer subtype ID."""
-    return _name_or_unknown(SUBTYPES, subtype_index)
-
-
-def task_label(task_type_index: int, subtype_index: int) -> str:
-    """Return the human-readable task label for integer task IDs."""
-    task_type = task_type_name(task_type_index)
-    subtype = subtype_name(subtype_index)
-    if subtype == "none":
-        return task_type
-    return f"{task_type}/{subtype}"
-
-
-def task_colour(task_type: str, subtype: str) -> str:
-    """Return the colour used by SWIFT's task plotting scripts."""
-    # Task types missing from TASKTYPES (newer SWIFT) get a neutral colour.
-    base_colour = TASK_COLOURS.get(task_type, "grey")
-    if "fof" in task_type:
-        return base_colour
-
-    if any(key in task_type for key in ("self", "pair", "recv", "send")):
-        full_type = f"{task_type}/{subtype}"
-        if full_type in SUB_COLOURS:
-            return SUB_COLOURS[full_type]
-        return SUB_COLOURS.get(subtype, base_colour)
-
-    return base_colour
+    Callers pass labels in a fixed order (e.g. by task-type index, or
+    sorted), so a label keeps its colour across ranks and plots of one run
+    rather than depending on how often it occurs.
+    """
+    unique = list(dict.fromkeys(labels))
+    return dict(zip(unique, distinct_colours(len(unique))))

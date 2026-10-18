@@ -36,7 +36,7 @@ _SUBCOMMAND_CASES = {
         "swiftsim_cli.modes.analyse.mpiuse.analyse_swift_mpiuse",
     ),
     "task-plots": (
-        ["task-plots", "tasks.dat", "threadpool.dat"],
+        ["task-plots", "tasks.dat", "--threadpool", "threadpool.dat"],
         "swiftsim_cli.modes.analyse.task_plots.analyse_swift_task_plots",
     ),
     "scaling": (

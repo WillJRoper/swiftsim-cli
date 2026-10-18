@@ -316,11 +316,11 @@ positional arguments:
     log               Analyse the timers in a SWIFT log file (run SWIFT with
                       -v 1 for rank 0 timers, -v 2 for every rank).
     task-counts       Plot the engine_print_task_counts output of SWIFT log
-                      files per step and cumulatively.
+                      files per step.
     mpiuse            Analyse SWIFT mpiuse_report-rank*-step*.dat files and
                       compare communication volume across inputs.
-    task-plots        Plot SWIFT task-debug and threadpool timings on a shared
-                      wall-clock axis.
+    task-plots        Plot SWIFT task-debug timings (optionally with a
+                      threadpool dump) per thread.
     scaling           Analyse how SWIFT scales across runs with different MPI
                       rank counts.
 
