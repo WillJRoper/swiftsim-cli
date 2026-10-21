@@ -104,7 +104,6 @@ test = [
     "coverage[toml]>=7.7",  # numba's coverage hook needs coverage.types.Tracer
     "ruff==0.11.7",
     "mypy==1.19.1",
-    "PyYAML >= 6.0",  # reading the expected-output fixtures
     "unyt",     # comes with swiftsimio; imported directly by a test
 ]
 
@@ -222,9 +221,10 @@ line-ending = "auto"
 
 
 # Type checking. `mypy` with no arguments checks src and tests; CI and the
-# pre-commit hook both run it this way so they agree.
+# pre-commit hook both run it this way so they agree. No python_version:
+# mypy must parse the installed stubs for the running interpreter (numpy
+# >= 2.5 uses 3.12 `type` statements); ruff's py310 target covers our syntax.
 [tool.mypy]
-python_version = "3.10"
 files = ["src", "tests"]
 exclude = ["^src/swiftsim_cli/_version\\.py$"]
 # astropy, h5py, swiftsimio and tree_sitter_c ship without type information.

@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-import yaml
+from ruamel.yaml import YAML
 
 from swiftsim_cli.timing.log_scan import scan_log
 from swiftsim_cli.timing.timer_db import (
@@ -48,7 +48,7 @@ def _case_id(path: Path) -> str:
 
 @cache
 def _spec(case: str) -> dict[str, Any]:
-    return yaml.safe_load((ARCHETYPES / f"{case}.yaml").read_text()) or {}
+    return YAML(typ="safe").load(ARCHETYPES / f"{case}.yaml") or {}
 
 
 def _sources(case: str) -> Path:

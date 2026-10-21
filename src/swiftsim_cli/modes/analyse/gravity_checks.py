@@ -368,17 +368,18 @@ def analyse_force_checks(
     bin_centres = 10 ** (0.5 * (log_edges[1:] + log_edges[:-1]))
 
     # Plot styling, scoped so it does not leak into later modes
-    plot_style = {
-        "axes.labelsize": 13,
-        "font.size": 11,
-        "legend.fontsize": 9,
-        "xtick.labelsize": 12,
-        "ytick.labelsize": 12,
-        "text.usetex": False,
-        "lines.linewidth": 2.0,
-    }
-
-    with plt.rc_context(plot_style):
+    # (inline so newer matplotlib stubs can check the rcParams keys)
+    with plt.rc_context(
+        {
+            "axes.labelsize": 13,
+            "font.size": 11,
+            "legend.fontsize": 9,
+            "xtick.labelsize": 12,
+            "ytick.labelsize": 12,
+            "text.usetex": False,
+            "lines.linewidth": 2.0,
+        }
+    ):
         fig, axes = plt.subplots(2, 3, figsize=(15, 9))
         panels = axes.flat[:5]
         summary_ax = axes.flat[5]
