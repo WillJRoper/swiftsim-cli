@@ -4,7 +4,7 @@ A profile is a named, fully independent SWIFT build: its own git worktree of
 the main SWIFT clone, on its own local branch (``swift-cli/<name>``) which
 tracks an upstream branch, with its own configure flags and build products.
 
-Profiles live in ``~/.swiftsim-utils/profiles.yaml`` (format version 2)::
+Profiles live in ``~/.swiftsim-cli/profiles.yaml`` (format version 2)::
 
     version: 2
     repo: /abs/path/to/swiftsim
@@ -38,8 +38,13 @@ from typing import Any, Callable
 from ruamel.yaml import YAML
 from ruamel.yaml.error import YAMLError
 
+from swiftsim_cli.utilities.messages import note
+
 # Define the path to the profile file
-PROFILE_FILE = Path.home() / ".swiftsim-utils" / "profiles.yaml"
+PROFILE_FILE = Path.home() / ".swiftsim-cli" / "profiles.yaml"
+
+# The directory older versions kept their files in
+LEGACY_DIR_NAME = ".swiftsim-utils"
 
 # The profile file format version this module reads and writes
 FORMAT_VERSION = 2
@@ -187,6 +192,19 @@ class ProfileStore:
 
 
 # ---------- reading and writing the profile file ----------
+
+
+def move_legacy_dir() -> None:
+    """Rename the old ``~/.swiftsim-utils`` directory to the current one.
+
+    Does nothing if the old directory is missing or the new one exists.
+    """
+    new = PROFILE_FILE.parent
+    old = new.with_name(LEGACY_DIR_NAME)
+    if old.is_dir() and not new.exists():
+        old.rename(new)
+        _load_store_cached.cache_clear()
+        note(f"moved {old} to {new}")
 
 
 def read_raw_profile_file() -> dict[str, Any] | None:
@@ -353,7 +371,7 @@ def get_profile_cache_dir(name: str | None = None) -> Path:
             file exists yet, the shared cache root is used.
 
     Returns:
-        Path: ``~/.swiftsim-utils/cache/<name>/``.
+        Path: ``~/.swiftsim-cli/cache/<name>/``.
     """
     path = PROFILE_FILE.parent / "cache"
     if name is None and PROFILE_FILE.exists():

@@ -20,11 +20,11 @@ DATA_DIR = Path(__file__).parent / "data"
 
 @pytest.fixture(autouse=True)
 def isolated_profile_file(tmp_path, monkeypatch):
-    """Keep every test away from the real ~/.swiftsim-utils directory."""
+    """Keep every test away from the real ~/.swiftsim-cli directory."""
     monkeypatch.setattr(
         profile_mod,
         "PROFILE_FILE",
-        tmp_path / ".swiftsim-utils" / "profiles.yaml",
+        tmp_path / ".swiftsim-cli" / "profiles.yaml",
     )
     profile_mod.set_profile_override(None)
     profile_mod._load_store_cached.cache_clear()

@@ -110,7 +110,7 @@ skipped unless `SWIFT_SRC` is set.
 The test suite uses pytest fixtures defined in `conftest.py`:
 
 - `isolated_profile_file` (autouse): points the profile file at a temporary
-  directory so no test touches `~/.swiftsim-utils`
+  directory so no test touches `~/.swiftsim-cli`
 - `temp_dir`: Temporary directory for file operations
 - `in_inputs_dir`: runs the test in a directory holding empty input files
   (`a.txt`, `swift.log`, `ics.hdf5`, ...) and a `reports/` directory, for

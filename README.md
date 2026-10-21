@@ -135,7 +135,7 @@ swift-cli profile --adopt ../swiftsim-my-feature --name my-feature
 the main clone and worktrees shared with another profile are only
 unregistered.
 
-Profiles are stored in `~/.swiftsim-utils/profiles.yaml` and per-profile caches (e.g. the timer database used by `analyse log` and the task names used by `analyse task-plots`) in `~/.swiftsim-utils/cache/<name>/`. If you have a profile file from an older version of `swift-cli`, convert it (after reviewing the plan it prints) with:
+Profiles are stored in `~/.swiftsim-cli/profiles.yaml` and per-profile caches (e.g. the timer database used by `analyse log` and the task names used by `analyse task-plots`) in `~/.swiftsim-cli/cache/<name>/`. If you have a profile file from an older version of `swift-cli`, convert it (after reviewing the plan it prints) with:
 
 ```bash
 swift-cli profile --migrate                         # worktrees next to the clone
@@ -143,7 +143,7 @@ swift-cli profile --migrate --worktree-root ~/swift-profiles -y
 ```
 
 The plan lists the settings that are dropped (for example cosmology keys)
-and the files in `~/.swiftsim-utils` that are no longer used, including the
+and the files in `~/.swiftsim-cli` that are no longer used, including the
 old timer databases (`timers.yaml` and `timer_nesting.yaml`), which the
 migration deletes. Nothing is fetched until you confirm, and nothing is
 written or deleted unless at least one profile migrates; an old `Current`

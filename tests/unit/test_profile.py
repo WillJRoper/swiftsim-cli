@@ -327,3 +327,18 @@ class TestPrompts:
             False,
             False,
         ]
+
+
+def test_move_legacy_dir(capsys):
+    """The old ~/.swiftsim-utils directory is renamed once, never merged."""
+    new = profile_mod.PROFILE_FILE.parent
+    old = new.with_name(profile_mod.LEGACY_DIR_NAME)
+    (old / "cache").mkdir(parents=True)
+    (old / "profiles.yaml").write_text("version: 2\n")
+    profile_mod.move_legacy_dir()
+    assert not old.exists()
+    assert (new / "profiles.yaml").read_text() == "version: 2\n"
+    assert "moved" in capsys.readouterr().err
+    old.mkdir()
+    profile_mod.move_legacy_dir()
+    assert old.exists()
