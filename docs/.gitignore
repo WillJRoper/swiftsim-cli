@@ -1,0 +1,5 @@
+# Builds
+build/*
+
+# Automatically generated files from APIDoc
+source/modules/swiftsim_cli*.rst

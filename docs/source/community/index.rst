@@ -27,7 +27,14 @@ Then:
    pytest                     # with coverage (fails under 85%)
    SWIFT_SRC=/path/to/swiftsim pytest tests/unit/test_timer_db_archetypes.py -k real
 
-The last command is an optional smoke test of the timer parser against a
+Build the documentation (into ``docs/build/html``) with:
+
+.. code-block:: bash
+
+   pip install -e ".[docs]"
+   make -C docs html
+
+The ``SWIFT_SRC`` command is an optional smoke test of the timer parser against a
 real SWIFT checkout (skipped unless ``SWIFT_SRC`` is set). See
 ``tests/README.md`` for the test layout and ``CONTRIBUTING.md`` for the
 contribution and release process.

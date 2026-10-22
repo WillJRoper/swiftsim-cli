@@ -106,6 +106,13 @@ test = [
     "unyt",     # comes with swiftsimio; imported directly by a test
 ]
 
+# Documentation (matches swiftsimio's docs stack)
+docs = [
+    "sphinx",
+    "sphinx-rtd-theme",
+    "sphinx_design",
+]
+
 # Project urls
 [project.urls]
 "Homepage" = "https://github.com/WillJRoper/swiftsim-cli"
@@ -169,6 +176,7 @@ exclude = [
     "venv",
     ".pre-commit-config.yaml",
     "src/swiftsim_cli/_version.py",
+    "docs/source/conf.py",
 ]
 
 # PEP-8 line length

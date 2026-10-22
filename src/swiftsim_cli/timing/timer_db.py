@@ -3,9 +3,10 @@
 SWIFT reports timings with ``message("... took %.3f %s.", ...)``. This
 module finds every such call with tree-sitter and turns each format string
 into a regex matching the body of the log line it produces (the text after
-``function: ``). It also records which functions each function calls (plus
-function identifiers passed as arguments, e.g. threadpool mappers) so the
-runtime nesting of the timers can be checked against the source.
+the ``function:`` prefix). It also records which functions each function
+calls (plus function identifiers passed as arguments, e.g. threadpool
+mappers) so the runtime nesting of the timers can be checked against the
+source.
 
 Classification follows one static rule: a timer is a ``function`` timer
 (timing its whole enclosing function) when no literal text precedes
