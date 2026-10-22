@@ -8,7 +8,7 @@ dynamic = ["version"]
 description = "A command-line toolkit for building, running and analysing SWIFT simulations."
 
 # The long description shown on PyPI
-readme = "README.md"
+readme = "README.rst"
 
 # Minimum Python version
 requires-python = ">=3.10"
@@ -109,7 +109,7 @@ test = [
 # Project urls
 [project.urls]
 "Homepage" = "https://github.com/WillJRoper/swiftsim-cli"
-"Documentation" = "https://github.com/WillJRoper/swiftsim-cli#readme"
+"Documentation" = "https://github.com/WillJRoper/swiftsim-cli/tree/main/docs/source"
 "Source" = "https://github.com/WillJRoper/swiftsim-cli"
 "Bug Reports" = "https://github.com/WillJRoper/swiftsim-cli/issues"
 "Changelog" = "https://github.com/WillJRoper/swiftsim-cli/blob/main/CHANGELOG.md"

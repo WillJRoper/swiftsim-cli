@@ -69,8 +69,8 @@ skipped unless `SWIFT_SRC` is set.
   handling, start-up imports and the flag conventions shared by every mode
 - **test_cli_chains.py**: end-to-end chains of real modes through
   `cli.main` (outputs written, a failing mode stopping the chain)
-- **test_readme.py**: the help text quoted in the top-level README matches
-  the real output
+- **test_docs_help.py**: the help text quoted in `docs/source` matches the
+  real output
 - **test_profile.py**, **test_profile_worktrees.py**: profile storage and the
   worktree-based profile commands against temporary git repositories
 - **test_profile_workflows.py**: whole profile workflows against temporary

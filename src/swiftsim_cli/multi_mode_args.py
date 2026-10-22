@@ -361,5 +361,5 @@ class MultiModeCLIArgs:
 
     @staticmethod
     def _print_help() -> None:
-        """Print the top-level help (also shown in the README)."""
+        """Print the top-level help (also shown in the docs)."""
         print(top_level_help())

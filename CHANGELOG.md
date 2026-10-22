@@ -92,6 +92,8 @@ Behaviour:
 
 General:
 
+- Documentation in `docs/source` (reStructuredText, ready for Sphinx);
+  `README.rst` is a short overview in swiftsimio's layout.
 - Global options `--profile NAME` (run against another profile without
   switching; checked before any mode runs), `--debug` (or
   `SWIFT_CLI_DEBUG=1`) and `--version`.
