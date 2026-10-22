@@ -28,8 +28,13 @@ def test_readme_top_level_help():
 
 
 def test_readme_analyse_help(monkeypatch, capsys):
-    """The README's `analyse --help` block is the real output (80 cols)."""
+    """The README's `analyse --help` block is the real output (80 cols).
+
+    Whitespace is ignored: argparse's column layout differs between Python
+    patch releases.
+    """
     monkeypatch.setenv("COLUMNS", "80")
     with pytest.raises(SystemExit):
         MultiModeCLIArgs(["analyse", "--help"])
-    assert _block_after("## Analysis (`analyse`)") == capsys.readouterr().out
+    readme = _block_after("## Analysis (`analyse`)")
+    assert readme.split() == capsys.readouterr().out.split()
