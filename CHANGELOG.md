@@ -16,8 +16,7 @@ Profiles:
 - Profiles are now git worktrees: each one has its own worktree of your main
   SWIFT clone, its own local branch (`swift-cli/<name>`) following an
   upstream branch, its own configure flags and its own build. Old profile
-  files are detected and converted with `swift-cli profile --migrate` (a
-  backup is kept as `profiles.yaml.bak`; old timer databases are deleted).
+  files are not converted: run `swift-cli init` again.
 - `switch NAME` now switches the current **profile** (an alias of
   `profile --switch NAME`). It used to switch the git branch of the SWIFT
   checkout.
@@ -52,7 +51,7 @@ Command-line flags (old → new):
 | `analyse task-plots --task NAME` | `analyse task-plots --tasks NAME [NAME ...]` |
 | `analyse task-counts -t NAME ...` | `analyse task-counts --tasks NAME [NAME ...]` |
 | `analyse task-plots --rank N` | `analyse task-plots --rank N\|all` (default `all`) |
-| `show` (profile only), `show --all` (profile and cosmology) | `show [NAME]` shows both; `--cosmo` only the cosmology; `--all` is a no-op |
+| `show` (profile only), `show --all` (profile and cosmology) | `show [NAME]` shows both; `--cosmo` only the cosmology; `--all` is gone |
 | required `-l/--labels` (`timesteps`, `gravity-checks`, `gravity-error-maps`) | optional everywhere, defaulting to the file stems |
 | abbreviated long options (e.g. `--res` for `--resolution`) | rejected: spell options out in full |
 
@@ -87,8 +86,7 @@ Behaviour:
 - `profiles.yaml` is written with normal permissions (umask), not 0600.
 - Dependency floors: numpy >= 2.1 and swiftsimio >= 10.0 (swiftsimio needs
   numpy 2), with matching floors for astropy (6.1), scipy (1.13), h5py
-  (3.11), matplotlib (3.9), pandas (2.2.2), ruamel.yaml (0.17.21) and
-  prompt_toolkit (3.0.29).
+  (3.11), matplotlib (3.9), pandas (2.2.2) and ruamel.yaml (0.17.21).
 
 ### Added
 
@@ -109,11 +107,17 @@ Profiles and builds:
   [--configure-flags] [--build] [--reuse-branch]`, `--update [NAME]`
   (rebase with autostash, reconfigure only when needed, build),
   `--update-all` with a summary, `--edit`, `--remove [--force]`,
-  `--adopt DIR --name NAME`, `--migrate [--worktree-root DIR]`.
-- Non-interactive use: `profile --init --repo DIR` (with `--worktree-root`,
-  `--name`, `--upstream`, `--configure-flags`, `--set KEY=VALUE`),
-  `profile --edit NAME --set KEY=VALUE`, and `-y/--yes` for the
-  confirmations of `--remove`, `--migrate` and `--init`.
+  `--adopt DIR --name NAME`.
+- `swift-cli init` replaces `profile --init`: one command, no prompts, that
+  clones SWIFT (from the GitHub mirror) into `./swiftsim`, or uses
+  `--swift-path DIR`, and creates the first profile (`--worktree-root`,
+  default `~/.swiftsim-cli/worktrees`; `--name`; `--upstream`;
+  `--configure-flags`).
+- `profile --edit NAME` opens the profile's settings in `$VISUAL`/`$EDITOR`
+  (default `vi`) instead of prompting; prompt_toolkit is no longer needed.
+- Non-interactive use: `profile --edit NAME --set KEY=VALUE`, and
+  `-y/--yes` for the confirmation of `--remove`.
+- Files live in `~/.swiftsim-cli` (was `~/.swiftsim-utils`; not moved).
 - `update --no-build`; a chained `update ... config/make` builds once.
 - `show [NAME]` shows any profile.
 - `-j/--nr-threads` for `make`, `update` and `profile`.
@@ -227,8 +231,8 @@ Profiles and builds:
 
 - Update building after an autostash conflict; `--remove` deleting adopted
   worktrees or the main clone; re-running `--init` re-pointing the clone of
-  existing profiles; migration losing data when every profile failed;
-  invalid profile names (`..`, trailing `.` or `.lock`, case clashes).
+  existing profiles; invalid profile names (`..`, trailing `.` or `.lock`,
+  case clashes).
 - `show` crashing on duplicate keys in the parameter file.
 
 Run setup:

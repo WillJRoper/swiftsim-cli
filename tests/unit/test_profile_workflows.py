@@ -1,4 +1,4 @@
-"""Profile/build workflow tests (update chains, edits, migration, ...).
+"""Profile/build workflow tests (update chains, edits, ...).
 
 These use real git repositories from the ``gitsetup`` fixture.
 """
@@ -25,7 +25,7 @@ from swiftsim_cli.profile import (
 from swiftsim_cli.swiftsim_dir import get_swiftsim_dir, update_profile
 
 from .conftest import run_git
-from .test_profile_worktrees import _answers, _args, _configure_runs, _confirm
+from .test_profile_worktrees import _args, _configure_runs, _confirm
 
 
 def _main(argv):
@@ -193,64 +193,8 @@ class TestCosmology:
         assert "no cosmology to show" in capsys.readouterr().err
 
 
-class TestInitAndOverride:
-    """Non-interactive init, clone changes and --profile (P4, P10, P18)."""
-
-    def test_init_non_interactive(self, gitsetup, capsys):
-        """--repo makes init prompt-free; --set fills the settings."""
-        pm.run(
-            _args(
-                init=True,
-                repo=str(gitsetup.repo),
-                worktree_root=str(gitsetup.tmp / "wts"),
-                name="zoom",
-                upstream="origin/feature",
-                configure_flags="--enable-debug",
-                set=["softening_coeff=0.1", f"data_dir={gitsetup.tmp}"],
-            )
-        )
-        store = load_store()
-        p = store.profiles["zoom"]
-        assert store.current == "zoom"
-        assert p.worktree == (gitsetup.tmp / "wts" / "zoom").resolve()
-        assert (p.worktree / "feature.c").exists()
-        assert p.configure_flags == ["--enable-debug"]
-        assert p.softening_coeff == 0.1
-        assert p.data_dir == gitsetup.tmp.resolve()
-        assert "swift-cli make -j" in capsys.readouterr().out
-
-    def test_init_cannot_change_clone(self, gitsetup, tmp_path):
-        """Re-running init can't re-point existing profiles' clone."""
-        gitsetup.store()
-        pm.new_profile("a")
-        other = tmp_path / "other"
-        run_git("clone", "-q", str(gitsetup.remote), str(other))
-        with pytest.raises(ProfileError, match="can't change"):
-            pm.init_profiles(repo=str(other), name="b", yes=True)
-        assert load_store().repo == gitsetup.repo
-        # The same clone is fine
-        pm.init_profiles(repo=str(gitsetup.repo), name="b", yes=True)
-        assert set(load_store().profiles) == {"a", "b"}
-
-    def test_init_rejects_bad_answers(self, gitsetup, monkeypatch):
-        """Prompt answers are checked as they are given (P11)."""
-        _answers(monkeypatch, str(gitsetup.repo), None, "bad name")
-        with pytest.raises(ProfileError, match="Invalid profile name"):
-            pm.init_profiles()
-        _answers(
-            monkeypatch,
-            str(gitsetup.repo),
-            None,
-            "ok",
-            None,
-            None,
-            None,
-            None,
-            "soft",
-        )
-        with pytest.raises(ProfileError, match="must be a number"):
-            pm.init_profiles()
-        assert not profile_mod.PROFILE_FILE.exists()
+class TestGlobalProfile:
+    """The global --profile option (P10, P18)."""
 
     def test_global_profile_checked_up_front(self, gitsetup, capsys):
         """An unknown --profile fails before the first mode runs."""
@@ -393,65 +337,6 @@ class TestRemoveAndAdopt:
             run_git("rev-parse", "--abbrev-ref", "swift-cli/b@{u}", cwd=wt)
             == "origin/feature"
         )
-
-
-class TestMigrateSafety:
-    """Migration edge cases (P7, P8, P27)."""
-
-    def _legacy(self, gitsetup, text):
-        profile_mod.PROFILE_FILE.parent.mkdir(parents=True, exist_ok=True)
-        profile_mod.PROFILE_FILE.write_text(text)
-
-    def test_all_failed_changes_nothing(self, gitsetup):
-        """If nothing migrates, the old file and timer files stay."""
-        self._legacy(
-            gitsetup,
-            f"Default:\n  swiftsim_dir: {gitsetup.repo}\n  branch: gone\n",
-        )
-        timers = profile_mod.PROFILE_FILE.parent / "timers.yaml"
-        timers.write_text("x")
-        old = profile_mod.PROFILE_FILE.read_text()
-        with pytest.raises(ProfileError, match="nothing was changed"):
-            pm.migrate_profiles(yes=True)
-        assert profile_mod.PROFILE_FILE.read_text() == old
-        assert timers.exists()
-        assert not profile_mod.PROFILE_FILE.with_suffix(".yaml.bak").exists()
-
-    def test_current_dropped_keys_root_and_rerun(self, gitsetup, capsys):
-        """Unmatched Current becomes 'current'; dropped keys are listed."""
-        run_git("branch", "local-only", cwd=gitsetup.repo)
-        self._legacy(
-            gitsetup,
-            f"Current:\n  swiftsim_dir: {gitsetup.repo}\n"
-            f"  branch: local-only\n"
-            f"Default:\n  swiftsim_dir: {gitsetup.repo}\n  branch: master\n"
-            f"  h: 0.7\n  Omega_m: 0.3\n",
-        )
-        (profile_mod.PROFILE_FILE.parent / "notes.txt").write_text("x")
-        root = gitsetup.tmp / "elsewhere"
-        # A worktree left by an interrupted earlier attempt is reused
-        run_git(
-            "worktree",
-            "add",
-            "-q",
-            "--track",
-            "-b",
-            "swift-cli/default",
-            str(root / "default"),
-            "origin/master",
-            cwd=gitsetup.repo,
-        )
-        pm.run(_args(migrate=True, yes=True, worktree_root=str(root)))
-        captured = capsys.readouterr()
-        assert "becomes the profile 'current'" in captured.err
-        assert "default: Omega_m, h" in captured.err
-        assert "notes.txt" in captured.err
-        assert "Reusing existing worktree" in captured.out
-        store = load_store()
-        assert set(store.profiles) == {"default", "current"}
-        assert store.current == "current"
-        assert store.profiles["current"].upstream == "local-only"
-        assert store.worktree_root == root.resolve()
 
 
 class TestMessages:

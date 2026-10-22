@@ -1,8 +1,6 @@
 """Unit tests for profile storage, resolution and configure parsing."""
 
 import os
-import subprocess
-import sys
 
 import pytest
 
@@ -75,24 +73,13 @@ class TestStore:
         assert get_profile("a").upstream == "origin/feature"
 
     def test_missing_and_empty_file(self):
-        """A missing or empty file asks the user to run --init."""
-        with pytest.raises(ProfileError, match="--init"):
+        """A missing or empty file asks the user to run swift-cli init."""
+        with pytest.raises(ProfileError, match="swift-cli init"):
             load_store()
         profile_mod.PROFILE_FILE.parent.mkdir(parents=True)
         profile_mod.PROFILE_FILE.write_text("")
-        with pytest.raises(ProfileError, match="--init"):
+        with pytest.raises(ProfileError, match="swift-cli init"):
             load_store()
-
-    def test_legacy_file(self):
-        """An old-format file asks the user to run --migrate."""
-        profile_mod.PROFILE_FILE.parent.mkdir(parents=True)
-        profile_mod.PROFILE_FILE.write_text(
-            "Current:\n  swiftsim_dir: /x\nDefault:\n  swiftsim_dir: /x\n"
-        )
-        with pytest.raises(ProfileError, match="--migrate"):
-            load_store()
-        with pytest.raises(ProfileError, match="--migrate"):
-            load_swift_profile()
 
     def test_permissions_follow_umask(self, tmp_path):
         """The profile file is not created private (mkstemp's 0600)."""
@@ -256,66 +243,7 @@ class TestHelpers:
 
 
 class TestPrompts:
-    """The interactive prompt helpers."""
-
-    def _ask(self, keys, *args, **kwargs):
-        from prompt_toolkit.application import create_app_session
-        from prompt_toolkit.input import create_pipe_input
-        from prompt_toolkit.output import DummyOutput
-
-        with (
-            pytest.MonkeyPatch.context() as mp,
-            create_pipe_input() as inp,
-        ):
-            mp.setattr(sys.stdin, "isatty", lambda: True, raising=False)
-            inp.send_text(keys)
-            with create_app_session(input=inp, output=DummyOutput()):
-                return profile_mod.ask(*args, **kwargs)
-
-    def test_ask_text_and_paths(self, tmp_path):
-        """Text and path prompts return the (default) answer."""
-        assert self._ask(" hello \r", "Q: ") == "hello"
-        assert self._ask("\r", "Q: ", default="dflt") == "dflt"
-        answer = self._ask(
-            "\r", "D: ", default=str(tmp_path), kind="dir", must_exist=True
-        )
-        assert answer == str(tmp_path)
-        assert self._ask("1.5\r", "F: ", check=float) == "1.5"
-
-    def _piped(self, monkeypatch, line, *args, **kwargs):
-        monkeypatch.setattr(sys.stdin, "isatty", lambda: False, raising=False)
-
-        def fake_input(label):
-            if line is None:
-                raise EOFError
-            return line
-
-        monkeypatch.setattr("builtins.input", fake_input)
-        return profile_mod.ask(*args, **kwargs)
-
-    def test_ask_piped(self, monkeypatch, tmp_path):
-        """Piped answers replace the default (blank keeps it) and are checked.
-
-        A closed stdin is an EOFError.
-        """
-        assert self._piped(monkeypatch, " x ", "Q: ", default="d") == "x"
-        assert self._piped(monkeypatch, "", "Q: ", default="d") == "d"
-        with pytest.raises(ProfileError, match="Soft: could not convert"):
-            self._piped(monkeypatch, "abc", "Soft: ", check=float)
-        with pytest.raises(ProfileError, match="does not exist"):
-            self._piped(
-                monkeypatch, str(tmp_path / "no"), "P: ", must_exist=True
-            )
-        with pytest.raises(EOFError):
-            self._piped(monkeypatch, None, "Q: ")
-
-    def test_prompt_toolkit_loaded_lazily(self):
-        """Importing the profile module does not import prompt_toolkit."""
-        code = (
-            "import sys, swiftsim_cli.profile; "
-            "sys.exit('prompt_toolkit' in sys.modules)"
-        )
-        subprocess.run([sys.executable, "-c", code], check=True)
+    """The confirmation prompt."""
 
     def test_confirm(self, monkeypatch):
         """Only an explicit yes confirms."""
@@ -327,18 +255,3 @@ class TestPrompts:
             False,
             False,
         ]
-
-
-def test_move_legacy_dir(capsys):
-    """The old ~/.swiftsim-utils directory is renamed once, never merged."""
-    new = profile_mod.PROFILE_FILE.parent
-    old = new.with_name(profile_mod.LEGACY_DIR_NAME)
-    (old / "cache").mkdir(parents=True)
-    (old / "profiles.yaml").write_text("version: 2\n")
-    profile_mod.move_legacy_dir()
-    assert not old.exists()
-    assert (new / "profiles.yaml").read_text() == "version: 2\n"
-    assert "moved" in capsys.readouterr().err
-    old.mkdir()
-    profile_mod.move_legacy_dir()
-    assert old.exists()

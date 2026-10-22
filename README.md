@@ -52,11 +52,9 @@ Check the installation with `swift-cli --version`.
 ## Quick start
 
 ```bash
-# 1. Point swift-cli at your SWIFT clone and create the first profile
-#    (interactive: clone path, worktree root, upstream, configure flags,
-#    data directory, softening constants)
-swift-cli profile --init
-#    Without prompts: swift-cli profile --init --repo ~/swiftsim -y
+# 1. Set up: clone SWIFT into ./swiftsim and create the "default" profile
+swift-cli init
+#    Or use an existing clone:  swift-cli init --swift-path ~/swiftsim
 
 # 2. Add more profiles, each with its own branch, flags and build
 swift-cli profile --new zoom --upstream origin/zoom \
@@ -105,17 +103,22 @@ swift-cli profile --new zoom --reuse-branch  # recreate it on the kept swift-cli
 swift-cli --profile zoom make -j 16   # build another profile without switching
 ```
 
-`profile --init` asks for the main clone, worktree root, upstream, configure
-flags, data directory and softening constants. With `--repo DIR` it asks
-nothing and takes the rest from `--worktree-root`, `--name` (default
-`default`), `--upstream`, `--configure-flags` and `--set KEY=VALUE`.
+`swift-cli init` sets everything up once, without prompts: it uses the SWIFT
+clone given with `--swift-path` or clones SWIFT (`--swift-url`, default the
+GitHub mirror) into `./swiftsim`, then creates the first profile (`--name`,
+default `default`; `--upstream`; `--configure-flags`) with its worktree in
+`--worktree-root` (default `~/.swiftsim-cli/worktrees`). Every later profile
+is another worktree of that clone, added with `profile --new`.
+
+`profile --edit NAME` opens the profile's settings (`upstream`,
+`configure_flags`, `data_dir`, `parameter_file`, `softening_coeff`,
+`softening_pivot_z`) as YAML in `$VISUAL`/`$EDITOR` (default `vi`); the
+changes are checked and applied when you save and quit.
 `profile --edit NAME --set KEY=VALUE` (repeatable) changes only the given
-settings without prompting; the keys are `upstream`, `configure_flags`,
-`data_dir`, `parameter_file`, `softening_coeff` and `softening_pivot_z`.
-`-y/--yes` answers the confirmation of `--remove`, `--migrate` and `--init`
+settings without opening an editor.
+`-y/--yes` answers the confirmation of `--remove`
 (`--remove --yes` keeps the profile's branch and prints the `git branch -D`
-command). In interactive prompts each answer is checked as it is given; piped
-answers are read one line per question, and an empty line keeps the default.
+command).
 
 Updating a profile runs `git pull --rebase --autostash` in its worktree (your local commits are replayed on top of the upstream, and any uncommitted changes are stashed and re-applied afterwards). It fails up front if the branch has no upstream, and reports "Already up to date" or how many commits were pulled. If the rebase, or re-applying your stashed changes, hits conflicts nothing is built and you're told how to resolve them. Otherwise `./autogen.sh` is run if `./configure` is missing, `./configure` is (re)run only if the profile has never been configured or its configure flags changed, and then `make` is run. No build starts in a worktree that is mid-rebase or has unresolved conflicts, and a failed `configure` or `make` exits with that command's own exit code.
 
@@ -135,19 +138,7 @@ swift-cli profile --adopt ../swiftsim-my-feature --name my-feature
 the main clone and worktrees shared with another profile are only
 unregistered.
 
-Profiles are stored in `~/.swiftsim-cli/profiles.yaml` and per-profile caches (e.g. the timer database used by `analyse log` and the task names used by `analyse task-plots`) in `~/.swiftsim-cli/cache/<name>/`. If you have a profile file from an older version of `swift-cli`, convert it (after reviewing the plan it prints) with:
-
-```bash
-swift-cli profile --migrate                         # worktrees next to the clone
-swift-cli profile --migrate --worktree-root ~/swift-profiles -y
-```
-
-The plan lists the settings that are dropped (for example cosmology keys)
-and the files in `~/.swiftsim-cli` that are no longer used, including the
-old timer databases (`timers.yaml` and `timer_nesting.yaml`), which the
-migration deletes. Nothing is fetched until you confirm, and nothing is
-written or deleted unless at least one profile migrates; an old `Current`
-entry that matches no profile becomes a profile called `current`.
+Profiles are stored in `~/.swiftsim-cli/profiles.yaml` and per-profile caches (e.g. the timer database used by `analyse log` and the task names used by `analyse task-plots`) in `~/.swiftsim-cli/cache/<name>/`.
 
 ## Global options
 
@@ -177,6 +168,7 @@ Global options (must come before the first mode):
                   SWIFT_CLI_DEBUG=1).
 
 Available modes:
+  init            Clone or reuse SWIFT and create the first profile.
   profile         Manage SWIFT profiles (one worktree, branch and build each).
   config          Set the current profile's configure flags and reconfigure.
   output-times    Generate a list of snapshot (and snipshot) output times.
@@ -251,7 +243,7 @@ as `warning: ...` lines and do not stop the chain.
 
 | Mode | What it does |
 | --- | --- |
-| `profile` | Create, list, show, switch, edit, update, remove, adopt and migrate profiles |
+| `profile` | Create, list, show, switch, edit, update, remove and adopt profiles |
 | `config` | Set the current profile's configure flags and reconfigure |
 | `make` | Compile the current profile |
 | `update` | Pull (rebase onto upstream) and rebuild the current profile |
@@ -662,19 +654,6 @@ Interpreting the numbers:
   not in the profile's repository (e.g. an unpushed commit), use
   `--no-match-revision` or `--swift-src`; the reported match rate shows how
   many timer lines were recognised.
-
-## Migrating from older versions
-
-- **Profiles**: profile files from before the worktree-based profiles are
-  detected automatically; run `swift-cli profile --migrate` to convert them
-  (a backup is kept as `profiles.yaml.bak`; old timer databases are
-  deleted).
-- **Flags**: many flags were renamed for v1.0 (e.g. `-o/--out` is always
-  an output directory, `new --path`/`--param` are now `-o/--out`/`--set`,
-  parameter files use `-P/--params`, `analyse task-plots` takes the
-  threadpool dump as `--threadpool FILE` and `analyse timesteps` uses
-  `--cores-per-run`). See
-  [CHANGELOG.md](https://github.com/WillJRoper/swiftsim-cli/blob/main/CHANGELOG.md) for the full list.
 
 ## Development
 

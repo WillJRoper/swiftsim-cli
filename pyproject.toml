@@ -75,7 +75,6 @@ dependencies = [
   "matplotlib >= 3.9",       # all analysis plots
   "numpy >= 2.1",
   "pandas >= 2.2.2",         # mpiuse report parsing
-  "prompt_toolkit >= 3.0.29", # interactive profile prompts
   "ruamel.yaml >= 0.17.21",  # round-trip parameter and profile files
   "swiftsimio >= 10.0",      # reading snapshots in `utils`
   "tqdm >= 4.60",            # progress bars in task plots

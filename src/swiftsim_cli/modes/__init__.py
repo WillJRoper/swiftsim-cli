@@ -11,6 +11,7 @@ from types import ModuleType
 from typing import Literal, get_args
 
 Mode = Literal[
+    "init",
     "profile",
     "config",
     "output-times",
@@ -28,6 +29,7 @@ AVAILABLE_MODES: tuple[Mode, ...] = get_args(Mode)
 # One-line description of each mode, shown by 'swift-cli --help' and at the
 # top of 'swift-cli <mode> --help'
 MODE_DESCRIPTIONS: dict[Mode, str] = {
+    "init": "Clone or reuse SWIFT and create the first profile.",
     "profile": "Manage SWIFT profiles (one worktree, branch and build each).",
     "config": "Set the current profile's configure flags and reconfigure.",
     "output-times": "Generate a list of snapshot (and snipshot) output times.",

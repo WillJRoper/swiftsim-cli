@@ -11,7 +11,7 @@ from swiftsim_cli.cosmology import clear_cosmology_cache
 from swiftsim_cli.modes import load_mode
 from swiftsim_cli.multi_mode_args import MultiModeCLIArgs
 from swiftsim_cli.params import clear_parameter_cache, load_parameters
-from swiftsim_cli.profile import move_legacy_dir, set_profile_override
+from swiftsim_cli.profile import set_profile_override
 
 # Errors caused by user input or the environment rather than a bug. These
 # are reported as a one-line message (ProfileError is a ValueError, and
@@ -57,9 +57,6 @@ def main(argv: list[str] | None = None) -> None:
         # Parse the multi-mode command-line arguments
         multi_args = MultiModeCLIArgs(argv)
         debug = debug or multi_args.global_args.debug
-
-        # Older versions kept their files in ~/.swiftsim-utils
-        move_legacy_dir()
 
         # Run every mode against --profile NAME instead of the current one
         set_profile_override(multi_args.global_args.profile)

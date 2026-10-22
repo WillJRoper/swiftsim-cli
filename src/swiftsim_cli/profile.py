@@ -8,13 +8,13 @@ Profiles live in ``~/.swiftsim-cli/profiles.yaml`` (format version 2)::
 
     version: 2
     repo: /abs/path/to/swiftsim
-    worktree_root: /abs/path/to/swiftsim-profiles
+    worktree_root: ~/.swiftsim-cli/worktrees
     current: default
     profiles:
       default:
         upstream: origin/master
         branch: swift-cli/default
-        worktree: /abs/path/to/swiftsim-profiles/default
+        worktree: ~/.swiftsim-cli/worktrees/default
         configure_flags: [--enable-debug]
         configured_flags: null
         data_dir: ...
@@ -33,18 +33,13 @@ import sys
 from dataclasses import dataclass, field
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 from ruamel.yaml import YAML
 from ruamel.yaml.error import YAMLError
 
-from swiftsim_cli.utilities.messages import note
-
 # Define the path to the profile file
 PROFILE_FILE = Path.home() / ".swiftsim-cli" / "profiles.yaml"
-
-# The directory older versions kept their files in
-LEGACY_DIR_NAME = ".swiftsim-utils"
 
 # The profile file format version this module reads and writes
 FORMAT_VERSION = 2
@@ -191,20 +186,12 @@ class ProfileStore:
         }
 
 
+def default_worktree_root() -> Path:
+    """Where profile worktrees go by default: ``~/.swiftsim-cli/worktrees``."""
+    return PROFILE_FILE.parent / "worktrees"
+
+
 # ---------- reading and writing the profile file ----------
-
-
-def move_legacy_dir() -> None:
-    """Rename the old ``~/.swiftsim-utils`` directory to the current one.
-
-    Does nothing if the old directory is missing or the new one exists.
-    """
-    new = PROFILE_FILE.parent
-    old = new.with_name(LEGACY_DIR_NAME)
-    if old.is_dir() and not new.exists():
-        old.rename(new)
-        _load_store_cached.cache_clear()
-        note(f"moved {old} to {new}")
 
 
 def read_raw_profile_file() -> dict[str, Any] | None:
@@ -224,11 +211,6 @@ def read_raw_profile_file() -> dict[str, Any] | None:
     return data
 
 
-def is_legacy_format(data: dict[str, Any]) -> bool:
-    """Whether raw profile data is in the old (pre-version 2) format."""
-    return "version" not in data
-
-
 @lru_cache(maxsize=None)
 def _load_store_cached(path: Path) -> ProfileStore:
     """Load and validate the profile file (cached per path)."""
@@ -236,16 +218,11 @@ def _load_store_cached(path: Path) -> ProfileStore:
     if data is None:
         raise ProfileError(
             f"No profiles found ({path} is missing or empty). Run "
-            "'swift-cli profile --init' to create your first profile."
+            "'swift-cli init' to create your first profile."
         )
-    if is_legacy_format(data):
+    if data.get("version") != FORMAT_VERSION:
         raise ProfileError(
-            f"{path} uses the old profile format. Run "
-            "'swift-cli profile --migrate' to convert it."
-        )
-    if data["version"] != FORMAT_VERSION:
-        raise ProfileError(
-            f"Unsupported profile file version {data['version']!r} in "
+            f"Unsupported profile file version {data.get('version')!r} in "
             f"{path} (expected {FORMAT_VERSION})."
         )
     try:
@@ -272,7 +249,7 @@ def load_store() -> ProfileStore:
     `save_store`.
 
     Raises:
-        ProfileError: If the file is missing, empty, old-format or invalid.
+        ProfileError: If the file is missing, empty or invalid.
     """
     return copy.deepcopy(_load_store_cached(PROFILE_FILE))
 
@@ -569,135 +546,6 @@ def add_profile(
 
 
 # ---------- interactive prompts ----------
-
-
-@lru_cache(maxsize=None)
-def _prompt_toolkit_extras() -> tuple[Any, Any]:
-    """Build the prompt style and key bindings.
-
-    prompt_toolkit is slow to import, so it is only loaded for a prompt.
-    """
-    from prompt_toolkit.key_binding import KeyBindings, KeyPressEvent
-    from prompt_toolkit.styles import Style
-
-    style = Style.from_dict(
-        {
-            "completion-menu": "bg:#2b2e3b",
-            "completion-menu.completion": "bg:#2b2e3b #c0caf5",
-            "completion-menu.completion.current": "bg:#3b4252 #ffffff",
-            "scrollbar.background": "bg:#3b4252",
-            "scrollbar.button": "bg:#ffffff",
-            "prompt": "bold",
-        }
-    )
-    kb = KeyBindings()
-
-    @kb.add("enter")
-    def _(event: KeyPressEvent) -> None:
-        """Enter accepts the open completion, otherwise submits."""
-        buf = event.current_buffer
-        if getattr(buf, "completer", None) is not None and buf.complete_state:
-            comp = buf.complete_state.current_completion
-            if comp is not None:
-                buf.apply_completion(comp)
-        else:
-            buf.validate_and_handle()
-
-    @kb.add("tab")
-    def _(event: KeyPressEvent) -> None:
-        """Tab opens/cycles completions, if the prompt has a completer."""
-        buf = event.current_buffer
-        if getattr(buf, "completer", None) is not None:
-            if buf.complete_state:
-                buf.complete_next()
-            else:
-                buf.start_completion(select_first=True)
-
-    return style, kb
-
-
-def ask(
-    label: str,
-    default: str = "",
-    kind: str = "text",
-    must_exist: bool = False,
-    check: Callable[[str], Any] | None = None,
-) -> str:
-    """Prompt the user for a value.
-
-    Path prompts (``kind`` "dir" or "file") have tab completion; while the
-    completion menu is open Enter applies the highlighted completion. A bad
-    answer is reported and the question asked again.
-
-    When stdin is not a terminal (answers piped in), one line is read per
-    question and an empty line means the default; a bad answer is an error.
-
-    Args:
-        label: The prompt text.
-        default: The pre-filled default value.
-        kind: "text", "dir" or "file".
-        must_exist: Reject paths that do not exist (blank is allowed).
-        check: Called with the answer; raising ValueError rejects it with
-            that message.
-
-    Returns:
-        str: The stripped answer.
-
-    Raises:
-        EOFError: If stdin is closed.
-        ProfileError: For a bad piped answer.
-    """
-
-    def problem(text: str) -> str | None:
-        if must_exist and text and not Path(text).expanduser().exists():
-            return f"Path does not exist: {text}"
-        if check is not None:
-            try:
-                check(text)
-            except ValueError as e:
-                return str(e)
-        return None
-
-    if not sys.stdin.isatty():
-        text = input(label).strip() or default
-        error = problem(text)
-        if error:
-            raise ProfileError(f"{label.strip()} {error}")
-        return text
-
-    from prompt_toolkit import PromptSession
-    from prompt_toolkit.completion import PathCompleter
-    from prompt_toolkit.document import Document
-    from prompt_toolkit.validation import ValidationError, Validator
-
-    class _Check(Validator):
-        def validate(self, document: Document) -> None:
-            error = problem(document.text.strip())
-            if error:
-                raise ValidationError(
-                    message=error, cursor_position=len(document.text)
-                )
-
-    style, kb = _prompt_toolkit_extras()
-    is_path = kind != "text"
-    session: PromptSession[str] = PromptSession(
-        style=style,
-        key_bindings=kb if is_path else None,
-        complete_while_typing=False,
-        reserve_space_for_menu=8 if is_path else 0,
-    )
-    completer = (
-        PathCompleter(expanduser=True, only_directories=kind == "dir")
-        if is_path
-        else None
-    )
-    return session.prompt(
-        [("class:prompt", label)],
-        default=default,
-        completer=completer,
-        validator=_Check(),
-        validate_while_typing=False,
-    ).strip()
 
 
 def confirm(question: str) -> bool:

@@ -1,12 +1,16 @@
 """Profile mode for managing SWIFT profiles (one git worktree each)."""
 
 import argparse
-import functools
+import os
 import shlex
 import shutil
 import subprocess
+import tempfile
 from pathlib import Path
 from typing import Any
+
+from ruamel.yaml import YAML
+from ruamel.yaml.error import YAMLError
 
 from swiftsim_cli import profile as profile_mod
 from swiftsim_cli.modes.common_args import (
@@ -18,7 +22,6 @@ from swiftsim_cli.profile import (
     ProfileStore,
     SWIFTCLIProfile,
     add_profile,
-    ask,
     check_new_profile_name,
     confirm,
     fetch_for_upstream,
@@ -27,7 +30,6 @@ from swiftsim_cli.profile import (
     list_worktrees,
     load_store,
     main_clone_of,
-    read_raw_profile_file,
     ref_exists,
     save_store,
 )
@@ -42,31 +44,20 @@ from swiftsim_cli.utilities.tables import create_ascii_table
 
 DEFAULT_UPSTREAM = "origin/master"
 
-# Profile settings set by --init/--edit prompts or --set KEY=VALUE, in
-# prompt order, with their prompt labels and kinds
-SETTINGS = {
-    "upstream": ("Upstream branch: ", "text"),
-    "configure_flags": ("Configure flags: ", "text"),
-    "data_dir": ("Extra data directory: ", "dir"),
-    "parameter_file": (
-        "Parameter file (blank: <worktree>/examples/parameter_example.yml): ",
-        "file",
-    ),
-    "softening_coeff": ("Softening (in units of mean separation): ", "text"),
-    "softening_pivot_z": ("Maximal softening pivot redshift: ", "text"),
-}
+# Profile settings changed by --edit (in the editor or with --set KEY=VALUE)
+SETTINGS = (
+    "upstream",
+    "configure_flags",
+    "data_dir",
+    "parameter_file",
+    "softening_coeff",
+    "softening_pivot_z",
+)
 
 
 def add_arguments(parser: argparse.ArgumentParser) -> None:
     """Add arguments for the profile mode."""
     action = parser.add_mutually_exclusive_group()
-    action.add_argument(
-        "-i",
-        "--init",
-        action="store_true",
-        help="Set up the main SWIFT clone and first profile (interactive "
-        "unless --repo is given).",
-    )
     action.add_argument(
         "-n",
         "--new",
@@ -83,7 +74,8 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         "-e",
         "--edit",
         metavar="NAME",
-        help="Edit a profile (interactive unless --set is given).",
+        help="Edit a profile in $VISUAL/$EDITOR (or only the given --set "
+        "values).",
     )
     action.add_argument(
         "-r",
@@ -121,11 +113,6 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         help="Update and build every profile, then print a summary.",
     )
     action.add_argument(
-        "--migrate",
-        action="store_true",
-        help="Convert an old-format profile file to the worktree format.",
-    )
-    action.add_argument(
         "--adopt",
         type=existing_dir,
         metavar="DIR",
@@ -137,48 +124,35 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--name",
         metavar="NAME",
-        help="Profile name for --adopt, and the first profile's name for "
-        "--init (default: default).",
+        help="Profile name for --adopt.",
     )
     parser.add_argument(
         "--upstream",
         default=DEFAULT_UPSTREAM,
         metavar="BRANCH",
-        help=f"Upstream branch for --new and --init (default: "
-        f"{DEFAULT_UPSTREAM}).",
+        help=f"Upstream branch for --new (default: {DEFAULT_UPSTREAM}).",
     )
     parser.add_argument(
         "--configure-flags",
         default="",
         metavar="FLAGS",
-        help="Configure flags for --new and --init, as one string, e.g. "
+        help="Configure flags for --new, as one string, e.g. "
         '--configure-flags="--enable-debug --with-hydro=sphenix".',
-    )
-    parser.add_argument(
-        "--repo",
-        metavar="DIR",
-        help="Main SWIFT clone for --init; makes --init non-interactive.",
-    )
-    parser.add_argument(
-        "--worktree-root",
-        metavar="DIR",
-        help="Directory profile worktrees are created in, for --init and "
-        "--migrate (default: swiftsim-profiles next to the main clone).",
     )
     parser.add_argument(
         "--set",
         action="append",
         default=[],
         metavar="KEY=VALUE",
-        help="Set a profile setting without prompting, for --edit and "
-        f"--init (repeatable). KEY is one of: {', '.join(SETTINGS)}.",
+        help="Set a profile setting without prompting, for --edit "
+        f"(repeatable). KEY is one of: {', '.join(SETTINGS)}.",
     )
     parser.add_argument(
         "-y",
         "--yes",
         action="store_true",
-        help="Answer yes to the confirmation of --remove, --migrate and "
-        "--init (--remove then keeps the profile's branch).",
+        help="Answer yes to the confirmation of --remove (which then keeps "
+        "the profile's branch).",
     )
     parser.add_argument(
         "--reuse-branch",
@@ -207,17 +181,7 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
 def run(args: argparse.Namespace) -> None:
     """Execute the profile mode."""
     settings = parse_settings(args.set)
-    if args.init:
-        init_profiles(
-            repo=args.repo,
-            worktree_root=args.worktree_root,
-            name=args.name,
-            upstream=args.upstream,
-            configure_flags=args.configure_flags,
-            settings=settings,
-            yes=args.yes,
-        )
-    elif args.new is not None:
+    if args.new is not None:
         new_profile(
             args.new,
             upstream=args.upstream,
@@ -238,8 +202,6 @@ def run(args: argparse.Namespace) -> None:
         update_profile(get_profile(args.update or None), args.nr_threads)
     elif args.update_all:
         update_all_profiles(args.nr_threads)
-    elif args.migrate:
-        migrate_profiles(yes=args.yes, worktree_root=args.worktree_root)
     elif args.adopt is not None:
         if not args.name:
             raise ProfileError("--adopt requires --name NAME.")
@@ -308,17 +270,44 @@ def check_setting(key: str, text: str) -> None:
             raise ProfileError(f"configure_flags: {e}") from None
 
 
-def _ask_settings(defaults: dict[str, str]) -> dict[str, str]:
-    """Prompt for every profile setting, checking each answer."""
-    values = {}
-    for key, (label, kind) in SETTINGS.items():
-        values[key] = ask(
-            label,
-            default=defaults[key],
-            kind=kind,
-            check=functools.partial(check_setting, key),
+def _edit_in_editor(name: str, values: dict[str, str]) -> dict[str, str]:
+    """Open the settings in ``$VISUAL``/``$EDITOR`` and return the edits.
+
+    Returns:
+        The settings whose value changed, already checked.
+
+    Raises:
+        ProfileError: For unknown keys or bad values in the edited file.
+    """
+    editor = os.environ.get("VISUAL") or os.environ.get("EDITOR") or "vi"
+    yaml = YAML(typ="safe")
+    yaml.default_flow_style = False
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / f"{name}.yaml"
+        with path.open("w") as f:
+            f.write(
+                f"# Profile '{name}'. Save and quit to apply; blank paths "
+                "use the defaults.\n"
+            )
+            yaml.dump(values, f)
+        subprocess.run([*shlex.split(editor), str(path)], check=True)
+        try:
+            edited = yaml.load(path) or {}
+        except YAMLError as e:
+            raise ProfileError(
+                f"Could not read the edited profile:\n{e}"
+            ) from e
+    if not isinstance(edited, dict) or set(edited) - set(SETTINGS):
+        raise ProfileError(
+            f"The edited profile may only contain: {', '.join(SETTINGS)}."
         )
-    return values
+    changed = {}
+    for key, value in edited.items():
+        text = "" if value is None else str(value).strip()
+        if text != values[key]:
+            check_setting(key, text)
+            changed[key] = text
+    return changed
 
 
 def _apply_settings(p: SWIFTCLIProfile, values: dict[str, str]) -> None:
@@ -346,141 +335,6 @@ def _apply_settings(p: SWIFTCLIProfile, values: dict[str, str]) -> None:
         p.softening_coeff = float(values["softening_coeff"])
     if "softening_pivot_z" in values:
         p.softening_pivot_z = float(values["softening_pivot_z"])
-
-
-def init_profiles(
-    repo: str | None = None,
-    worktree_root: str | None = None,
-    name: str | None = None,
-    upstream: str = DEFAULT_UPSTREAM,
-    configure_flags: str = "",
-    settings: dict[str, str] | None = None,
-    yes: bool = False,
-) -> None:
-    """Set up the main SWIFT clone and a first profile.
-
-    Interactive unless ``repo`` is given, in which case the other arguments
-    (or their defaults) are used without prompting. Existing profiles are
-    always kept, and must all use the same main clone.
-
-    Args:
-        repo: The main SWIFT clone (makes this non-interactive).
-        worktree_root: Where profile worktrees are created.
-        name: The first profile's name (default: "default").
-        upstream: The first profile's upstream branch.
-        configure_flags: The first profile's configure flags, as one string.
-        settings: Further settings (``--set``), already checked.
-        yes: Skip the confirmation when a profile file already exists.
-    """
-    interactive = repo is None
-    if interactive:
-        print("\nWelcome to SWIFTsim-CLI!\n")
-        print("\n".join(ascii_art))
-        print("\nLet's set up your profiles...\n")
-
-    raw = read_raw_profile_file()
-    existing: ProfileStore | None = None
-    if raw is not None:
-        if profile_mod.is_legacy_format(raw):
-            raise ProfileError(
-                f"{profile_mod.PROFILE_FILE} uses the old profile format. "
-                "Run 'swift-cli profile --migrate' instead."
-            )
-        existing = load_store()
-        names = ", ".join(existing.profiles) or "(none)"
-        if not (
-            yes
-            or confirm(
-                f"{profile_mod.PROFILE_FILE} already exists (profiles: "
-                f"{names}). Existing profiles will be kept. Continue?"
-            )
-        ):
-            print("Aborting.")
-            return
-
-    # Every profile is a worktree of one clone: it can't change under them
-    locked = existing is not None and bool(existing.profiles)
-    if locked and existing is not None:
-        if repo is not None and _path(repo) != existing.repo.resolve():
-            raise ProfileError(
-                f"Existing profiles ({', '.join(existing.profiles)}) are "
-                f"worktrees of {existing.repo}; the main clone can't change "
-                "while they exist. Remove them first, or use that clone."
-            )
-        clone = existing.repo
-        print(f"Main SWIFT clone: {clone} (used by the existing profiles)")
-    elif interactive:
-        clone = _path(
-            ask(
-                "Main SWIFT clone: ",
-                default=str(existing.repo) if existing else "",
-                kind="dir",
-                must_exist=True,
-            )
-        )
-    else:
-        clone = _path(str(repo))
-    if not clone.is_dir():
-        raise ProfileError(f"Main SWIFT clone not found: {clone}")
-    git("rev-parse", "--git-dir", cwd=clone)  # fail early if not a repo
-
-    default_root = str(
-        existing.worktree_root
-        if existing
-        else clone.parent / "swiftsim-profiles"
-    )
-    store = existing or ProfileStore(repo=clone, worktree_root=Path())
-    store.repo = clone
-    defaults = {
-        "upstream": upstream,
-        "configure_flags": configure_flags,
-        "data_dir": str(clone.parent),
-        "parameter_file": "",
-        "softening_coeff": "0.04",
-        "softening_pivot_z": "2.7",
-        **(settings or {}),
-    }
-    if interactive:
-        root = ask(
-            "Worktree root: ",
-            default=worktree_root or default_root,
-            kind="dir",
-        )
-        name = ask(
-            "First profile name: ",
-            default=name or "default",
-            check=lambda text: check_new_profile_name(store, text),
-        )
-        values = _ask_settings(defaults)
-    else:
-        root = worktree_root or default_root
-        name = name or "default"
-        values = defaults
-        for key, value in values.items():
-            check_setting(key, value)
-    store.worktree_root = _path(root)
-
-    add_profile(
-        store,
-        name,
-        values["upstream"],
-        configure_flags=shlex.split(values["configure_flags"]),
-        data_dir=_path(values["data_dir"]) if values["data_dir"] else None,
-        parameter_file=(
-            _path(values["parameter_file"])
-            if values["parameter_file"]
-            else None
-        ),
-        softening_coeff=float(values["softening_coeff"]),
-        softening_pivot_z=float(values["softening_pivot_z"]),
-    )
-    store.current = name
-    save_store(store)
-    print(
-        f"\nCreated profile '{name}'. Profiles saved to "
-        f"{profile_mod.PROFILE_FILE}"
-    )
-    print("Build it with: swift-cli make -j <N>")
 
 
 def new_profile(
@@ -579,7 +433,7 @@ def _change_upstream(p: SWIFTCLIProfile, upstream: str) -> None:
 
 
 def edit_profile(name: str, settings: dict[str, str] | None = None) -> None:
-    """Edit a profile, interactively unless ``settings`` is given.
+    """Edit a profile in the user's editor unless ``settings`` is given.
 
     Changing the upstream moves the profile's branch to it (if the branch
     has no commits of its own); changing the configure flags makes the next
@@ -588,15 +442,13 @@ def edit_profile(name: str, settings: dict[str, str] | None = None) -> None:
     Args:
         name: The profile to edit.
         settings: Settings to change (``--set``), already checked; only
-            these are changed and nothing is prompted for.
+            these are changed and no editor is opened.
     """
     store = load_store()
     p = store.get(name)
     if settings is None:
-        print(
-            f"Editing profile '{name}'. Press Enter to keep existing values.\n"
-        )
-        values = _ask_settings(
+        values = _edit_in_editor(
+            name,
             {
                 "upstream": p.upstream or "",
                 "configure_flags": shlex.join(p.configure_flags),
@@ -604,8 +456,11 @@ def edit_profile(name: str, settings: dict[str, str] | None = None) -> None:
                 "parameter_file": str(p.parameter_file or ""),
                 "softening_coeff": str(p.softening_coeff),
                 "softening_pivot_z": str(p.softening_pivot_z),
-            }
+            },
         )
+        if not values:
+            print(f"Profile '{name}' unchanged.")
+            return
     else:
         values = settings
 
@@ -828,227 +683,6 @@ def update_all_profiles(nr_threads: int = 1) -> None:
     if failed:
         raise ProfileError(
             f"{len(failed)} profile(s) failed to update: {', '.join(failed)}"
-        )
-
-
-def _resolve_legacy_upstream(repo: Path, branch: str) -> str:
-    """Pick the upstream for a migrated branch (prefer origin/<branch>)."""
-    if ref_exists(repo, f"refs/remotes/origin/{branch}"):
-        return f"origin/{branch}"
-    if ref_exists(repo, f"refs/heads/{branch}"):
-        return branch
-    return f"origin/{branch}"
-
-
-# Timer databases of the old log analysis, superseded by the timing
-# package's cache (cache/<profile>/timer_db/).
-LEGACY_TIMER_FILES = ("timers.yaml", "timer_nesting.yaml")
-
-
-def _legacy_timer_files() -> list[Path]:
-    """Old timer databases in the profile dir root and cache/<profile>/."""
-    base = profile_mod.PROFILE_FILE.parent
-    cache = base / "cache"
-    dirs = [base]
-    if cache.is_dir():
-        dirs += sorted(p for p in cache.iterdir() if p.is_dir())
-    return [
-        d / name
-        for d in dirs
-        for name in LEGACY_TIMER_FILES
-        if (d / name).is_file()
-    ]
-
-
-# Keys of the old profile format that are migrated; others are reported
-LEGACY_KEYS = {
-    "swiftsim_dir",
-    "branch",
-    "data_dir",
-    "parameter_file",
-    "template_parameter_file",
-    "template_params",
-    "softening_coeff",
-    "softening_pivot_z",
-}
-
-
-def _other_files(skip: list[Path]) -> list[Path]:
-    """Files in the profile directory that swift-cli does not use."""
-    base = profile_mod.PROFILE_FILE.parent
-    used = {profile_mod.PROFILE_FILE.name, "profiles.yaml.bak", "cache"}
-    return sorted(
-        path
-        for path in base.iterdir()
-        if path.name not in used and path not in skip
-    )
-
-
-def migrate_profiles(
-    yes: bool = False, worktree_root: str | None = None
-) -> None:
-    """Convert an old-format profile file into version 2.
-
-    Each old named profile (``Default`` becomes ``default``) gets its own
-    worktree tracking ``origin/<old branch>``. An old ``Current`` profile on
-    a branch no named profile uses becomes the profile ``current``. Nothing
-    is changed unless at least one profile migrates: then the old file is
-    backed up to ``profiles.yaml.bak`` and old timer databases
-    (``timers.yaml``, ``timer_nesting.yaml``) are deleted. Rerunning after
-    an interrupted migration reuses the worktrees already created.
-
-    Args:
-        yes: Skip the confirmation.
-        worktree_root: Where to create the worktrees (default:
-            ``swiftsim-profiles`` next to the main clone).
-    """
-    raw = read_raw_profile_file()
-    if raw is None:
-        raise ProfileError(
-            "No profile file to migrate. Run 'swift-cli profile --init'."
-        )
-    if not profile_mod.is_legacy_format(raw):
-        print("Profile file is already in the current format.")
-        return
-
-    old_current = raw.get("Current") or {}
-    named = {
-        ("default" if key == "Default" else str(key)): entry
-        for key, entry in raw.items()
-        if key != "Current" and isinstance(entry, dict)
-    }
-    if (
-        old_current
-        and "current" not in named
-        and not any(
-            entry.get("branch") == old_current.get("branch")
-            for entry in named.values()
-        )
-    ):
-        named["current"] = old_current
-    if not named:
-        raise ProfileError("No named profiles found to migrate.")
-    old_repo = old_current.get("swiftsim_dir") or next(
-        iter(named.values())
-    ).get("swiftsim_dir")
-    if not old_repo:
-        raise ProfileError("Could not find 'swiftsim_dir' in the old file.")
-    repo = Path(old_repo)
-    root = (
-        _path(worktree_root)
-        if worktree_root
-        else repo.parent / "swiftsim-profiles"
-    )
-
-    plan = {
-        name: _resolve_legacy_upstream(repo, entry.get("branch") or "master")
-        for name, entry in named.items()
-    }
-    current = next(
-        (
-            name
-            for name, entry in named.items()
-            if entry.get("swiftsim_dir") == old_current.get("swiftsim_dir")
-            and entry.get("branch") == old_current.get("branch")
-        ),
-        "default" if "default" in named else next(iter(named)),
-    )
-
-    print(f"Main SWIFT clone: {repo}\nWorktree root:    {root}\n")
-    rows = [
-        [name, upstream, str(root / name), "yes" if name == current else ""]
-        for name, upstream in plan.items()
-    ]
-    print(
-        create_ascii_table(
-            ["Profile", "Upstream", "Worktree", "Current"],
-            rows,
-            title="MIGRATION PLAN",
-        )
-    )
-    if "current" in named and named["current"] is old_current:
-        note(
-            f"the old 'Current' profile (branch {old_current.get('branch')}) "
-            "matches no named profile, so it becomes the profile 'current'."
-        )
-    dropped = {
-        name: sorted(str(k) for k in set(entry) - LEGACY_KEYS)
-        for name, entry in named.items()
-    }
-    dropped = {name: keys for name, keys in dropped.items() if keys}
-    if dropped:
-        note(
-            "these old settings are no longer stored in profiles and will "
-            "not be migrated (the cosmology now comes from the parameter "
-            "file): "
-            + "; ".join(f"{n}: {', '.join(k)}" for n, k in dropped.items())
-        )
-    legacy = _legacy_timer_files()
-    if legacy:
-        print("Old timer databases to delete (no longer used):")
-        for path in legacy:
-            print(f"  {path}")
-    others = _other_files(legacy)
-    if others:
-        note(
-            f"other files in {profile_mod.PROFILE_FILE.parent} are not used "
-            "by swift-cli and are left alone: "
-            + ", ".join(path.name for path in others)
-        )
-    if not (yes or confirm("Proceed with the migration?")):
-        print("Aborting.")
-        return
-
-    store = ProfileStore(repo=repo, worktree_root=root)
-    failed = []
-    for name, upstream in plan.items():
-        entry = named[name]
-        param = (
-            entry.get("parameter_file")
-            or entry.get("template_parameter_file")
-            or entry.get("template_params")
-        )
-        param_path = Path(param) if param else None
-        if param_path is not None and param_path.is_relative_to(repo):
-            # Point at the same file inside the new worktree
-            param_path = root / name / param_path.relative_to(repo)
-        try:
-            add_profile(
-                store,
-                name,
-                upstream,
-                data_dir=Path(entry["data_dir"])
-                if entry.get("data_dir")
-                else None,
-                parameter_file=param_path,
-                softening_coeff=float(entry.get("softening_coeff", 0.04)),
-                softening_pivot_z=float(entry.get("softening_pivot_z", 2.7)),
-                reuse_branch=True,
-            )
-        except (ProfileError, ValueError) as e:
-            warn(f"could not migrate '{name}': {e}")
-            failed.append(name)
-    if not store.profiles:
-        raise ProfileError(
-            "No profile could be migrated (see above); nothing was changed."
-        )
-
-    backup = profile_mod.PROFILE_FILE.with_suffix(".yaml.bak")
-    shutil.copy2(profile_mod.PROFILE_FILE, backup)
-    print(f"Backed up old profile file to {backup}")
-    store.current = (
-        current if current in store.profiles else next(iter(store.profiles))
-    )
-    save_store(store)
-    print(f"Migrated {len(store.profiles)} profile(s).")
-    for path in legacy:
-        path.unlink()
-    if legacy:
-        print(f"Deleted {len(legacy)} old timer database file(s).")
-    if failed:
-        raise ProfileError(
-            f"Failed to migrate: {', '.join(failed)} (see above; the old file "
-            f"is at {backup}). Add them with 'swift-cli profile --new'."
         )
 
 

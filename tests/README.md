@@ -76,8 +76,8 @@ skipped unless `SWIFT_SRC` is set.
 - **test_profile_workflows.py**: whole profile workflows against temporary
   git repositories: chained `update ... make` building once, update safety
   (autostash conflicts, no upstream, mid-rebase worktrees), `show`
-  cosmology, non-interactive `--init`/`--edit --set`, upstream changes,
-  `--remove`/`--adopt` safety, migration and user-facing messages
+  cosmology, non-interactive `--edit --set`, upstream changes,
+  `--remove`/`--adopt` safety and user-facing messages
 - **test_modes_new.py**: `new`, including every bundled template in
   `src/swiftsim_cli/templates` passing the SWIFT parser checks, template
   selection from the ICs, zoom softenings and `--check`

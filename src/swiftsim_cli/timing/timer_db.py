@@ -1039,7 +1039,7 @@ def resolve_timer_db(
     if root is None:
         raise ValueError(
             "Cannot build the timer database: the active profile has no "
-            "SWIFT checkout. Run 'swift-cli profile --init' or pass "
+            "SWIFT checkout. Run 'swift-cli init' or pass "
             "--swift-src."
         )
     head = _git_head(root)

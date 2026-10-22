@@ -22,12 +22,6 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         action="store_true",
         help="Show only the cosmology from the parameter file.",
     )
-    parser.add_argument(
-        "--all",
-        action="store_true",
-        help="Show the profile and cosmology (the default; kept for "
-        "compatibility).",
-    )
 
 
 def run(args: argparse.Namespace) -> None:
