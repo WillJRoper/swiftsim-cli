@@ -7,6 +7,7 @@ the active profile's worktree, resolved by `get_swiftsim_dir`.
 import difflib
 import json
 import re
+import shlex
 import subprocess
 import sys
 from pathlib import Path
@@ -20,7 +21,7 @@ from swiftsim_cli.profile import (
     git,
     update_profile_fields,
 )
-from swiftsim_cli.utilities import run_command_in_dir
+from swiftsim_cli.utilities.io import run_command_in_dir
 
 # Matches an option at the start of a `./configure --help` line, e.g.
 # "  --enable-debug=[yes/no]" or "  -h, --help". Placeholder entries such as
@@ -28,6 +29,28 @@ from swiftsim_cli.utilities import run_command_in_dir
 _CONFIGURE_OPTION_RE = re.compile(
     r"^\s+(?:-\w, )?(--[a-z0-9][a-z0-9_-]*[a-z0-9])(?=[\s=\[,]|$)"
 )
+
+# A ``VAR=value`` argument to ./configure (e.g. ``CC=gcc``)
+_ENV_ASSIGN_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*=")
+
+# How to recreate a profile whose worktree is missing or unset
+_RECREATE_HINT = (
+    "Recreate the profile with 'swift-cli profile --remove NAME' then "
+    "'swift-cli profile --new NAME', register an existing checkout with "
+    "'swift-cli profile --adopt DIR --name NAME', or pick another profile "
+    "with 'swift-cli --profile NAME ...'."
+)
+
+
+class CommandError(ProfileError):
+    """A build command failed; ``returncode`` is the exit code to use."""
+
+    def __init__(self, message: str, returncode: int) -> None:
+        """Store the message and the shell-style exit code."""
+        super().__init__(message)
+        # A negative code means death by signal: report it like a shell
+        self.returncode = 128 - returncode if returncode < 0 else returncode
+
 
 # autoconf accepts the complement of every enable/with option
 _COMPLEMENTS = (
@@ -54,10 +77,14 @@ def get_swiftsim_dir(swift_dir: Path | None = None) -> Path:
         swift_dir = get_profile().worktree
 
     if swift_dir is None:
-        raise ValueError("The active profile has no worktree set.")
+        raise ValueError(
+            f"The active profile has no worktree set. {_RECREATE_HINT}"
+        )
 
     if not swift_dir.exists():
-        raise FileNotFoundError(f"SWIFT directory does not exist: {swift_dir}")
+        raise FileNotFoundError(
+            f"SWIFT directory does not exist: {swift_dir}. {_RECREATE_HINT}"
+        )
 
     return swift_dir
 
@@ -67,16 +94,17 @@ def _run_command_in_swift_dir(command: Sequence[str], swift_dir: Path) -> None:
 
     Raises:
         FileNotFoundError: If the SWIFT directory does not exist.
-        ProfileError: If the command fails.
+        CommandError: If the command fails (carrying its exit code).
     """
     swift_dir = get_swiftsim_dir(swift_dir)
     sys.stdout.flush()  # keep our messages ordered before the tool's
     try:
         run_command_in_dir(command, swift_dir)
     except subprocess.CalledProcessError as e:
-        raise ProfileError(
-            f"'{' '.join(command)}' failed (exit code {e.returncode}) "
-            f"in {swift_dir}"
+        raise CommandError(
+            f"'{shlex.join(command)}' failed (exit code {e.returncode}) "
+            f"in {swift_dir}",
+            e.returncode,
         ) from e
 
 
@@ -143,16 +171,26 @@ def validate_configure_flags(
 ) -> None:
     """Check configure flags against the options ``./configure`` accepts.
 
-    Arguments not starting with ``--`` (e.g. ``CC=gcc``) are not checked.
+    Every argument must be an option (``--opt`` or ``--opt=value``; short
+    ``-x`` options are not checked) or a ``VAR=value`` assignment.
 
     Raises:
-        ProfileError: Listing unknown flags with close-match suggestions.
+        ProfileError: Listing bad arguments with suggestions.
     """
-    known = get_configure_options(worktree, profile_name)
     problems = []
-    for flag in flags:
-        if not flag.startswith("--"):
+    for i, flag in enumerate(flags):
+        if flag.startswith("-") or _ENV_ASSIGN_RE.match(flag):
             continue
+        prev = flags[i - 1] if i else ""
+        hint = (
+            f" (did you mean {prev}={flag}?)"
+            if prev.startswith("--") and "=" not in prev
+            else ""
+        )
+        problems.append(f"  {flag} (not an option or VAR=value){hint}")
+    options = [f for f in flags if f.startswith("--")]
+    known = get_configure_options(worktree, profile_name) if options else set()
+    for flag in options:
         name = flag.split("=", 1)[0]
         if name in known:
             continue
@@ -161,9 +199,10 @@ def validate_configure_flags(
         problems.append(f"  {flag}{hint}")
     if problems:
         raise ProfileError(
-            "Unknown configure option(s):\n"
+            "Invalid configure argument(s):\n"
             + "\n".join(problems)
-            + "\nRun 'swift-cli config --show' to list valid options."
+            + "\nOption values go after '=', e.g. --with-hydro=sphenix. Run "
+            "'swift-cli config --list-options' to list valid options."
         )
 
 
@@ -190,7 +229,12 @@ def configure_profile(
     """
     worktree = get_swiftsim_dir(profile.worktree)
     flags = list(profile.configure_flags if flags is None else flags)
+    ensure_configure_script(worktree)
     validate_configure_flags(flags, worktree, profile.name)
+    print(
+        f"Configuring profile '{profile.name}' with: "
+        f"{shlex.join(flags) or '(no flags)'}"
+    )
     _run_command_in_swift_dir(["./configure", *flags], worktree)
     update_profile_fields(
         profile.name, configure_flags=flags, configured_flags=flags
@@ -210,12 +254,19 @@ def run_make(worktree: Path, nr_threads: int = 1, clean: bool = False) -> None:
 def build_profile(
     profile: SWIFTCLIProfile, nr_threads: int = 1, clean: bool = False
 ) -> None:
-    """Build a profile, (re)configuring first if needed."""
+    """Build a profile, (re)configuring first if needed.
+
+    Raises:
+        ProfileError: If the worktree is mid-rebase or has unresolved
+            conflicts, or configure/make fails.
+    """
     if nr_threads < 1:
         raise ValueError("Number of threads must be at least 1.")
     worktree = get_swiftsim_dir(profile.worktree)
+    check_buildable(worktree)
     if needs_configure(profile):
         configure_profile(profile)
+    print(f"Building profile '{profile.name}' with make -j {nr_threads}")
     run_make(worktree, nr_threads, clean)
 
 
@@ -228,15 +279,65 @@ def _rebase_in_progress(worktree: Path) -> bool:
     return False
 
 
-def update_profile(profile: SWIFTCLIProfile, nr_threads: int = 1) -> None:
-    """Pull (rebasing local commits onto upstream), then build a profile.
+def _conflicted_files(worktree: Path) -> list[str]:
+    """Files with unresolved merge conflicts in a worktree."""
+    out = git("diff", "--name-only", "--diff-filter=U", cwd=worktree)
+    return out.splitlines()
+
+
+def check_buildable(worktree: Path) -> None:
+    """Refuse to build a worktree that is mid-rebase or has conflicts.
 
     Raises:
-        ProfileError: If the pull/rebase fails (nothing is built) or the
-            build fails.
+        ProfileError: Saying how to finish or undo the operation.
     """
+    if _rebase_in_progress(worktree):
+        raise ProfileError(
+            f"A rebase is in progress in {worktree}; finish it ('git rebase "
+            "--continue') or undo it ('git rebase --abort') before building."
+        )
+    conflicted = _conflicted_files(worktree)
+    if conflicted:
+        raise ProfileError(
+            f"{worktree} has unresolved conflicts in: {', '.join(conflicted)}"
+            ". Resolve them and 'git add' the files before building."
+        )
+
+
+def update_profile(
+    profile: SWIFTCLIProfile, nr_threads: int = 1, build: bool = True
+) -> None:
+    """Pull (rebasing local commits onto upstream), then build a profile.
+
+    Args:
+        profile: The profile to update.
+        nr_threads: Number of make threads.
+        build: Whether to (re)configure and build after pulling.
+
+    Raises:
+        ProfileError: If the branch has no upstream, the pull/rebase fails
+            or leaves conflicts (nothing is built), or the build fails.
+    """
+    if nr_threads < 1:
+        raise ValueError("Number of threads must be at least 1.")
     worktree = get_swiftsim_dir(profile.worktree)
-    print(f"Updating profile '{profile.name}' from {profile.upstream}...")
+    try:
+        tracking = git(
+            "rev-parse",
+            "--abbrev-ref",
+            "--symbolic-full-name",
+            "@{upstream}",
+            cwd=worktree,
+        )
+    except ProfileError:
+        raise ProfileError(
+            f"Profile '{profile.name}' has no upstream branch to update "
+            f"from (branch {profile.branch} tracks nothing). Set one with "
+            f"'swift-cli profile --edit {profile.name} "
+            "--set upstream=origin/master'."
+        ) from None
+    print(f"Updating profile '{profile.name}' from {tracking}...")
+    old_head = git("rev-parse", "HEAD", cwd=worktree)
     if git("status", "--porcelain", "--untracked-files=no", cwd=worktree):
         print(
             f"Uncommitted changes in {worktree} will be stashed for the "
@@ -255,4 +356,26 @@ def update_profile(profile: SWIFTCLIProfile, nr_threads: int = 1) -> None:
             "  git rebase --continue   # or 'git rebase --abort' to undo\n"
             f"then rerun 'swift-cli profile --update {profile.name}'."
         ) from e
-    build_profile(profile, nr_threads)
+    conflicted = _conflicted_files(worktree)
+    if conflicted:
+        # git leaves the autostash in the stash list when re-applying it
+        # conflicts, but still exits 0
+        raise ProfileError(
+            f"Updated profile '{profile.name}', but re-applying your "
+            f"uncommitted changes conflicted in: {', '.join(conflicted)}. "
+            "Nothing was built. To fix:\n"
+            f"  cd {worktree}\n"
+            "  # resolve the conflicts, then 'git add <files>'\n"
+            "  git stash drop   # git kept a copy of your changes until now\n"
+            f"then rerun 'swift-cli make' (or 'swift-cli profile --update "
+            f"{profile.name}')."
+        )
+    if git("rev-parse", "HEAD", cwd=worktree) == old_head:
+        print(f"Already up to date with {tracking}.")
+    else:
+        count = git(
+            "rev-list", "--count", f"{old_head}..@{{upstream}}", cwd=worktree
+        )
+        print(f"Pulled {count} new commit(s) from {tracking}.")
+    if build:
+        build_profile(profile, nr_threads)

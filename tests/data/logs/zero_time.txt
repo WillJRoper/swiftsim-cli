@@ -1,0 +1,7 @@
+[00001.0] engine_print_task_counts: took 0.000 ms.
+[00001.0] engine_collect_end_of_step: took 0.000 ms.
+#   Step           Time Scale-factor     Redshift      Time-step Time-bins      Updates    g-Updates    s-Updates sink-Updates    b-Updates  Wall-clock time [ms]  Props    Dead time [ms] 
+       0   1.225990e-05    0.0078125  127.0000000   0.000000e+00    1   56            0     54990454            0            0            0                 0.000    265           495.008
+[00001.0] engine_launch: (tasks) took 0.000 ms.
+[00001.0] engine_collect_end_of_step: took 0.000 ms.
+       1   1.225990e-05    0.0078125  127.0000000   0.000000e+00    1   56            0     54990454            0            0            0                 0.000    265           495.008

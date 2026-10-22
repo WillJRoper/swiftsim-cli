@@ -1,0 +1,64 @@
+description: >
+  Float conversions (%f, %e, %g, %lf, widths), the %s unit converted from
+  ms/s/us/ns, literal units ("ms", "s", "seconds") converted to ms, a
+  unitless time (taken as ms) and integer times (%d is the time when no
+  float follows "took"; text after it, e.g. "ticks", makes an operation).
+functions:
+  zoom_region_init: [3, 8]
+  spec_variants: [10, 20]
+  literal_units: [22, 28]
+  integer_time: [30, 34]
+sites:
+  units_specs.c:6: {function: zoom_region_init, kind: operation, label: Zoom region initialisation}
+  units_specs.c:12: {function: spec_variants, kind: operation, label: Exp}
+  units_specs.c:14: {function: spec_variants, kind: operation, label: General}
+  units_specs.c:16: {function: spec_variants, kind: operation, label: Long}
+  units_specs.c:18: {function: spec_variants, kind: operation, label: Width}
+  units_specs.c:24: {function: literal_units, kind: operation, label: Literal ms}
+  units_specs.c:25: {function: literal_units, kind: operation, label: Literal s}
+  units_specs.c:26: {function: literal_units, kind: operation, label: Literal seconds}
+  units_specs.c:27: {function: literal_units, kind: operation, label: Unitless}
+  units_specs.c:32: {function: integer_time, kind: operation, label: Integer}
+  units_specs.c:33: {function: integer_time, kind: operation, label: Ticks}
+lines:
+  units_specs.c:6:
+    match:
+      - {body: "Zoom region initialisation took 30.110611 ms", ms: 30.110611}
+      - {body: "Zoom region initialisation took 2.000000 s", ms: 2000.0}
+      - {body: "Zoom region initialisation took 5.000000 ns", ms: 5.0e-6}
+  units_specs.c:12:
+    match:
+      - {body: "Exp took 1.234500e+01 ms.", ms: 12.345}
+      - {body: "Exp took 1.5E-03 s.", ms: 1.5}
+  units_specs.c:14:
+    match:
+      - {body: "General took 1e+06 us.", ms: 1000.0}
+      - {body: "General took 0.25 ms.", ms: 0.25}
+  units_specs.c:18:
+    match:
+      - {body: "Width took     3.1416 ms.", ms: 3.1416}
+  units_specs.c:24:
+    match:
+      - {body: "Literal ms took 4.000 ms.", ms: 4.0}
+    reject: ["Literal ms took 4.000 s."]
+  units_specs.c:25:
+    match:
+      - {body: "Literal s took 1.500 s.", ms: 1500.0}
+  units_specs.c:26:
+    match:
+      - {body: "Literal seconds took 2.50 seconds", ms: 2500.0}
+  units_specs.c:27:
+    match:
+      - {body: "Unitless took 8.000.", ms: 8.0}
+  units_specs.c:32:
+    match:
+      - {body: "Integer took 12 ms.", ms: 12.0}
+log:
+  text: |
+    [00001.0] literal_units: Literal s took 1.500 s.
+    [00001.1] spec_variants: Exp took 2.000000e+00 s.
+    [00001.2] integer_time: Integer took 3 ms.
+  records:
+    - [0, literal_units, "literal_units: Literal s", 1500.0]
+    - [0, spec_variants, "spec_variants: Exp", 2000.0]
+    - [0, integer_time, "integer_time: Integer", 3.0]

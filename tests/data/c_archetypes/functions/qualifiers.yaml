@@ -1,0 +1,24 @@
+description: >
+  Storage classes, the INLINE macro and __attribute__ prefixes in the orders
+  SWIFT writes them (cosmology.c, fof.c, cell.c).
+functions:
+  plain: [3, 8]
+  static_fn: [10, 15]
+  static_inline: [17, 22]
+  attr_inline: [24, 30]
+  attr_const: [32, 37]
+  extern_fn: [39, 43]
+sites:
+  qualifiers.c:6: {function: plain, kind: function, label: "", tic: tic, start: 4}
+  qualifiers.c:13: {function: static_fn, kind: function, tic: tic, start: 11}
+  qualifiers.c:19: {function: static_inline, kind: function, start: 18}
+  qualifiers.c:27: {function: attr_inline, kind: function, start: 26}
+  qualifiers.c:34: {function: attr_const, kind: function, start: 33}
+  qualifiers.c:41: {function: extern_fn, kind: function, start: 40}
+log:
+  text: |
+    [00001.2] attr_inline: took 0.123 ms.
+    [00001.3] static_inline: took 4.000 ms.
+  records:
+    - [0, attr_inline, attr_inline, 0.123]
+    - [0, static_inline, static_inline, 4.0]

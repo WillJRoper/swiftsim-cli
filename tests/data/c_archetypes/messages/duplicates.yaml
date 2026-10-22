@@ -1,0 +1,25 @@
+description: >
+  Identical messages in one function produce indistinguishable lines, so
+  they are one logical timer with a range per site; a format differing
+  only in "took:" is a separate timer.
+functions:
+  space_split: [3, 24]
+sites:
+  duplicates.c:7: {function: space_split, kind: operation, label: Splitting, start: 4}
+  duplicates.c:12: {function: space_split, kind: operation, label: Splitting, start: 10}
+  duplicates.c:16: {function: space_split, kind: operation, label: Splitting, start: 10}
+  duplicates.c:19: {function: space_split, kind: function, start: 10}
+  duplicates.c:22: {function: space_split, kind: function, start: 10}
+timers:
+  - [duplicates.c:7, duplicates.c:12]
+  - [duplicates.c:16]
+  - [duplicates.c:19, duplicates.c:22]
+log:
+  text: |
+    [00005.0] space_split: Splitting took 1.000 ms.
+    [00005.1] space_split: Splitting took: 2.000 ms.
+    [00005.2] space_split: took 3.000 ms.
+  records:
+    - [0, space_split, "space_split: Splitting", 1.0]
+    - [0, space_split, "space_split: Splitting", 2.0]
+    - [0, space_split, space_split, 3.0]

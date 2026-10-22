@@ -1,0 +1,19 @@
+description: >
+  A function whose braces only balance within each #ifdef branch (the
+  fallback path). Its timers, tics and calls are attributed by counting
+  braces back to the header (skipping if/while headers and a preceding
+  "#if defined(...)" line), and later functions are unaffected.
+functions:
+  exchange: [27, 30]
+  balanced_after: [32, 37]
+sites:
+  ifdef_unbalanced.c:10: {function: unbalanced, kind: operation, label: MPI branch, start: 6}
+  ifdef_unbalanced.c:15: {function: unbalanced, kind: operation, label: Serial branch, start: 6}
+  ifdef_unbalanced.c:22: {function: unbalanced, kind: function, start: 6}
+  ifdef_unbalanced.c:35: {function: balanced_after, kind: function, start: 33}
+calls:
+  unbalanced:
+    exchange: [9, 14, 20]
+  balanced_after: [exchange]
+op_reach:
+  ifdef_unbalanced.c:10: [exchange]

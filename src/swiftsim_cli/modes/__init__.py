@@ -1,38 +1,17 @@
-"""Mode definitions and constants for swift-cli."""
+"""Mode definitions for swift-cli.
 
-from typing import Literal
+`Mode` is the single list of modes. Each mode lives in the module of the
+same name (dashes become underscores) and is only imported by `load_mode`
+when that mode is parsed or run, so ``swift-cli --help`` and friends never
+pay for the heavy imports of the analysis modes.
+"""
 
-from . import (
-    analyse,
-    config,
-    make,
-    new,
-    output_times,
-    profile,
-    scaling,
-    show,
-    switch,
-    update,
-    utils,
-)
+import importlib
+from types import ModuleType
+from typing import Literal, get_args
 
-# Available modes for swift-utils CLI
-AVAILABLE_MODES = [
-    "profile",
-    "config",
-    "output-times",
-    "update",
-    "switch",
-    "make",
-    "new",
-    "analyse",
-    "scaling",
-    "show",
-    "utils",
-]
-
-# Type hint for mode names
 Mode = Literal[
+    "init",
     "profile",
     "config",
     "output-times",
@@ -41,24 +20,36 @@ Mode = Literal[
     "make",
     "new",
     "analyse",
-    "scaling",
     "show",
     "utils",
 ]
 
-# Mode module imports
+AVAILABLE_MODES: tuple[Mode, ...] = get_args(Mode)
 
-# Mapping of mode names to their modules
-MODE_MODULES = {
-    "profile": profile,
-    "config": config,
-    "output-times": output_times,
-    "update": update,
-    "switch": switch,
-    "make": make,
-    "new": new,
-    "analyse": analyse,
-    "scaling": scaling,
-    "show": show,
-    "utils": utils,
+# One-line description of each mode, shown by 'swift-cli --help' and at the
+# top of 'swift-cli <mode> --help'
+MODE_DESCRIPTIONS: dict[Mode, str] = {
+    "init": "Clone or reuse SWIFT and create the first profile.",
+    "profile": "Manage SWIFT profiles (one worktree, branch and build each).",
+    "config": "Set the current profile's configure flags and reconfigure.",
+    "output-times": "Generate a list of snapshot (and snipshot) output times.",
+    "update": "Pull and rebuild the current profile.",
+    "switch": "Make another profile the current one.",
+    "make": "Compile the current profile.",
+    "new": "Create a new simulation run directory.",
+    "analyse": "Analyse SWIFT logs and diagnostic outputs.",
+    "show": "Show the current profile (and optionally its cosmology).",
+    "utils": "Run small helper calculations (e.g. softenings).",
 }
+
+
+def load_mode(name: Mode) -> ModuleType:
+    """Import and return the module implementing a mode.
+
+    Args:
+        name: The mode name.
+
+    Returns:
+        The mode's module (with ``add_arguments`` and ``run``).
+    """
+    return importlib.import_module(f"{__name__}.{name.replace('-', '_')}")

@@ -1,6 +1,6 @@
-"""Show mode for displaying the current SWIFT profile.
+"""Show mode for displaying a SWIFT profile.
 
-This is a shortcut for 'swift-cli profile --show'.
+This is a shortcut for 'swift-cli profile --show [NAME]'.
 """
 
 import argparse
@@ -11,35 +11,26 @@ from swiftsim_cli.modes.profile import display_profile
 def add_arguments(parser: argparse.ArgumentParser) -> None:
     """Add arguments for the show mode."""
     parser.add_argument(
+        "name",
+        nargs="?",
+        default=None,
+        metavar="NAME",
+        help="The profile to show (default: the active one).",
+    )
+    parser.add_argument(
         "--cosmo",
         action="store_true",
         help="Show only the cosmology from the parameter file.",
-        default=False,
-    )
-    parser.add_argument(
-        "--all",
-        action="store_true",
-        help="Show both the profile and cosmology.",
-        default=False,
     )
 
 
 def run(args: argparse.Namespace) -> None:
     """Execute the show mode.
 
-    This calls display_profile() from the profile mode with appropriate flags.
+    Like 'profile --show': the profile's settings, then its parameter
+    file's cosmology (with --cosmo, only the cosmology).
     """
-    # Determine what to show
     if args.cosmo:
-        # Show only cosmology
-        display_profile(
-            print_header=False,
-            show_profile=False,
-            show_cosmology=True,
-        )
-    elif args.all:
-        # Show both
-        display_profile(show_profile=True, show_cosmology=True)
+        display_profile(print_header=False, show_profile=False, name=args.name)
     else:
-        # Show only profile (default)
-        display_profile(show_profile=True, show_cosmology=False)
+        display_profile(name=args.name)

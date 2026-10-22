@@ -1,25 +1,87 @@
 """Gravity checks analysis module for SWIFT simulations."""
 
 import argparse
-import glob
 import re
+import warnings
 from pathlib import Path
-from typing import Optional, Union
+from typing import Any, NamedTuple, Union
 
-import matplotlib.pyplot as plt
 import numpy as np
 
-from swiftsim_cli.utilities import create_output_path
+from swiftsim_cli.modes.common_args import (
+    add_labels_argument,
+    add_output_arguments,
+    existing_file,
+    positive_float,
+    positive_int,
+    resolve_labels,
+)
+from swiftsim_cli.utilities.io import create_output_path
+from swiftsim_cli.utilities.messages import plural, reading, warn
+from swiftsim_cli.utilities.plotting import save_figure
+from swiftsim_cli.utilities.tables import create_ascii_table
+
+# Subdirectory of --out that the outputs are written to
+OUT_SUBDIR = "gravity_checks_analysis"
+
+EXACT_PREFIX = "gravity_checks_exact"
+
+# The leading columns shared by exact and SWIFT files:
+# id, pos[3], a[3], potential (SWIFT writes the id with %lld).
+_FORCE_DTYPE = np.dtype(
+    [
+        ("id", np.int64),
+        ("pos", np.float64, (3,)),
+        ("a", np.float64, (3,)),
+        ("pot", np.float64),
+    ]
+)
+
+# Error components: (key, axis label), in panel order
+ERROR_COMPONENTS = (
+    ("x", "|δa_x|/|a_exact|"),
+    ("y", "|δa_y|/|a_exact|"),
+    ("z", "|δa_z|/|a_exact|"),
+    ("norm", "|δa|/|a_exact|"),
+    ("pot", "|δφ|/|φ_exact|"),
+)
+
+# Positions agreeing to this relative tolerance belong to the same snapshot
+_POSITION_RTOL = 1e-6
+
+# Runs whose percentiles fit in the summary panel; the rest are printed only
+_MAX_SUMMARY_RUNS = 6
 
 
-def _find_counterpart_file(filepath: str) -> tuple[str, str]:
-    """Find the counterpart file (exact <-> swift) for a given file.
+class ForcePair(NamedTuple):
+    """An exact/SWIFT check pair aligned by particle ID."""
+
+    pos: np.ndarray
+    exact_a: np.ndarray
+    swift_a: np.ndarray
+    exact_pot: np.ndarray
+    swift_pot: np.ndarray
+
+
+def _swift_order(path: Path) -> int:
+    """Return the multipole order in a SWIFT check filename (-1 if none)."""
+    match = re.search(r"_order(\d+)\.dat$", path.name)
+    return int(match.group(1)) if match else -1
+
+
+def _find_counterpart_files(
+    filepath: str, all_orders: bool = False
+) -> list[tuple[str, str]]:
+    """Find the exact/SWIFT pair(s) for a given check file.
 
     Args:
         filepath: Path to either an exact or SWIFT gravity check file.
+        all_orders: For an exact file, return a pair for every SWIFT file
+            of that step (one per multipole order) rather than the lowest
+            order only.
 
     Returns:
-        tuple: (exact_file_path, swift_file_path)
+        ``(exact_file, swift_file)`` pairs.
 
     Raises:
         ValueError: If step number cannot be extracted from filename.
@@ -29,74 +91,214 @@ def _find_counterpart_file(filepath: str) -> tuple[str, str]:
     filename = file_path.name
     directory = file_path.parent
 
-    # Initialize variables
-    exact_file: Optional[str]
-    swift_file: str
+    # Extract the step number, reusing SWIFT's own zero padding (%.4d, so
+    # steps >= 10000 have more digits)
+    step_match = re.search(r"step(\d+)", filename)
+    if not step_match:
+        raise ValueError(f"Could not extract step number from {filename}")
+    step_num = step_match.group(1)
 
-    # Check if this is an exact file
-    if "exact" in filename:
-        # This is an exact file, find the corresponding SWIFT file
-        exact_file = filepath
+    if not filename.startswith(EXACT_PREFIX):
+        # A SWIFT file: find the exact file of the same step
+        for name in (
+            f"{EXACT_PREFIX}_step{step_num}.dat",
+            f"{EXACT_PREFIX}_periodic_step{step_num}.dat",
+        ):
+            if (directory / name).exists():
+                return [(str(directory / name), filepath)]
+        raise FileNotFoundError(f"No exact file found for step {step_num}")
 
-        # Extract step number
-        step_match = re.search(r"step(\d{4})", filename)
-        if not step_match:
-            raise ValueError(f"Could not extract step number from {filename}")
-        step_num = step_match.group(1)
-
-        # Look for corresponding SWIFT files with different orders
-        swift_pattern = (
-            directory / f"gravity_checks_swift_step{step_num}_order*.dat"
+    # An exact file: find the SWIFT file(s) of exactly this step
+    swift_re = re.compile(
+        rf"gravity_checks_swift_step{step_num}(_order\d+)?\.dat"
+    )
+    swift_files = sorted(
+        (
+            path
+            for path in directory.glob(f"gravity_checks_swift_step{step_num}*")
+            if swift_re.fullmatch(path.name)
+        ),
+        key=lambda path: (_swift_order(path), path.name),
+    )
+    if not swift_files:
+        raise FileNotFoundError(f"No SWIFT files found for step {step_num}")
+    if len(swift_files) > 1 and not all_orders:
+        warn(
+            f"{len(swift_files)} SWIFT files found for step {step_num}; "
+            f"using {swift_files[0]}. Pass --all-orders to compare every "
+            "multipole order, or the SWIFT file to choose one."
         )
-        swift_files = list(glob.glob(str(swift_pattern)))
+        swift_files = swift_files[:1]
+    return [(filepath, str(path)) for path in swift_files]
 
-        if not swift_files:
-            raise FileNotFoundError(
-                f"No SWIFT files found for step {step_num}"
+
+def _load_check_file(path: str) -> np.ndarray:
+    """Read the shared leading columns of a gravity check file.
+
+    Raises:
+        ValueError: If the file cannot be parsed or has no data rows.
+    """
+    with reading(path), warnings.catch_warnings():
+        warnings.simplefilter("ignore", UserWarning)  # empty-file warning
+        data = np.loadtxt(path, usecols=range(8), dtype=_FORCE_DTYPE, ndmin=1)
+    if data.size == 0:
+        raise ValueError(f"{path}: no data rows")
+    return data
+
+
+def _load_force_pair(exact_file: str, swift_file: str) -> ForcePair:
+    """Load an exact/SWIFT gravity check pair aligned by particle ID.
+
+    Particles with non-finite values in either file are dropped with a
+    warning, and a warning is given if the two files place the same
+    particle at different positions (SWIFT reuses an existing exact file
+    whenever N, G and the periodicity match, even from another run).
+
+    Args:
+        exact_file: Path to the exact force file.
+        swift_file: Path to the SWIFT force file.
+
+    Returns:
+        The particles present in both files, sorted by particle ID.
+        Positions are taken from the exact file.
+
+    Raises:
+        ValueError: If the files share no usable particles.
+    """
+    exact = _load_check_file(exact_file)
+    swift = _load_check_file(swift_file)
+
+    common_ids, exact_index, swift_index = np.intersect1d(
+        exact["id"], swift["id"], return_indices=True
+    )
+    if common_ids.size == 0:
+        raise ValueError(
+            f"No common particle IDs between {exact_file} and {swift_file}"
+        )
+    if common_ids.size != len(exact) or common_ids.size != len(swift):
+        warn(
+            f"particle IDs differ between {exact_file} "
+            f"({len(exact)} particles) and {swift_file} "
+            f"({len(swift)} particles); using the "
+            f"{common_ids.size} common particles."
+        )
+    exact = exact[exact_index]
+    swift = swift[swift_index]
+
+    finite = np.ones(len(exact), dtype=bool)
+    for data in (exact, swift):
+        for field in ("pos", "a", "pot"):
+            values = data[field].reshape(len(data), -1)
+            finite &= np.isfinite(values).all(axis=1)
+    if not finite.all():
+        if not finite.any():
+            raise ValueError(
+                f"No particles with finite values in both {exact_file} and "
+                f"{swift_file}"
             )
+        warn(
+            f"ignoring {plural(int((~finite).sum()), 'particle')} with "
+            f"non-finite values in {exact_file} or {swift_file}."
+        )
+        exact = exact[finite]
+        swift = swift[finite]
 
-        # Take the first one found
-        swift_file = swift_files[0]
+    moved = ~np.isclose(
+        exact["pos"], swift["pos"], rtol=_POSITION_RTOL, atol=0.0
+    ).all(axis=1)
+    if moved.any():
+        warn(
+            f"{plural(int(moved.sum()), 'particle')} sit at different "
+            f"positions in {exact_file} and {swift_file} (max offset "
+            f"{np.abs(exact['pos'] - swift['pos']).max():.3g}); the exact "
+            "file may come from another run or step."
+        )
 
-    else:
-        # This should be a SWIFT file, find the corresponding exact file
-        swift_file = filepath
+    return ForcePair(
+        exact["pos"], exact["a"], swift["a"], exact["pot"], swift["pot"]
+    )
 
-        # Extract step number
-        step_match = re.search(r"step(\d{4})", filename)
-        if not step_match:
-            raise ValueError(f"Could not extract step number from {filename}")
-        step_num = step_match.group(1)
 
-        # Look for exact file - try different patterns
-        exact_patterns = [
-            directory / f"gravity_checks_exact_step{step_num}.dat",
-            directory / f"gravity_checks_exact_periodic_step{step_num}.dat",
-        ]
+def _relative_errors(pair: ForcePair) -> dict[str, np.ndarray]:
+    """Return the relative force and potential errors per particle.
 
-        exact_file = None
-        for pattern in exact_patterns:
-            if pattern.exists():
-                exact_file = str(pattern)
-                break
+    The potential is compared after removing the mean offset between the
+    two files (their zero points differ). Errors that are undefined
+    because the exact value is zero are NaN.
 
-        if exact_file is None:
-            raise FileNotFoundError(f"No exact file found for step {step_num}")
+    Args:
+        pair: The aligned exact/SWIFT values.
 
-    # At this point, exact_file is guaranteed to be a string
-    assert exact_file is not None
-    return exact_file, swift_file
+    Returns:
+        One array per `ERROR_COMPONENTS` key.
+    """
+    exact_norm = np.linalg.norm(pair.exact_a, axis=1)
+    diff = pair.exact_a - pair.swift_a
+    exact_pot = pair.exact_pot - np.mean(pair.exact_pot - pair.swift_pot)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        errors = {
+            "x": np.abs(diff[:, 0]) / exact_norm,
+            "y": np.abs(diff[:, 1]) / exact_norm,
+            "z": np.abs(diff[:, 2]) / exact_norm,
+            "norm": np.linalg.norm(diff, axis=1) / exact_norm,
+            "pot": np.abs(exact_pot - pair.swift_pot) / np.abs(exact_pot),
+        }
+    for values in errors.values():
+        values[~np.isfinite(values)] = np.nan
+    return errors
+
+
+def _resolve_inputs(
+    files: list[str], labels: list[str], all_orders: bool
+) -> list[tuple[str, str, str, str]]:
+    """Find the check pairs of every input, skipping failures.
+
+    Returns:
+        ``(input, label, exact_file, swift_file)`` per pair; with several
+        multipole orders per input the order is appended to the label.
+    """
+    jobs = []
+    for input_file, label in zip(files, labels):
+        try:
+            pairs = _find_counterpart_files(str(input_file), all_orders)
+        except (ValueError, FileNotFoundError) as e:
+            warn(f"skipping {input_file}: {e}")
+            continue
+        for exact_file, swift_file in pairs:
+            order = _swift_order(Path(swift_file))
+            run_label = label
+            if len(pairs) > 1:
+                run_label += f" order {order}" if order >= 0 else " (no order)"
+            jobs.append((str(input_file), run_label, exact_file, swift_file))
+    return jobs
+
+
+def _style(index: int, count: int) -> dict[str, Any]:
+    """Line colour and style for run ``index`` of ``count``.
+
+    Colours come from tab10 (tab20 for more than ten runs); the line style
+    changes each time the colours run out, so no two runs look alike.
+    """
+    import matplotlib
+
+    cmap = matplotlib.colormaps["tab10" if count <= 10 else "tab20"]
+    styles = ("-", "--", ":", "-.")
+    return {
+        "color": cmap(index % cmap.N),
+        "linestyle": styles[(index // cmap.N) % len(styles)],
+    }
 
 
 def analyse_force_checks(
     files: list[str],
     labels: list[str],
-    output_path: Union[str, None] = None,
+    output_path: Union[str, Path, None] = None,
     prefix: Union[str, None] = None,
-    show_plot: bool = True,
+    show_plot: bool = False,
     min_error: float = 1e-7,
     max_error: float = 3e-1,
     num_bins: int = 64,
+    all_orders: bool = False,
 ) -> None:
     """Plot the force check analysis for one or more SWIFT runs.
 
@@ -109,18 +311,23 @@ def analyse_force_checks(
         files: List of file paths to either exact or SWIFT force files.
                The function will automatically find the counterpart files.
         labels: List of labels for the runs. Must match the length of files.
-        output_path: Optional path to save the plot. If None, the plot is saved
-            to the current directory.
-        prefix: Optional prefix to add to the output filename if saving.
-            If empty, defaults to 'gravity_checks.png'.
+        output_path: Directory whose ``gravity_checks_analysis``
+            subdirectory receives the plot. If None, the current directory
+            is used.
+        prefix: Optional prefix to add to the output filename.
         show_plot: Whether to display the plot interactively.
-        min_error: Minimum error for binning (default: 1e-7).
-        max_error: Maximum error for binning (default: 3e-1).
+        min_error: Lower edge of the histograms (default: 1e-7).
+        max_error: Upper edge of the histograms (default: 3e-1). Errors
+            outside the range are counted and reported, not plotted.
         num_bins: Number of bins for histogram (default: 64).
+        all_orders: For an exact file with SWIFT files of several
+            multipole orders, compare every order (default: the lowest).
+
+    Inputs that cannot be processed are reported as warnings and skipped.
 
     Raises:
-        ValueError: If the number of files and labels do not match.
-        FileNotFoundError: If counterpart files cannot be found.
+        ValueError: If the number of files and labels do not match, the
+            error range is invalid, or no input could be processed.
 
     Note:
         The function expects gravity check files in the format produced by
@@ -128,251 +335,166 @@ def analyse_force_checks(
         identifiers. Files should contain columns for:
         [ID, x, y, z, ax, ay, az, potential]
     """
+    import matplotlib.pyplot as plt
+
     # Make sure the number of files and labels match
     if len(files) != len(labels):
         raise ValueError("Number of files and labels must match.")
+    if not 0 < min_error < max_error:
+        raise ValueError(
+            f"need 0 < --min-error < --max-error, got {min_error:g} and "
+            f"{max_error:g}"
+        )
 
-    # Set up parameters for plotting
-    plt.rcParams.update(
-        {
-            "axes.labelsize": 14,
-            "axes.titlesize": 18,
-            "font.size": 11,
-            "legend.fontsize": 12,
-            "xtick.labelsize": 14,
-            "ytick.labelsize": 14,
-            "text.usetex": False,
-            "figure.figsize": (12, 9),
-            "figure.subplot.left": 0.06,
-            "figure.subplot.right": 0.99,
-            "figure.subplot.bottom": 0.06,
-            "figure.subplot.top": 0.99,
-            "figure.subplot.wspace": 0.14,
-            "figure.subplot.hspace": 0.14,
-            "lines.markersize": 6,
-            "lines.linewidth": 3.0,
-        }
-    )
+    # Load everything first so a failure leaves no plot behind
+    runs = []
+    for input_file, label, exact_file, swift_file in _resolve_inputs(
+        files, labels, all_orders
+    ):
+        try:
+            errors = _relative_errors(_load_force_pair(exact_file, swift_file))
+        except ValueError as e:
+            warn(f"skipping {input_file}: {e}")
+            continue
+        runs.append((label, exact_file, swift_file, errors))
+    if not runs:
+        raise ValueError("none of the gravity check inputs could be processed")
 
-    # Construct the bins for error histogram
-    bin_edges = np.linspace(
+    log_edges = np.linspace(
         np.log10(min_error), np.log10(max_error), num_bins + 1
     )
-    bin_size = (np.log10(max_error) - np.log10(min_error)) / num_bins
-    bins = 0.5 * (bin_edges[1:] + bin_edges[:-1])
-    bin_edges = 10**bin_edges
-    bins = 10**bins
+    bin_size = log_edges[1] - log_edges[0]
+    bin_edges = 10**log_edges
+    bin_centres = 10 ** (0.5 * (log_edges[1:] + log_edges[:-1]))
 
-    # Colors for the plots
-    cols = ["#332288", "#88CCEE", "#117733", "#DDCC77", "#CC6677"]
+    # Plot styling, scoped so it does not leak into later modes
+    # (inline so newer matplotlib stubs can check the rcParams keys)
+    with plt.rc_context(
+        {
+            "axes.labelsize": 13,
+            "font.size": 11,
+            "legend.fontsize": 9,
+            "xtick.labelsize": 12,
+            "ytick.labelsize": 12,
+            "text.usetex": False,
+            "lines.linewidth": 2.0,
+        }
+    ):
+        fig, axes = plt.subplots(2, 3, figsize=(15, 9))
+        panels = axes.flat[:5]
+        summary_ax = axes.flat[5]
+        summary_ax.axis("off")
+        summary_lines: list[tuple[str, Any]] = []
 
-    # Create the figure with subplots
-    fig = plt.figure()
-    ax1 = plt.subplot(231)  # X-component error
-    ax2 = plt.subplot(232)  # Y-component error
-    ax3 = plt.subplot(233)  # Z-component error
-    ax4 = plt.subplot(234)  # Magnitude error
-    ax5 = plt.subplot(235)  # Potential error
+        for i, (label, exact_file, swift_file, errors) in enumerate(runs):
+            style = _style(i, len(runs))
+            rows = []
+            for ax, (key, name) in zip(panels, ERROR_COMPONENTS):
+                values = errors[key][np.isfinite(errors[key])]
+                undefined = errors[key].size - values.size
+                if values.size == 0:
+                    rows.append([name, "-", "-", "-", "-", "-", undefined])
+                    continue
+                hist, _ = np.histogram(values, bins=bin_edges)
+                ax.semilogx(
+                    bin_centres,
+                    hist / (values.size * bin_size),
+                    label=label,
+                    **style,
+                )
+                median, per90, per99 = np.percentile(values, [50, 90, 99])
+                ax.axvline(median, color=style["color"], linewidth=1, ls=":")
+                below = 100 * np.mean(values < min_error)
+                above = 100 * np.mean(values > max_error)
+                rows.append(
+                    [
+                        name,
+                        f"{median:.3e}",
+                        f"{per90:.3e}",
+                        f"{per99:.3e}",
+                        f"{below:.1f}",
+                        f"{above:.1f}",
+                        undefined,
+                    ]
+                )
+                if key == "norm":
+                    summary_lines.append(
+                        (
+                            f"{label}\n  50% {median:.2e}  90% {per90:.2e}"
+                            f"  99% {per99:.2e}\n  outside range: "
+                            f"{below:.1f}% below, {above:.1f}% above",
+                            style["color"],
+                        )
+                    )
 
-    # Process each file and find its counterpart
-    for i, (input_file, label) in enumerate(zip(files, labels)):
-        try:
-            exact_file, swift_file = _find_counterpart_file(input_file)
-        except (ValueError, FileNotFoundError) as e:
-            print(f"Error processing {input_file}: {e}")
-            continue
+            print(
+                create_ascii_table(
+                    [
+                        "Error",
+                        "Median",
+                        "90%",
+                        "99%",
+                        f"< {min_error:g} [%]",
+                        f"> {max_error:g} [%]",
+                        "Undefined",
+                    ],
+                    rows,
+                    title=f"{label}: {Path(exact_file).name} vs "
+                    f"{Path(swift_file).name}",
+                )
+            )
+            print()
 
-        # Read exact data
-        exact_data = np.loadtxt(exact_file)
-        exact_ids = exact_data[:, 0]
-        exact_pos = exact_data[:, 1:4]
-        exact_a = exact_data[:, 4:7]
-        exact_pot = exact_data[:, 7]
+        for ax, (_, name) in zip(panels, ERROR_COMPONENTS):
+            ax.set_xlabel(name)
+            ax.set_xlim(min_error, max_error)
+            ax.set_ylim(0, None)
+            ax.margins(y=0.1)
+            ax.grid(True, alpha=0.3)
+        for ax in (axes[0, 0], axes[1, 0]):
+            ax.set_ylabel("Particle fraction per dex")
+        axes[1, 0].legend(loc="upper left")
 
-        # Sort exact data by particle ID
-        sort_index = np.argsort(exact_ids)
-        exact_ids = exact_ids[sort_index]
-        exact_pos = exact_pos[sort_index, :]
-        exact_a = exact_a[sort_index, :]
-        exact_pot = exact_pot[sort_index]
-        exact_a_norm = np.sqrt(
-            exact_a[:, 0] ** 2 + exact_a[:, 1] ** 2 + exact_a[:, 2] ** 2
-        )
-
-        # Read SWIFT data
-        swift_data = np.loadtxt(swift_file)
-        swift_ids = swift_data[:, 0]
-        swift_pos = swift_data[:, 1:4]
-        swift_a_grav = swift_data[:, 4:7]
-        swift_pot = swift_data[:, 7]
-
-        # Sort SWIFT data by particle ID
-        sort_index = np.argsort(swift_ids)
-        swift_ids = swift_ids[sort_index]
-        swift_pos = swift_pos[sort_index, :]
-        swift_a_grav = swift_a_grav[sort_index, :]
-        swift_pot = swift_pot[sort_index]
-
-        # Compute force differences
-        diff = exact_a - swift_a_grav
-        diff_pot = exact_pot - swift_pot
-
-        # Correct for different normalization of potential
-        exact_pot_corrected = exact_pot - np.mean(diff_pot)
-        diff_pot = exact_pot_corrected - swift_pot
-
-        # Calculate relative errors
-        norm_diff = np.sqrt(
-            diff[:, 0] ** 2 + diff[:, 1] ** 2 + diff[:, 2] ** 2
-        )
-        norm_error = norm_diff / exact_a_norm
-        error_x = np.abs(diff[:, 0]) / exact_a_norm
-        error_y = np.abs(diff[:, 1]) / exact_a_norm
-        error_z = np.abs(diff[:, 2]) / exact_a_norm
-        error_pot = np.abs(diff_pot) / np.abs(exact_pot_corrected)
-
-        # Bin the errors for histogram
-        norm_error_hist, _ = np.histogram(
-            norm_error, bins=bin_edges, density=False
-        )
-        norm_error_hist = norm_error_hist / (np.size(norm_error) * bin_size)
-
-        error_x_hist, _ = np.histogram(error_x, bins=bin_edges, density=False)
-        error_x_hist = error_x_hist / (np.size(norm_error) * bin_size)
-
-        error_y_hist, _ = np.histogram(error_y, bins=bin_edges, density=False)
-        error_y_hist = error_y_hist / (np.size(norm_error) * bin_size)
-
-        error_z_hist, _ = np.histogram(error_z, bins=bin_edges, density=False)
-        error_z_hist = error_z_hist / (np.size(norm_error) * bin_size)
-
-        error_pot_hist, _ = np.histogram(
-            error_pot, bins=bin_edges, density=False
-        )
-        error_pot_hist = error_pot_hist / (np.size(norm_error) * bin_size)
-
-        # Calculate statistics
-        norm_median = np.median(norm_error)
-        median_x = np.median(error_x)
-        median_y = np.median(error_y)
-        median_z = np.median(error_z)
-        median_pot = np.median(error_pot)
-
-        norm_per99 = np.percentile(norm_error, 99)
-        per99_x = np.percentile(error_x, 99)
-        per99_y = np.percentile(error_y, 99)
-        per99_z = np.percentile(error_z, 99)
-        per99_pot = np.percentile(error_pot, 99)
-
-        norm_per90 = np.percentile(norm_error, 90)
-        per90_x = np.percentile(error_x, 90)
-        per90_y = np.percentile(error_y, 90)
-        per90_z = np.percentile(error_z, 90)
-        per90_pot = np.percentile(error_pot, 90)
-
-        # Use colors from the color list, cycling if necessary
-        color = cols[i % len(cols)]
-
-        # Plot X-component errors
-        ax1.semilogx(bins, error_x_hist, color=color, label=label)
-        ax1.text(
-            min_error * 1.5,
-            1.5 - i / 10.0,
-            f"50%→{median_x:.5f} 90%→{per90_x:.5f} 99%→{per99_x:.5f}",
-            ha="left",
+        summary_ax.text(
+            0.0,
+            1.0,
+            "|δa|/|a_exact| percentiles\n(dotted lines: medians)",
+            transform=summary_ax.transAxes,
             va="top",
-            color=color,
+            fontweight="bold",
         )
+        for j, (text, color) in enumerate(summary_lines[:_MAX_SUMMARY_RUNS]):
+            summary_ax.text(
+                0.0,
+                0.86 - j * 0.145,
+                text,
+                transform=summary_ax.transAxes,
+                va="top",
+                family="monospace",
+                fontsize=8.5,
+                color=color,
+            )
+        if len(summary_lines) > _MAX_SUMMARY_RUNS:
+            summary_ax.text(
+                0.0,
+                0.0,
+                f"+{len(summary_lines) - _MAX_SUMMARY_RUNS} more runs: see "
+                "the terminal output",
+                transform=summary_ax.transAxes,
+                fontsize=8.5,
+            )
+        fig.tight_layout()
 
-        # Plot Y-component errors
-        ax2.semilogx(bins, error_y_hist, color=color, label=label)
-        ax2.text(
-            min_error * 1.5,
-            1.5 - i / 10.0,
-            f"50%→{median_y:.5f} 90%→{per90_y:.5f} 99%→{per99_y:.5f}",
-            ha="left",
-            va="top",
-            color=color,
+        png_file = create_output_path(
+            output_path, prefix, "gravity_checks.png", OUT_SUBDIR
         )
-
-        # Plot Z-component errors
-        ax3.semilogx(bins, error_z_hist, color=color, label=label)
-        ax3.text(
-            min_error * 1.5,
-            1.5 - i / 10.0,
-            f"50%→{median_z:.5f} 90%→{per90_z:.5f} 99%→{per99_z:.5f}",
-            ha="left",
-            va="top",
-            color=color,
-        )
-
-        # Plot magnitude errors
-        ax4.semilogx(bins, norm_error_hist, color=color, label=label)
-        ax4.text(
-            min_error * 1.5,
-            1.5 - i / 10.0,
-            f"50%→{norm_median:.5f} 90%→{norm_per90:.5f} 99%→{norm_per99:.5f}",
-            ha="left",
-            va="top",
-            color=color,
-        )
-
-        # Plot potential errors
-        ax5.semilogx(bins, error_pot_hist, color=color, label=label)
-        ax5.text(
-            min_error * 1.5,
-            1.5 - i / 10.0,
-            f"50%→{median_pot:.5f} 90%→{per90_pot:.5f} 99%→{per99_pot:.5f}",
-            ha="left",
-            va="top",
-            color=color,
-        )
-
-        # Print summary statistics
-        print(f"Processed: {label}")
-        print(f"  Exact file: {exact_file}")
-        print(f"  SWIFT file: {swift_file}")
-        print(
-            f"  Norm error - median: {norm_median:.5f}, 90%: {norm_per90:.5f},"
-            f" 99%: {norm_per99:.5f}",
-        )
-        print()
-
-    # Set up axes labels and limits
-    ax1.set_xlabel("δax/|a_exact|")
-    ax1.set_xlim(min_error, max_error)
-    ax1.set_ylim(0, 1.75)
-
-    ax2.set_xlabel("δay/|a_exact|")
-    ax2.set_xlim(min_error, max_error)
-    ax2.set_ylim(0, 1.75)
-
-    ax3.set_xlabel("δaz/|a_exact|")
-    ax3.set_xlim(min_error, max_error)
-    ax3.set_ylim(0, 1.75)
-
-    ax4.set_xlabel("|δa|/|a_exact|")
-    ax4.set_xlim(min_error, max_error)
-    ax4.set_ylim(0, 2.5)
-    ax4.legend(loc="upper left", fontsize=8)
-
-    ax5.set_xlabel("δφ/φ_exact")
-    ax5.set_xlim(min_error, max_error)
-    ax5.set_ylim(0, 1.75)
-
-    # Save the figure
-    png_file = create_output_path(output_path, prefix, "gravity_checks.png")
-
-    fig.savefig(png_file, dpi=200, bbox_inches="tight")
-    print(f"Plot saved to {png_file}")
-
-    # Show the plot if requested
-    if show_plot:
-        plt.show()
-    plt.close(fig)
+        save_figure(fig, png_file, show=show_plot, dpi=200)
+        print(f"Plot saved to {png_file}")
 
 
-def add_gravity_checks_arguments(subparsers) -> argparse.ArgumentParser:
+def add_gravity_checks_arguments(
+    subparsers: argparse._SubParsersAction,
+) -> argparse.ArgumentParser:
     """Add gravity checks analysis arguments to the argument parser.
 
     Args:
@@ -382,68 +504,58 @@ def add_gravity_checks_arguments(subparsers) -> argparse.ArgumentParser:
         The gravity checks argument parser.
     """
     gravity_parser = subparsers.add_parser(
-        "gravity-checks", help="Analyse gravity check files"
+        "gravity-checks",
+        help="Compare SWIFT gravity forces with exact gravity checks.",
+        description="Compare SWIFT gravity forces with exact gravity "
+        "checks. Give either file of each pair (gravity_checks_exact_* or "
+        "gravity_checks_swift_*); its counterpart is found next to it. An "
+        "exact file with SWIFT files of several multipole orders is "
+        "compared with the lowest order unless --all-orders is given. "
+        "Requires SWIFT configured with --enable-gravity-force-checks=N.",
     )
+    gravity_parser.set_defaults(func=run_gravity_checks)
 
     gravity_parser.add_argument(
         "files",
         nargs="+",
-        help="List of gravity check files to analyse (either exact "
-        "or SWIFT files).",
-        type=Path,
+        metavar="FILE",
+        help="Gravity check files to analyse (either exact or SWIFT files).",
+        type=existing_file,
     )
-
-    gravity_parser.add_argument(
-        "--labels",
-        "-l",
-        nargs="+",
-        required=True,
-        help="List of labels for the runs being analysed.",
-        type=str,
-    )
-
-    gravity_parser.add_argument(
-        "--output-path",
-        "-o",
-        type=Path,
-        help="Where to save analysis (default: current directory).",
-        default=None,
-    )
-
-    gravity_parser.add_argument(
-        "--prefix",
-        "-p",
-        type=str,
-        help="A prefix to add to the analysis files (default: '').",
-        default="",
-    )
-
-    gravity_parser.add_argument(
-        "--show",
-        action="store_true",
-        help="Show the plot interactively.",
-        default=False,
-    )
+    add_labels_argument(gravity_parser)
+    add_output_arguments(gravity_parser, OUT_SUBDIR)
 
     gravity_parser.add_argument(
         "--min-error",
-        type=float,
-        help="Minimum error for binning (default: 1e-7).",
+        type=positive_float,
+        metavar="ERR",
+        help="Lower edge of the error histograms (default: 1e-7). Errors "
+        "below it are counted in the summary.",
         default=1e-7,
     )
 
     gravity_parser.add_argument(
         "--max-error",
-        type=float,
-        help="Maximum error for binning (default: 3e-1).",
+        type=positive_float,
+        metavar="ERR",
+        help="Upper edge of the error histograms (default: 3e-1). Errors "
+        "above it are counted in the summary.",
         default=3e-1,
     )
 
     gravity_parser.add_argument(
         "--num-bins",
-        type=int,
+        type=positive_int,
+        metavar="N",
         help="Number of bins for histogram (default: 64).",
         default=64,
+    )
+
+    gravity_parser.add_argument(
+        "--all-orders",
+        action="store_true",
+        help="For an exact file, compare the SWIFT files of every "
+        "multipole order (default: the lowest order only).",
     )
 
     return gravity_parser
@@ -457,11 +569,12 @@ def run_gravity_checks(args: argparse.Namespace) -> None:
     """
     analyse_force_checks(
         files=args.files,
-        labels=args.labels,
-        output_path=args.output_path,
+        labels=resolve_labels(args.files, args.labels),
+        output_path=args.out,
         prefix=args.prefix,
         show_plot=args.show,
         min_error=args.min_error,
         max_error=args.max_error,
         num_bins=args.num_bins,
+        all_orders=args.all_orders,
     )

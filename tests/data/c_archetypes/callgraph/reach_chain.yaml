@@ -1,0 +1,46 @@
+description: >
+  A timed function reaches a timed callee through an untimed intermediate;
+  an operation only reaches the calls inside its [tic, message] range
+  (calls before, between and after operations belong to none of them).
+functions:
+  engine_step: [3, 21]
+  untimed_middle: [23, 23]
+  gravity_timed: [25, 29]
+  hydro_timed: [31, 35]
+  before_ops: [37, 37]
+  between_ops: [38, 38]
+  after_ops: [39, 39]
+sites:
+  reach_chain.c:9: {function: engine_step, kind: operation, label: Gravity, tic: tic2, start: 6}
+  reach_chain.c:15: {function: engine_step, kind: operation, label: Hydro, tic: tic2, start: 12}
+  reach_chain.c:19: {function: engine_step, kind: function, tic: tic, start: 4}
+  reach_chain.c:27: {function: gravity_timed, kind: function}
+  reach_chain.c:33: {function: hydro_timed, kind: function}
+calls:
+  engine_step:
+    before_ops: [5]
+    untimed_middle: [7]
+    between_ops: [11]
+    hydro_timed: [13]
+    after_ops: [17]
+  untimed_middle: [gravity_timed]
+reach:
+  engine_step: [before_ops, untimed_middle, gravity_timed, between_ops, hydro_timed, after_ops]
+  untimed_middle: [gravity_timed]
+  gravity_timed: []
+op_reach:
+  reach_chain.c:9: [untimed_middle, gravity_timed]
+  reach_chain.c:15: [hydro_timed]
+log:
+  text: |
+    [00001.0] gravity_timed: took 4.000 ms.
+    [00001.1] engine_step: Gravity took 5.000 ms.
+    [00001.2] hydro_timed: took 2.000 ms.
+    [00001.3] engine_step: Hydro took 2.500 ms.
+    [00001.4] engine_step: took 9.000 ms.
+  records:
+    - [0, gravity_timed, gravity_timed, 4.0]
+    - [0, engine_step, "engine_step: Gravity", 5.0]
+    - [0, hydro_timed, hydro_timed, 2.0]
+    - [0, engine_step, "engine_step: Hydro", 2.5]
+    - [0, engine_step, engine_step, 9.0]

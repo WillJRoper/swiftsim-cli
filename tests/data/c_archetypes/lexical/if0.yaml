@@ -1,0 +1,17 @@
+description: >
+  #if 0 blocks: a dead function and a dead branch inside a function are
+  ignored (no function, no timer, no call edge); the #elif/#else branches
+  and #if 1 are live.
+functions:
+  live_function: [11, 30]
+  dead_helper: [32, 32]
+  live_helper: [33, 33]
+sites:
+  if0.c:19: {function: live_function, kind: operation, label: MPI method, start: 12}
+  if0.c:23: {function: live_function, kind: operation, label: New method, start: 12}
+  if0.c:27: {function: live_function, kind: function, start: 12}
+calls:
+  live_function:
+    live_helper: [18, 22]
+reach:
+  live_function: [live_helper]

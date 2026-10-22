@@ -1,0 +1,18 @@
+description: >
+  Call edges across .c files and into a header (headers are parsed too);
+  the operation in engine.c reaches functions defined in other files.
+functions:
+  engine.c:engine_rebuild: [3, 9]
+  space.c:space_rebuild: [5, 10]
+  cell.h:cell_split_inline: [5, 8]
+  cell.h:cell_split: [10, 14]
+sites:
+  engine.c:7: {function: engine_rebuild, kind: operation, label: Space rebuild, start: 4}
+  space.c:8: {function: space_rebuild, kind: function, start: 6}
+  cell.h:12: {function: cell_split, kind: function, start: 11}
+calls:
+  engine_rebuild: {space_rebuild: [5]}
+  space_rebuild: [cell_split]
+  cell_split_inline: [cell_split]
+op_reach:
+  engine.c:7: [space_rebuild, cell_split]

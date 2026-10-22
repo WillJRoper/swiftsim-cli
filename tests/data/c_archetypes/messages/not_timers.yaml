@@ -1,0 +1,18 @@
+description: >
+  Not timers: "took" with no number after it, a non-literal format,
+  error/printf/fprintf and other functions than message, and a message
+  inside a macro body (macros are not expanded). Only message() calls with
+  a literal format and a number after "took" are timers; "took" may end a
+  word, so "Undertook ... %.3f" IS a timer (as fof.c's "IDstook" needs).
+functions:
+  not_timers: [7, 20]
+sites:
+  not_timers.c:19: {function: not_timers, kind: operation, label: Under}
+log:
+  text: |
+    [00001.0] not_timers: This took a while.
+    [00001.1] not_timers: Rebuild took 1.000 ms which is too long.
+  records:
+    - [0, not_timers, "unknown:not_timers: Rebuild", 1.0]
+  unmatched:
+    "not_timers: Rebuild": 1

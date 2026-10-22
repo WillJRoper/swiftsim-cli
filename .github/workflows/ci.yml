@@ -6,16 +6,27 @@ on:
   pull_request:
     branches: [main, develop]
 
+permissions:
+  contents: read
+
 jobs:
   test:
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
+        os: [ubuntu-latest]
         python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
+        # One macOS job: tree-sitter wheels and macOS development setups
+        include:
+          - os: macos-latest
+            python-version: "3.12"
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          # setuptools_scm derives the version from git tags.
+          fetch-depth: 0
 
       - name: Set up Python ${{ matrix.python-version }}
         uses: actions/setup-python@v5
@@ -31,22 +42,25 @@ jobs:
 
       - name: Lint with ruff
         run: |
-          ruff check src/ tests/ --exclude="src/swiftsim_cli/_version.py"
-          ruff format --check src/ tests/ --exclude="src/swiftsim_cli/_version.py"
+          ruff check src/ tests/
+          ruff format --check src/ tests/
 
+      # Checks src and tests with the [tool.mypy] config in pyproject.toml,
+      # the same invocation as the pre-commit hook.
       - name: Type check with mypy
-        run: |
-          mypy src/swiftsim_cli/ --ignore-missing-imports --no-strict-optional
+        run: mypy
 
       - name: Test with pytest
-        run: |
-          python -m pytest tests/ -v --cov=src/swiftsim_cli --cov-report=xml --cov-report=term-missing
+        run: python -m pytest
 
+      # Tokenless uploads work for public repositories; set a CODECOV_TOKEN
+      # repository secret if uploads are rate limited. Never fails the build.
       - name: Upload coverage to Codecov
-        if: matrix.python-version == '3.12'
-        uses: codecov/codecov-action@v3
+        if: matrix.python-version == '3.12' && matrix.os == 'ubuntu-latest'
+        uses: codecov/codecov-action@v5
         with:
-          file: ./coverage.xml
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: ./coverage.xml
           flags: unittests
           name: codecov-umbrella
           fail_ci_if_error: false

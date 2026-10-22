@@ -1,0 +1,53 @@
+# swift-cli template: isolated (non-cosmological, non-periodic) hydrodynamics
+# (+ self-gravity) run, e.g. an isolated disc galaxy with gas.
+# Derived from SWIFT's examples/IsolatedGalaxy/IsolatedGalaxy_dmparticles and
+# IsolatedGalaxy_feedback.
+# Run with: swift --self-gravity --hydro params.yml
+# `swift-cli new` fills in the ICs, units, start time and softenings.
+
+MetaData:
+  run_name: swift-cli isolated hydro run
+
+InternalUnitSystem:
+  UnitMass_in_cgs: 1.98841e43       # 10^10 M_sun
+  UnitLength_in_cgs: 3.08567758e21  # 1 kpc
+  UnitVelocity_in_cgs: 1e5          # 1 km/s
+  UnitCurrent_in_cgs: 1             # Amperes
+  UnitTemp_in_cgs: 1                # Kelvin
+
+TimeIntegration:
+  time_begin: 0.                    # Set from the ICs
+  time_end: 1.                      # ~1 Gyr in these units
+  dt_min: 1e-9
+  dt_max: 1e-2
+
+Gravity:
+  eta: 0.025
+  MAC: geometric
+  theta_cr: 0.7
+  max_physical_DM_softening: 0.1    # Set from the ICs
+  max_physical_baryon_softening: 0.1  # Set from the ICs
+
+SPH:
+  resolution_eta: 1.2348            # 48 neighbours with the cubic spline kernel
+  CFL_condition: 0.1
+  minimal_temperature: 10.          # Kelvin
+
+Snapshots:
+  basename: snap
+  time_first: 0.                    # Set to time_begin
+  delta_time: 0.1
+
+Statistics:
+  time_first: 0.                    # Set to time_begin
+  delta_time: 1e-2
+
+Scheduler:
+  max_top_level_cells: 16
+
+Restarts:
+  delta_hours: 6.0
+
+InitialConditions:
+  file_name: ics.hdf5               # Set by swift-cli new
+  periodic: 0

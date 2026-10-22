@@ -1,0 +1,17 @@
+description: >
+  Return types that wrap the declarator: pointer, double pointer, const char
+  pointer, struct by value, function pointer and restrict pointer returns.
+functions:
+  pointer_return: [3, 8]
+  double_pointer_return: [10, 15]
+  const_char_return: [17, 22]
+  struct_by_value: [24, 30]
+  function_pointer_return: [32, 37]
+  restrict_pointer_return: [39, 44]
+sites:
+  returns.c:5: {function: pointer_return, kind: function, start: 4}
+  returns.c:12: {function: double_pointer_return, kind: function, start: 11}
+  returns.c:19: {function: const_char_return, kind: function, start: 18}
+  returns.c:27: {function: struct_by_value, kind: function, start: 25}
+  returns.c:34: {function: function_pointer_return, kind: function, start: 33}
+  returns.c:41: {function: restrict_pointer_return, kind: function, start: 40}

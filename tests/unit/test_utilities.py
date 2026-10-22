@@ -3,14 +3,16 @@
 from subprocess import CalledProcessError, TimeoutExpired
 from unittest.mock import Mock, patch
 
+import matplotlib.pyplot as plt
 import pytest
 
 from swiftsim_cli.utilities import (
     create_ascii_table,
     create_output_path,
-    make_directory,
     run_command_in_dir,
+    slugify,
 )
+from swiftsim_cli.utilities.plotting import save_figure, should_use_log_scale
 
 
 class TestUtilityFunctions:
@@ -53,7 +55,7 @@ class TestUtilityFunctions:
     def test_create_ascii_table_empty_rows(self):
         """Test ASCII table creation with empty rows."""
         headers = ["Name", "Value"]
-        rows = []
+        rows: list[list[str]] = []
 
         table = create_ascii_table(headers, rows)
 
@@ -78,34 +80,6 @@ class TestUtilityFunctions:
         assert isinstance(table, str)
         assert "Short" in table
         assert "Very Long Content" in table
-
-    def test_make_directory_new(self, temp_dir):
-        """Test creating a new directory."""
-        new_dir = temp_dir / "new_directory"
-
-        assert not new_dir.exists()
-        make_directory(new_dir)
-        assert new_dir.exists()
-        assert new_dir.is_dir()
-
-    def test_make_directory_existing(self, temp_dir):
-        """Test making directory that already exists."""
-        existing_dir = temp_dir / "existing"
-        existing_dir.mkdir()
-
-        assert existing_dir.exists()
-        # Should not raise exception
-        make_directory(existing_dir)
-        assert existing_dir.exists()
-
-    def test_make_directory_nested(self, temp_dir):
-        """Test creating nested directories."""
-        nested_dir = temp_dir / "level1" / "level2" / "level3"
-
-        assert not nested_dir.exists()
-        make_directory(nested_dir)
-        assert nested_dir.exists()
-        assert nested_dir.is_dir()
 
     @patch("subprocess.run")
     def test_run_command_in_dir_success(self, mock_run, temp_dir):
@@ -233,17 +207,6 @@ class TestUtilityEdgeCases:
         assert "Value" in table
         assert "Squared" in table
 
-    def test_make_directory_permission_error(self, temp_dir):
-        """Test make_directory with permission error."""
-        # Create a scenario that might cause permission error
-        restricted_path = temp_dir / "restricted"
-
-        with patch("pathlib.Path.mkdir") as mock_mkdir:
-            mock_mkdir.side_effect = PermissionError("Permission denied")
-
-            with pytest.raises(PermissionError):
-                make_directory(restricted_path)
-
     @patch("subprocess.run")
     def test_run_command_in_dir_timeout(self, mock_run, temp_dir):
         """Test running command that times out."""
@@ -251,18 +214,6 @@ class TestUtilityEdgeCases:
 
         with pytest.raises(TimeoutExpired):
             run_command_in_dir(["sleep", "10"], temp_dir)
-
-    def test_make_directory_file_exists(self, temp_dir):
-        """Test make_directory when path exists as a file."""
-        # Create a file
-        file_path = temp_dir / "existing_file.txt"
-        file_path.write_text("test content")
-
-        # Try to make a directory with the same path
-        with pytest.raises(
-            FileExistsError, match="exists and is not a directory"
-        ):
-            make_directory(file_path)
 
     def test_create_output_path_none(self, temp_dir):
         """Test create_output_path with None output_path."""
@@ -291,3 +242,85 @@ class TestUtilityEdgeCases:
                 filename="output.png",
                 out_dir=None,
             )
+
+
+class TestSlugify:
+    """Tests for slugify."""
+
+    def test_default_replaces_runs_and_keeps_case(self):
+        """Runs of other characters become one underscore."""
+        assert slugify("  Engine: launch (tasks) ") == "Engine_launch_tasks"
+
+    def test_lowercase(self):
+        """Lowercasing is optional."""
+        assert slugify("Engine Launch", lowercase=True) == "engine_launch"
+
+    def test_keep_extra_characters(self):
+        """Extra characters can be kept, e.g. for file labels."""
+        assert slugify("run-1.v2 final", keep="._-") == "run-1.v2_final"
+        assert slugify("run-1.v2 final") == "run_1_v2_final"
+
+    def test_fallback_when_empty(self):
+        """An empty slug falls back to the given text."""
+        assert slugify("()", fallback="timer") == "timer"
+        assert slugify("") == "item"
+
+
+class TestShouldUseLogScale:
+    """Tests for should_use_log_scale."""
+
+    def test_wide_range(self):
+        """Two orders of magnitude switch to a log axis."""
+        assert should_use_log_scale([1.0, 100.0])
+
+    def test_narrow_range(self):
+        """Smaller ranges stay linear."""
+        assert not should_use_log_scale([10.0, 20.0, 999.0])
+
+    def test_zeros_and_negatives_are_ignored(self):
+        """Only positive values count towards the range."""
+        assert not should_use_log_scale([0.0, -500.0, 5.0, 10.0])
+        assert should_use_log_scale([0.0, -1.0, 0.5, 50.0])
+
+    @pytest.mark.parametrize("values", [[], [42.0], [0.0, 0.0], [-1.0, 3.0]])
+    def test_too_few_positive_values(self, values):
+        """Fewer than two positive values never use a log axis."""
+        assert not should_use_log_scale(values)
+
+    def test_accepts_generators(self):
+        """Any iterable of values is accepted."""
+        assert should_use_log_scale(v for v in (1.0, 1000.0))
+
+
+class TestSaveFigure:
+    """Tests for save_figure."""
+
+    def test_saves_and_closes(self, temp_dir):
+        """The figure is written, closed and its path returned."""
+        fig, ax = plt.subplots()
+        ax.plot([0, 1], [0, 1])
+        path = temp_dir / "plot.png"
+
+        with patch("matplotlib.pyplot.show") as mock_show:
+            result = save_figure(fig, path, dpi=50)
+
+        assert result == path
+        assert path.exists()
+        assert not plt.fignum_exists(fig.number)
+        mock_show.assert_not_called()
+
+    def test_show_displays_before_closing(self, temp_dir):
+        """With show=True the figure is shown, then closed."""
+        fig, _ = plt.subplots()
+
+        def check_open():
+            assert plt.fignum_exists(fig.number)
+
+        with patch(
+            "matplotlib.pyplot.show",
+            side_effect=check_open,
+        ) as mock_show:
+            save_figure(fig, temp_dir / "plot.png", show=True, dpi=50)
+
+        mock_show.assert_called_once()
+        assert not plt.fignum_exists(fig.number)

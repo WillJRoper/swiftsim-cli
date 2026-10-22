@@ -1,0 +1,10 @@
+description: >
+  Commented-out timers (// and /* */), a comment containing a timer
+  format, comments inside the message call and a stray brace in a comment
+  between functions.
+functions:
+  commented: [4, 14]
+  next_function: [18, 23]
+sites:
+  comments.c:12: {function: commented, kind: operation, label: Live, start: 5, format: "Live took %.3f %s."}
+  comments.c:21: {function: next_function, kind: function, start: 19}

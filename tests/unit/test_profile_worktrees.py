@@ -1,6 +1,7 @@
 """Integration tests for worktree-based profiles using real git repos."""
 
 import argparse
+import sys
 
 import pytest
 
@@ -12,7 +13,12 @@ from swiftsim_cli.modes import show as show_mode
 from swiftsim_cli.modes import switch as switch_mode
 from swiftsim_cli.modes import update as update_mode
 from swiftsim_cli.multi_mode_args import MultiModeCLIArgs
-from swiftsim_cli.profile import ProfileError, get_profile, load_store
+from swiftsim_cli.profile import (
+    ProfileError,
+    get_profile,
+    load_store,
+    set_profile_override,
+)
 from swiftsim_cli.swiftsim_dir import (
     configure_profile,
     get_swiftsim_dir,
@@ -22,16 +28,19 @@ from swiftsim_cli.swiftsim_dir import (
 from .conftest import run_git
 
 
-def _answers(monkeypatch, *answers):
-    """Script the interactive prompts; None accepts the default."""
-    queue = list(answers)
-
-    def fake_ask(label, default="", kind="text", must_exist=False):
-        answer = queue.pop(0)
-        return default if answer is None else answer
-
-    monkeypatch.setattr(pm, "ask", fake_ask)
-    return queue
+def _editor(monkeypatch, tmp_path, **changes):
+    """Point $EDITOR at a script that applies ``changes`` to the file."""
+    script = tmp_path / "fake_editor.py"
+    script.write_text(
+        "import sys\n"
+        "from ruamel.yaml import YAML\n"
+        "yaml = YAML(typ='safe')\n"
+        "data = yaml.load(open(sys.argv[1]))\n"
+        f"data.update({changes!r})\n"
+        "yaml.dump(data, open(sys.argv[1], 'w'))\n"
+    )
+    monkeypatch.delenv("VISUAL", raising=False)
+    monkeypatch.setenv("EDITOR", f"{sys.executable} {script}")
 
 
 def _confirm(monkeypatch, *replies):
@@ -70,6 +79,7 @@ class TestNew:
         gitsetup.store()
         pm.run(_args(new="dev"))
         p = get_profile("dev")
+        assert p.worktree is not None
         assert p.worktree == gitsetup.root / "dev"
         assert (p.worktree / "src.c").exists()
         assert p.branch == "swift-cli/dev"
@@ -97,6 +107,7 @@ class TestNew:
             )
         )
         p = get_profile("feat")
+        assert p.worktree is not None
         assert (p.worktree / "feature.c").exists()
         assert _upstream(p.worktree, p.branch) == "origin/feature"
         assert p.configure_flags == ["--enable-debug", "--with-hydro=sphenix"]
@@ -179,12 +190,12 @@ class TestSwitchListShow:
         """The show mode can print the parameter file's cosmology."""
         gitsetup.store()
         pm.new_profile("dev")
-        show_mode.run(argparse.Namespace(cosmo=True, all=False))
+        show_mode.run(argparse.Namespace(name=None, cosmo=True, all=False))
         out = capsys.readouterr().out
         assert "PARAMETER FILE COSMOLOGY" in out
         assert "Omega_cdm" in out
         assert "PROFILE:" not in out
-        show_mode.run(argparse.Namespace(cosmo=False, all=True))
+        show_mode.run(argparse.Namespace(name=None, cosmo=False))
         out = capsys.readouterr().out
         assert "PROFILE: dev" in out and "Omega_cdm" in out
 
@@ -192,23 +203,26 @@ class TestSwitchListShow:
 class TestEdit:
     """profile --edit."""
 
-    def test_edit_upstream_and_flags(self, gitsetup, monkeypatch, capsys):
-        """Upstream changes re-point the branch; flags are just stored."""
+    def test_edit_upstream_and_flags(
+        self, gitsetup, monkeypatch, tmp_path, capsys
+    ):
+        """Upstream changes move the branch; flags are just stored."""
         gitsetup.store()
         pm.new_profile("dev")
-        _answers(
+        _editor(
             monkeypatch,
-            "origin/feature",
-            "--enable-ipo --with-hydro=sphenix",
-            str(gitsetup.tmp),
-            None,
-            "0.05",
-            None,
+            tmp_path,
+            upstream="origin/feature",
+            configure_flags="--enable-ipo --with-hydro=sphenix",
+            data_dir=str(gitsetup.tmp),
+            softening_coeff=0.05,
         )
         pm.run(_args(edit="dev"))
         p = get_profile("dev")
         assert p.upstream == "origin/feature"
         assert _upstream(p.worktree, p.branch) == "origin/feature"
+        # No commits of its own, so the branch moved to the new upstream
+        assert (gitsetup.root / "dev" / "feature.c").exists()
         assert p.configure_flags == ["--enable-ipo", "--with-hydro=sphenix"]
         assert p.configured_flags is None
         assert p.data_dir == gitsetup.tmp.resolve()
@@ -216,13 +230,28 @@ class TestEdit:
         assert p.softening_pivot_z == 2.7
         assert "reconfigure" in capsys.readouterr().out
 
-    def test_edit_bad_upstream(self, gitsetup, monkeypatch):
-        """An unknown upstream is a clean error and nothing is saved."""
+    def test_edit_unchanged(self, gitsetup, monkeypatch, tmp_path, capsys):
+        """Quitting without changes saves nothing."""
         gitsetup.store()
         pm.new_profile("dev")
-        _answers(monkeypatch, "origin/nope", None, None, None, None, None)
-        with pytest.raises(ProfileError, match="origin/nope"):
-            pm.edit_profile("dev")
+        _editor(monkeypatch, tmp_path)
+        before = profile_mod.PROFILE_FILE.read_bytes()
+        pm.edit_profile("dev")
+        assert profile_mod.PROFILE_FILE.read_bytes() == before
+        assert "unchanged" in capsys.readouterr().out
+
+    def test_edit_bad_values(self, gitsetup, monkeypatch, tmp_path):
+        """Bad edits are clean errors and nothing is saved."""
+        gitsetup.store()
+        pm.new_profile("dev")
+        for changes, match in (
+            ({"upstream": "origin/nope"}, "origin/nope"),
+            ({"softening_coeff": "soft"}, "must be a number"),
+            ({"colour": "red"}, "may only contain"),
+        ):
+            _editor(monkeypatch, tmp_path, **changes)
+            with pytest.raises(ProfileError, match=match):
+                pm.edit_profile("dev")
         assert get_profile("dev").upstream == "origin/master"
 
 
@@ -298,7 +327,7 @@ class TestUpdate:
         assert _configure_runs(wt) == ["--enable-debug"]
 
         gitsetup.push("master", "src.c", "int x = 2;\n")
-        update_mode.run(argparse.Namespace(nr_threads=1))
+        update_mode.run(argparse.Namespace(nr_threads=1, no_build=False))
         assert (wt / "src.c").read_text() == "int x = 2;\n"
         assert len(_configure_runs(wt)) == 1
 
@@ -429,7 +458,7 @@ class TestConfig:
         gitsetup.store()
         pm.new_profile("dev")
         wt = gitsetup.root / "dev"
-        configure_profile(get_profile("dev"), [])
+        configure_profile(get_profile("dev"), ["--enable-debug"])
         cache = (
             profile_mod.PROFILE_FILE.parent
             / "cache"
@@ -451,7 +480,7 @@ class TestConfig:
         pm.new_profile("dev")
         wt = gitsetup.root / "dev"
         args = MultiModeCLIArgs(
-            ["config", "--debug", "--with-hydro=sphenix"]
+            ["config", "--debug-build", "--with-hydro=sphenix"]
         ).modes[0][1]
         config_mode.run(args)
         expected = [
@@ -467,7 +496,8 @@ class TestConfig:
         config_mode.run(MultiModeCLIArgs(["config"]).modes[0][1])
         assert _configure_runs(wt)[-1] == " ".join(expected)
 
-        config_mode.run(MultiModeCLIArgs(["config", "--show"]).modes[0][1])
+        argv = ["config", "--list-options"]
+        config_mode.run(MultiModeCLIArgs(argv).modes[0][1])
 
         with pytest.raises(ProfileError, match="did you mean"):
             config_mode.run(
@@ -486,171 +516,29 @@ class TestOverride:
         assert get_swiftsim_dir() == gitsetup.root / "a"
         parsed = MultiModeCLIArgs(["--profile", "b", "make", "-j", "2"])
         assert parsed.modes[0][1].nr_threads == 2
+        # Parsing has no side effects; cli.main applies the override
+        assert get_swiftsim_dir() == gitsetup.root / "a"
+        set_profile_override(parsed.global_args.profile)
         assert get_swiftsim_dir() == gitsetup.root / "b"
         make_mode.run(parsed.modes[0][1])
         assert (gitsetup.root / "b" / "swift").exists()
         assert not (gitsetup.root / "a" / "swift").exists()
         assert load_store().current == "a"
-        MultiModeCLIArgs(["make"])
+        set_profile_override(MultiModeCLIArgs(["make"]).global_args.profile)
         assert get_swiftsim_dir() == gitsetup.root / "a"
 
     def test_unknown_override(self, gitsetup):
         """An unknown --profile is a clean error."""
         gitsetup.store()
         pm.new_profile("a")
-        MultiModeCLIArgs(["--profile", "zzz", "make"])
+        # Fails as soon as the override is set, before any mode runs
         with pytest.raises(ProfileError, match="Unknown profile 'zzz'"):
-            get_swiftsim_dir()
-
-
-class TestInit:
-    """profile --init."""
-
-    def _init_answers(self, monkeypatch, gitsetup, name="default"):
-        _answers(
-            monkeypatch,
-            str(gitsetup.repo),
-            None,  # worktree root default
-            name,
-            None,  # upstream default
-            "--enable-debug",
-            str(gitsetup.tmp),
-            "",  # parameter file default
-            None,
-            None,
-        )
-
-    def test_init_fresh(self, gitsetup, monkeypatch):
-        """Init creates the store and first worktree."""
-        self._init_answers(monkeypatch, gitsetup)
-        pm.run(_args(init=True))
-        store = load_store()
-        assert store.repo == gitsetup.repo
-        assert (
-            store.worktree_root == gitsetup.repo.parent / "swiftsim-profiles"
-        )
-        assert store.current == "default"
-        p = store.profiles["default"]
-        assert p.upstream == "origin/master"
-        assert p.configure_flags == ["--enable-debug"]
-        assert (p.worktree / "src.c").exists()
-
-    def test_init_keeps_existing(self, gitsetup, monkeypatch):
-        """Re-running init needs confirmation and keeps profiles."""
-        gitsetup.store()
-        pm.new_profile("old")
-        _confirm(monkeypatch, False)
-        pm.init_profiles()
-        assert list(load_store().profiles) == ["old"]
-
-        _confirm(monkeypatch, True)
-        _answers(
-            monkeypatch, None, None, "second", None, "", None, "", None, None
-        )
-        pm.init_profiles()
-        store = load_store()
-        assert set(store.profiles) == {"old", "second"}
-        assert store.current == "second"
-
-    def test_init_refuses_legacy(self, gitsetup):
-        """Init on an old-format file points at --migrate."""
-        profile_mod.PROFILE_FILE.parent.mkdir(parents=True)
-        profile_mod.PROFILE_FILE.write_text("Default:\n  branch: master\n")
-        with pytest.raises(ProfileError, match="--migrate"):
-            pm.init_profiles()
-
-
-class TestMigrate:
-    """profile --migrate."""
-
-    def _write_legacy(self, gitsetup, current_branch="master"):
-        repo = gitsetup.repo
-        profile_mod.PROFILE_FILE.parent.mkdir(parents=True)
-        profile_mod.PROFILE_FILE.write_text(
-            f"Current:\n"
-            f"  swiftsim_dir: {repo}\n"
-            f"  data_dir: {gitsetup.tmp}\n"
-            f"  branch: {current_branch}\n"
-            f"Default:\n"
-            f"  swiftsim_dir: {repo}\n"
-            f"  data_dir: {gitsetup.tmp}\n"
-            f"  branch: master\n"
-            f"  softening_coeff: 0.05\n"
-            f"  h: 0.6777\n"
-            f"  template_params: {repo}/examples/parameter_example.yml\n"
-            f"feat:\n"
-            f"  swiftsim_dir: {repo}\n"
-            f"  data_dir: {gitsetup.tmp}\n"
-            f"  branch: feature\n"
-        )
-
-    def test_migrate(self, gitsetup, monkeypatch, capsys):
-        """Old profiles become worktrees; the old file is backed up."""
-        self._write_legacy(gitsetup, current_branch="feature")
-        old = profile_mod.PROFILE_FILE.read_text()
-        _confirm(monkeypatch, True)
-        pm.run(_args(migrate=True))
-        assert "MIGRATION PLAN" in capsys.readouterr().out
-
-        backup = profile_mod.PROFILE_FILE.with_name("profiles.yaml.bak")
-        assert backup.read_text() == old
-        store = load_store()
-        assert store.repo == gitsetup.repo
-        assert set(store.profiles) == {"default", "feat"}
-        assert store.current == "feat"
-        d, f = store.profiles["default"], store.profiles["feat"]
-        assert d.upstream == "origin/master"
-        assert f.upstream == "origin/feature"
-        assert _upstream(f.worktree, "swift-cli/feat") == "origin/feature"
-        assert d.softening_coeff == 0.05
-        assert d.data_dir == gitsetup.tmp
-        assert d.parameter_file == (
-            store.worktree_root
-            / "default"
-            / "examples"
-            / "parameter_example.yml"
-        )
-        assert d.parameter_file.exists()
-
-        pm.migrate_profiles()  # already migrated: no-op
-        assert "already" in capsys.readouterr().out
-
-    def test_migrate_declined_and_unmatched_current(
-        self, gitsetup, monkeypatch, capsys
-    ):
-        """Declining leaves the old file; unmatched Current is reported."""
-        run_git("branch", "local-only", cwd=gitsetup.repo)
-        self._write_legacy(gitsetup, current_branch="local-only")
-        _confirm(monkeypatch, False)
-        pm.migrate_profiles()
-        assert "matches no named profile" in capsys.readouterr().out
-        assert not profile_mod.PROFILE_FILE.with_name(
-            "profiles.yaml.bak"
-        ).exists()
-        with pytest.raises(ProfileError, match="--migrate"):
-            load_store()
-
-    def test_migrate_local_branch_and_failure(self, gitsetup, monkeypatch):
-        """Local-only branches are tracked locally; failures are reported."""
-        run_git("branch", "local-only", cwd=gitsetup.repo)
-        profile_mod.PROFILE_FILE.parent.mkdir(parents=True)
-        profile_mod.PROFILE_FILE.write_text(
-            f"Default:\n  swiftsim_dir: {gitsetup.repo}\n"
-            f"  branch: local-only\n"
-            f"gone:\n  swiftsim_dir: {gitsetup.repo}\n  branch: missing\n"
-        )
-        _confirm(monkeypatch, True)
-        with pytest.raises(ProfileError, match="Failed to migrate: gone"):
-            pm.migrate_profiles()
-        store = load_store()
-        assert list(store.profiles) == ["default"]
-        assert store.profiles["default"].upstream == "local-only"
-        assert store.current == "default"
-
-    def test_migrate_without_file(self):
-        """Nothing to migrate is an error."""
-        with pytest.raises(ProfileError, match="--init"):
-            pm.migrate_profiles()
+            set_profile_override(
+                MultiModeCLIArgs(
+                    ["--profile", "zzz", "make"]
+                ).global_args.profile
+            )
+        assert get_swiftsim_dir() == gitsetup.root / "a"
 
 
 class TestAdopt:

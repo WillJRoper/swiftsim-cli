@@ -1,0 +1,23 @@
+description: >
+  Text after the time: a parenthesised remark keeps a function timer;
+  unparenthesised text makes an operation labelled "took ... <text>".
+functions:
+  engine_prepare: [3, 8]
+  engine_marktasks: [10, 21]
+sites:
+  suffixes.c:6: {function: engine_prepare, kind: function, label: ""}
+  suffixes.c:13: {function: engine_marktasks, kind: operation, label: took ... to find active cells}
+  suffixes.c:16: {function: engine_marktasks, kind: operation, label: took ... to duplicate the list}
+  suffixes.c:19: {function: engine_marktasks, kind: operation, label: Marking}
+lines:
+  suffixes.c:6:
+    match:
+      - {body: "took 26.726 ms (including unskip, rebuild and reweight).", ms: 26.726, key: engine_prepare}
+    reject: ["took 26.726 ms."]
+  suffixes.c:13:
+    match:
+      - {body: "took 1.000 ms to find active cells.", ms: 1.0, key: "engine_marktasks: took ... to find active cells"}
+    reject: ["took 1.000 ms to duplicate the list."]
+  suffixes.c:19:
+    match:
+      - {body: "Marking took 2.000 ms (17 cells).", ms: 2.0}

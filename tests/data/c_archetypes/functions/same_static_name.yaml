@@ -1,0 +1,25 @@
+description: >
+  The same static function name in two files. The log only prints the
+  function name, so identical messages are one logical timer with a site in
+  each file; different messages stay separate timers.
+functions:
+  engine_a.c:make_tasks: [3, 8]
+  engine_a.c:link_tasks: [10, 15]
+  engine_b.c:make_tasks: [3, 8]
+  engine_b.c:link_tasks: [10, 15]
+sites:
+  engine_a.c:6: {function: make_tasks, kind: function, start: 4}
+  engine_b.c:6: {function: make_tasks, kind: function, start: 4}
+  engine_a.c:13: {function: link_tasks, kind: operation, label: Linking A}
+  engine_b.c:13: {function: link_tasks, kind: operation, label: Linking B}
+timers:
+  - [engine_a.c:6, engine_b.c:6]
+  - [engine_a.c:13]
+  - [engine_b.c:13]
+log:
+  text: |
+    [0001] [00010.0] make_tasks: took 2.000 ms.
+    [0001] [00010.1] link_tasks: Linking B took 3.000 ms.
+  records:
+    - [1, make_tasks, make_tasks, 2.0]
+    - [1, link_tasks, "link_tasks: Linking B", 3.0]

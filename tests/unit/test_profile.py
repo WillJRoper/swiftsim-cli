@@ -1,5 +1,7 @@
 """Unit tests for profile storage, resolution and configure parsing."""
 
+import os
+
 import pytest
 
 from swiftsim_cli import profile as profile_mod
@@ -7,6 +9,7 @@ from swiftsim_cli.profile import (
     ProfileError,
     ProfileStore,
     SWIFTCLIProfile,
+    check_new_profile_name,
     get_profile,
     get_profile_cache_dir,
     git,
@@ -70,24 +73,45 @@ class TestStore:
         assert get_profile("a").upstream == "origin/feature"
 
     def test_missing_and_empty_file(self):
-        """A missing or empty file asks the user to run --init."""
-        with pytest.raises(ProfileError, match="--init"):
+        """A missing or empty file asks the user to run swift-cli init."""
+        with pytest.raises(ProfileError, match="swift-cli init"):
             load_store()
         profile_mod.PROFILE_FILE.parent.mkdir(parents=True)
         profile_mod.PROFILE_FILE.write_text("")
-        with pytest.raises(ProfileError, match="--init"):
+        with pytest.raises(ProfileError, match="swift-cli init"):
             load_store()
 
-    def test_legacy_file(self):
-        """An old-format file asks the user to run --migrate."""
+    def test_permissions_follow_umask(self, tmp_path):
+        """The profile file is not created private (mkstemp's 0600)."""
+        old = os.umask(0o022)
+        try:
+            _store(tmp_path)
+        finally:
+            os.umask(old)
+        assert profile_mod.PROFILE_FILE.stat().st_mode & 0o777 == 0o644
+
+    @pytest.mark.parametrize(
+        "text, match",
+        [
+            ("version: 2\nworktree_root: /x\n", "missing key 'repo'"),
+            ("version: 2\nrepo: [\n", "Malformed"),
+            (
+                "version: 2\nrepo: /r\nworktree_root: /w\nprofiles: [1]\n",
+                "Malformed",
+            ),
+            (
+                "version: 2\nrepo: /r\nworktree_root: /w\n"
+                "profiles:\n  a:\n    softening_coeff: soft\n",
+                "Malformed",
+            ),
+        ],
+    )
+    def test_malformed_file_is_profile_error(self, text, match):
+        """Broken files give a ProfileError, not a traceback."""
         profile_mod.PROFILE_FILE.parent.mkdir(parents=True)
-        profile_mod.PROFILE_FILE.write_text(
-            "Current:\n  swiftsim_dir: /x\nDefault:\n  swiftsim_dir: /x\n"
-        )
-        with pytest.raises(ProfileError, match="--migrate"):
+        profile_mod.PROFILE_FILE.write_text(text)
+        with pytest.raises(ProfileError, match=match):
             load_store()
-        with pytest.raises(ProfileError, match="--migrate"):
-            load_swift_profile()
 
     def test_bad_version_and_malformed(self):
         """Unknown versions and non-mapping files are rejected."""
@@ -121,9 +145,15 @@ class TestResolution:
     def test_unknown_profile_suggests(self, tmp_path):
         """Unknown names give a clean error with close matches."""
         _store(tmp_path)
-        set_profile_override("aa")
         with pytest.raises(ProfileError, match="Did you mean: a"):
-            get_profile()
+            get_profile("aa")
+
+    def test_unknown_override_fails_early(self, tmp_path):
+        """--profile NAME is checked when set, not when first used."""
+        _store(tmp_path)
+        with pytest.raises(ProfileError, match="Did you mean: a"):
+            set_profile_override("aa")
+        assert get_profile().name == "a"
 
     def test_no_current(self, tmp_path):
         """A store with no current profile errors cleanly."""
@@ -142,11 +172,11 @@ class TestResolution:
 
     def test_timer_files_use_profile_cache(self, tmp_path):
         """Timer databases live in the active profile's cache dir."""
-        from swiftsim_cli import src_parser
+        from swiftsim_cli.timing import timer_db
 
         _store(tmp_path)
         expected = profile_mod.PROFILE_FILE.parent / "cache" / "a"
-        assert src_parser._timer_file() == expected / "timers.yaml"
+        assert timer_db._db_cache_dir() == expected / "timer_db"
 
 
 class TestHelpers:
@@ -157,11 +187,32 @@ class TestHelpers:
         """Reasonable names pass."""
         validate_profile_name(name)
 
-    @pytest.mark.parametrize("name", ["", "-x", "a/b", "has space", "../x"])
+    @pytest.mark.parametrize(
+        "name",
+        [
+            "",
+            "-x",
+            "a/b",
+            "has space",
+            "../x",
+            "default.",
+            "foo.lock",
+            "foo..bar",
+        ],
+    )
     def test_invalid_names(self, name):
         """Names unusable as branch/directory names fail."""
         with pytest.raises(ProfileError, match="Invalid profile name"):
             validate_profile_name(name)
+
+    def test_new_name_case_clash(self, tmp_path):
+        """Names differing only in case clash (macOS file systems)."""
+        store = _store(tmp_path)
+        with pytest.raises(ProfileError, match="'a' already exists.*case"):
+            check_new_profile_name(store, "A")
+        with pytest.raises(ProfileError, match="'a' already exists\\.$"):
+            check_new_profile_name(store, "a")
+        check_new_profile_name(store, "c")
 
     def test_git_error_message(self, tmp_path):
         """Git failures surface git's stderr."""
@@ -192,26 +243,7 @@ class TestHelpers:
 
 
 class TestPrompts:
-    """The interactive prompt helpers."""
-
-    def _ask(self, keys, *args, **kwargs):
-        from prompt_toolkit.application import create_app_session
-        from prompt_toolkit.input import create_pipe_input
-        from prompt_toolkit.output import DummyOutput
-
-        with create_pipe_input() as inp:
-            inp.send_text(keys)
-            with create_app_session(input=inp, output=DummyOutput()):
-                return profile_mod.ask(*args, **kwargs)
-
-    def test_ask_text_and_paths(self, tmp_path):
-        """Text and path prompts return the (default) answer."""
-        assert self._ask(" hello \r", "Q: ") == "hello"
-        assert self._ask("\r", "Q: ", default="dflt") == "dflt"
-        answer = self._ask(
-            "\r", "D: ", default=str(tmp_path), kind="dir", must_exist=True
-        )
-        assert answer == str(tmp_path)
+    """The confirmation prompt."""
 
     def test_confirm(self, monkeypatch):
         """Only an explicit yes confirms."""

@@ -9,49 +9,94 @@ from swiftsim_cli.swiftsim_dir import (
     ensure_configure_script,
     get_swiftsim_dir,
 )
+from swiftsim_cli.utilities.messages import warn
+
+# Preset flag -> (description, configure options)
+PRESETS: dict[str, tuple[str, list[str]]] = {
+    "--debug-build": (
+        "debug",
+        [
+            "--enable-debug",
+            "--enable-debugging-checks",
+            "--disable-optimization",
+        ],
+    ),
+    "--gravity": (
+        "gravity-only",
+        ["--enable-ipo", "--with-tbbmalloc", "--with-parmetis"],
+    ),
+    "--eagle": (
+        "EAGLE",
+        [
+            "--with-subgrid=EAGLE",
+            "--with-hydro=sphenix",
+            "--with-kernel=wendland-C2",
+            "--enable-ipo",
+            "--with-tbbmalloc",
+            "--with-parmetis",
+        ],
+    ),
+    "--eaglexl": (
+        "EAGLE-XL",
+        [
+            "--with-subgrid=EAGLE-XL",
+            "--with-hydro=sphenix",
+            "--with-kernel=wendland-C2",
+            "--enable-ipo",
+            "--with-tbbmalloc",
+            "--with-parmetis",
+        ],
+    ),
+}
+
+# Presets that set the same options differently
+EXCLUSIVE_PRESETS = ("--eagle", "--eaglexl")
 
 
 def add_arguments(parser: argparse.ArgumentParser) -> None:
     """Add arguments for configuring SWIFT itself."""
-    # Show the configuration options (equivalent to running
-    # `./configure --help`).
-    parser.add_argument(
-        "--show",
-        "-s",
-        action="store_true",
-        help="Show the available configuration options.",
+    parser.epilog = (
+        "Any other --<option>[=value] flags and VAR=value assignments are "
+        "passed to ./configure after being checked against its options "
+        "(list them with --list-options)."
     )
     parser.add_argument(
-        "--debug",
-        "-d",
+        "--list-options",
         action="store_true",
-        help="Configure using the preset debug options "
-        "(--enable-debug --enable-debugging-checks --disable-optimization).",
+        help="List the available ./configure options (./configure --help) "
+        "and exit.",
     )
-    parser.add_argument(
-        "--gravity",
-        "-g",
-        action="store_true",
-        help="Configure using the preset gravity-only options "
-        "(--enable-ipo --with-tbbmalloc --with-parmetis).",
-    )
-    parser.add_argument(
-        "--eagle",
-        "-e",
-        action="store_true",
-        help="Configure using the preset EAGLE options "
-        "(--with-subgrid=EAGLE --with-hydro=sphenix --with-kernel=wendland-C2 "
-        "--enable-ipo --with-tbbmalloc  --with-parmetis).",
-    )
-    parser.add_argument(
-        "--eaglexl",
-        "-x",
-        action="store_true",
-        help="Configure using the preset EAGLE-XL options "
-        "(--with-subgrid=EAGLE-XL --with-hydro=sphenix "
-        "--with-kernel=wendland-C2 --enable-ipo --with-tbbmalloc "
-        "--with-parmetis).",
-    )
+    exclusive = parser.add_mutually_exclusive_group()
+    for flag, (what, opts) in PRESETS.items():
+        target = exclusive if flag in EXCLUSIVE_PRESETS else parser
+        target.add_argument(
+            flag,
+            action="store_true",
+            help=f"Configure using the preset {what} options "
+            f"({' '.join(opts)}).",
+        )
+
+
+def merge_flags(opts: list[str]) -> list[str]:
+    """Drop repeated configure flags; a later value for an option wins.
+
+    Args:
+        opts: The flags in order (presets first, then the user's).
+
+    Returns:
+        The flags with one entry per option, warning about overrides.
+    """
+    merged: dict[str, str] = {}
+    for opt in opts:
+        key = opt.split("=", 1)[0]
+        old = merged.get(key)
+        if old == opt:
+            continue
+        if old is not None:
+            warn(f"{opt} overrides {old}")
+            del merged[key]
+        merged[key] = opt
+    return list(merged.values())
 
 
 def run(args: argparse.Namespace) -> None:
@@ -65,58 +110,17 @@ def run(args: argparse.Namespace) -> None:
     Args:
         args: The parsed arguments from the command line.
     """
-    # Are we just showing the config options?
-    if args.show:
+    if args.list_options:
         show_config_options()
-    else:
-        # Build up the options to pass to the configure script
-        opts = []
-        if args.debug:
-            opts.extend(
-                [
-                    "--enable-debug",
-                    "--enable-debugging-checks",
-                    "--disable-optimization",
-                ]
-            )
-        if args.gravity:
-            opts.extend(
-                [
-                    "--enable-ipo",
-                    "--with-tbbmalloc",
-                    "--with-parmetis",
-                ]
-            )
-        if args.eagle:
-            opts.extend(
-                [
-                    "--with-subgrid=EAGLE",
-                    "--with-hydro=sphenix",
-                    "--with-kernel=wendland-C2",
-                    "--enable-ipo",
-                    "--with-tbbmalloc",
-                    "--with-parmetis",
-                ]
-            )
-        if args.eaglexl:
-            opts.extend(
-                [
-                    "--with-subgrid=EAGLE-XL",
-                    "--with-hydro=sphenix",
-                    "--with-kernel=wendland-C2",
-                    "--enable-ipo",
-                    "--with-tbbmalloc",
-                    "--with-parmetis",
-                ]
-            )
-        opts.extend(args.options)
-
-        # Remove any duplicate options while preserving order
-        unique_opts = list(dict.fromkeys(opts))
-        args.options = unique_opts
-
-        # Now run the configuration
-        config_swiftsim(opts=unique_opts or None)
+        return
+    opts = [
+        opt
+        for flag, (_, preset) in PRESETS.items()
+        if getattr(args, flag[2:].replace("-", "_"))
+        for opt in preset
+    ]
+    opts.extend(args.options)
+    config_swiftsim(opts=merge_flags(opts) or None)
 
 
 def config_swiftsim(opts: list[str] | None = None) -> None:

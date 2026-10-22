@@ -1,0 +1,20 @@
+# map_function thread_id chunk_size tic toc
+# {'num_threads': 128, 'cpufreq': 2595119055}
+engine_do_unskip_mapper 5 1 75915157482138 75915157482684
+engine_collect_end_of_step_mapper 12 283 75915199942556 75915200157732
+engine_do_drift_top_multipoles_mapper 19 43 75915114998814 75915115122964
+engine_do_drift_top_multipoles_mapper 24 1 75915115566810 75915115598842
+engine_collect_end_of_step_mapper 28 1 75915232565484 75915232637998
+engine_collect_end_of_step_mapper 36 5 75915226493860 75915226539568
+engine_do_drift_top_multipoles_mapper 44 283 75915111942540 75915112450502
+engine_do_drift_top_multipoles_mapper 50 76 75915114678494 75915115111914
+engine_do_drift_top_multipoles_mapper 57 88 75915114612194 75915114733692
+engine_do_drift_top_multipoles_mapper 63 11 75915115367572 75915115394820
+engine_collect_end_of_step_mapper 68 205 75915210972692 75915218590484
+engine_do_drift_top_multipoles_mapper 78 133 75915114356016 75915114518880
+engine_collect_end_of_step_mapper 86 2 75915230776580 75915238036248
+engine_collect_end_of_step_mapper 93 1 75915235626126 75915238093136
+engine_collect_end_of_step_mapper 100 97 75915214740248 75915214834524
+engine_do_drift_top_multipoles_mapper 107 3 75915115492398 75915115496298
+engine_do_drift_top_multipoles_mapper -1 254143 75915110554946 75915116228510
+engine_do_unskip_mapper -1 8 75915157346626 75915169444062
