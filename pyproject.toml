@@ -116,7 +116,7 @@ docs = [
 # Project urls
 [project.urls]
 "Homepage" = "https://github.com/WillJRoper/swiftsim-cli"
-"Documentation" = "https://github.com/WillJRoper/swiftsim-cli/tree/main/docs/source"
+"Documentation" = "https://swiftsim-cli.readthedocs.io"
 "Source" = "https://github.com/WillJRoper/swiftsim-cli"
 "Bug Reports" = "https://github.com/WillJRoper/swiftsim-cli/issues"
 "Changelog" = "https://github.com/WillJRoper/swiftsim-cli/blob/main/CHANGELOG.md"

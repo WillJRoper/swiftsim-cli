@@ -1,7 +1,7 @@
 swiftsim-cli
 ============
 
-|Python version| |PyPI version| |Build status| |License| |Ruff|
+|Python version| |PyPI version| |Build status| |Documentation status| |License| |Ruff|
 
 .. |Python version| image:: https://img.shields.io/python/required-version-toml?tomlFilePath=https%3A%2F%2Fraw.githubusercontent.com%2FWillJRoper%2Fswiftsim-cli%2Fmain%2Fpyproject.toml
    :alt: Supported python versions
@@ -11,6 +11,9 @@ swiftsim-cli
 .. |Build status| image:: https://github.com/WillJRoper/swiftsim-cli/actions/workflows/ci.yml/badge.svg
    :target: https://github.com/WillJRoper/swiftsim-cli/actions/workflows/ci.yml
    :alt: Build status
+.. |Documentation status| image:: https://readthedocs.org/projects/swiftsim-cli/badge/?version=latest
+   :target: https://swiftsim-cli.readthedocs.io
+   :alt: Documentation status
 .. |License| image:: https://img.shields.io/badge/license-GPL--3.0--or--later-blue
    :target: https://github.com/WillJRoper/swiftsim-cli/blob/main/LICENSE
    :alt: License: GPL-3.0-or-later
@@ -41,9 +44,9 @@ Modes can be chained, so a whole development loop is one command:
 
 .. INTRO_END_LABEL
 
-Full documentation is in the docs_ directory.
+Full documentation is available at ReadTheDocs_.
 
-.. _docs: https://github.com/WillJRoper/swiftsim-cli/tree/main/docs/source
+.. _ReadTheDocs: https://swiftsim-cli.readthedocs.io
 
 Requirements
 ------------
