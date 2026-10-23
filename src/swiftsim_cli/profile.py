@@ -499,35 +499,48 @@ def add_profile(
         ):
             raise ProfileError(f"Worktree path already exists: {worktree}")
         print(f"Reusing existing worktree {worktree} on {branch}")
-    elif ref_exists(store.repo, f"refs/heads/{branch}"):
-        if not reuse_branch:
+    else:
+        branch_exists = ref_exists(store.repo, f"refs/heads/{branch}")
+        if branch_exists and not reuse_branch:
             raise ProfileError(
                 f"Branch '{branch}' already exists (kept from an earlier "
                 f"profile '{name}'?). Use 'swift-cli profile --new {name} "
                 "--reuse-branch' to give the new profile that branch, or "
                 f"delete it with 'git -C {store.repo} branch -D {branch}'."
             )
+        # Check the upstream before creating anything, so a typo leaves no
+        # half-made worktree behind
         fetch_for_upstream(store.repo, upstream)
-        print(f"Creating worktree {worktree} on existing branch {branch}")
+        if not ref_exists(store.repo, upstream):
+            raise ProfileError(
+                f"Unknown upstream branch '{upstream}' in {store.repo} "
+                f"(list them with 'git -C {store.repo} branch -a')."
+            )
         store.worktree_root.mkdir(parents=True, exist_ok=True)
-        git("worktree", "add", str(worktree), branch, cwd=store.repo)
-        git("branch", f"--set-upstream-to={upstream}", branch, cwd=worktree)
-    else:
-        fetch_for_upstream(store.repo, upstream)
-        print(
-            f"Creating worktree {worktree} on {branch} (tracking {upstream})"
-        )
-        store.worktree_root.mkdir(parents=True, exist_ok=True)
-        git(
-            "worktree",
-            "add",
-            "--track",
-            "-b",
-            branch,
-            str(worktree),
-            upstream,
-            cwd=store.repo,
-        )
+        if branch_exists:
+            print(f"Creating worktree {worktree} on existing branch {branch}")
+            git("worktree", "add", str(worktree), branch, cwd=store.repo)
+            git(
+                "branch",
+                f"--set-upstream-to={upstream}",
+                branch,
+                cwd=worktree,
+            )
+        else:
+            print(
+                f"Creating worktree {worktree} on {branch} "
+                f"(tracking {upstream})"
+            )
+            git(
+                "worktree",
+                "add",
+                "--track",
+                "-b",
+                branch,
+                str(worktree),
+                upstream,
+                cwd=store.repo,
+            )
 
     profile = SWIFTCLIProfile(
         name=name,

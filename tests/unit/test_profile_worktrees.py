@@ -133,6 +133,21 @@ class TestNew:
             pm.new_profile("clash")
         assert list(load_store().profiles) == ["dev"]
 
+    def test_bad_upstream_leaves_nothing(self, gitsetup):
+        """An unknown upstream fails before any worktree is created."""
+        gitsetup.store()
+        with pytest.raises(ProfileError, match="Unknown upstream branch"):
+            pm.new_profile("x", upstream="origin/nope")
+        # Also when reusing a kept branch
+        run_git("branch", "swift-cli/kept", cwd=gitsetup.repo)
+        with pytest.raises(ProfileError, match="Unknown upstream branch"):
+            pm.new_profile("kept", upstream="origin/nope", reuse_branch=True)
+        assert not (gitsetup.root / "x").exists()
+        assert not (gitsetup.root / "kept").exists()
+        # So retrying with the right upstream just works
+        pm.new_profile("kept", upstream="origin/master", reuse_branch=True)
+        assert list(load_store().profiles) == ["kept"]
+
     def test_build(self, gitsetup):
         """--build runs autogen, configure with the flags, and make."""
         gitsetup.store()
