@@ -172,3 +172,28 @@ def test_startup_does_not_import_heavy_dependencies():
         check=True,
     )
     assert result.stdout.splitlines()[-2:] == ["[]", "True"]
+
+
+def test_main_closed_stdout_is_quiet(tmp_path):
+    """Piping into e.g. head stops quietly with SIGPIPE's exit code."""
+    script = tmp_path / "pipe.py"
+    script.write_text(
+        "from unittest.mock import Mock\n"
+        "from swiftsim_cli import cli\n"
+        "mode = Mock()\n"
+        "mode.run.side_effect = lambda args: print('x\\n' * 100000)\n"
+        "cli.load_mode = lambda name: mode\n"
+        "cli.main(['make'])\n"
+    )
+    proc = subprocess.Popen(
+        [sys.executable, str(script)],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    assert proc.stdout is not None and proc.stderr is not None
+    proc.stdout.readline()
+    proc.stdout.close()  # the reader goes away mid-output
+    err = proc.stderr.read()
+    assert proc.wait() == 141
+    assert err == ""

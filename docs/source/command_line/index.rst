@@ -142,3 +142,5 @@ lines and do not stop the chain.
 + ``2``: a usage error (unknown option, invalid value, missing input file).
 + A failed external command (``configure``, ``make``, ``git``) exits with
   its own code; an interrupt exits with 130.
++ ``141``: the output was piped into a command that stopped reading (e.g.
+  ``head``); nothing more is printed, as for a shell command.

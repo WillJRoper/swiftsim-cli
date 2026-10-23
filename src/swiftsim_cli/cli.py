@@ -74,6 +74,15 @@ def main(argv: list[str] | None = None) -> None:
             _ = load_parameters(getattr(args, "params", None))
 
             load_mode(mode_name).run(args)
+
+        # Surface a closed stdout (e.g. piped into head) here, not as an
+        # ignored exception at interpreter exit
+        sys.stdout.flush()
+    except BrokenPipeError:
+        # The reader went away: stop quietly, like a shell command killed
+        # by SIGPIPE. Point stdout at devnull so the exit flush can't fail.
+        os.dup2(os.open(os.devnull, os.O_WRONLY), sys.stdout.fileno())
+        sys.exit(128 + 13)
     except KeyboardInterrupt:
         if debug:
             raise
