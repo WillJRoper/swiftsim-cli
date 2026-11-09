@@ -142,6 +142,18 @@ class TestResolution:
         set_profile_override("b")
         assert load_swift_profile().name == "b"
 
+    def test_own_parameter_file(self, tmp_path):
+        """Only a set, non-example parameter file counts."""
+        assert profile_mod.own_parameter_file() is None
+        _store(tmp_path)
+        own = tmp_path / "own.yml"
+        profile_mod.update_profile_fields("a", parameter_file=own)
+        assert profile_mod.own_parameter_file() == own
+        profile_mod.update_profile_fields(
+            "a", parameter_file=tmp_path / "parameter_example.yml"
+        )
+        assert profile_mod.own_parameter_file() is None
+
     def test_unknown_profile_suggests(self, tmp_path):
         """Unknown names give a clean error with close matches."""
         _store(tmp_path)

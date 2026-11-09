@@ -308,6 +308,38 @@ class TestCLI:
         )
         assert read_list(out)[1] == pytest.approx([0.1, 0.2, 0.3, 0.4, 0.5])
 
+    def test_falls_back_to_profile_parameter_file(
+        self, tmp_path, monkeypatch, capsys
+    ):
+        """Without -P the profile's own parameter file gives the cosmology.
+
+        -P always wins.
+        """
+        own = tmp_path / "own.yml"
+        own.write_text(COSMO_PARAMS.replace("a_end: 1.0", "a_end: 0.5"))
+        monkeypatch.setattr(
+            "swiftsim_cli.modes.output_times.own_parameter_file", lambda: own
+        )
+        out = tmp_path / "list.txt"
+        argv = [
+            "output-times",
+            "--first-snap-scale-factor",
+            "0.1",
+            "--delta-scale-factor",
+            "0.1",
+            "--output-list",
+            str(out),
+            "--force",
+        ]
+        main(argv)
+        assert read_list(out)[1] == pytest.approx([0.1, 0.2, 0.3, 0.4, 0.5])
+        assert str(own) in capsys.readouterr().err
+
+        explicit = tmp_path / "explicit.yml"
+        explicit.write_text(COSMO_PARAMS.replace("a_end: 1.0", "a_end: 0.3"))
+        main([*argv, "-P", str(explicit)])
+        assert read_list(out)[1] == pytest.approx([0.1, 0.2, 0.3])
+
 
 def test_converter_without_cosmology_passes_time_through():
     """Time is its own ordering without a cosmology."""

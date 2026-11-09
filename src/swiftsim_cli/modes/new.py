@@ -28,7 +28,7 @@ from swiftsim_cli.params import (
     check_swift_parameter_text,
     round_trip_yaml,
 )
-from swiftsim_cli.profile import load_swift_profile
+from swiftsim_cli.profile import load_swift_profile, own_parameter_file
 from swiftsim_cli.templates import TEMPLATES, choose_template, template_path
 from swiftsim_cli.utilities.messages import note, warn
 
@@ -36,7 +36,6 @@ yaml = round_trip_yaml()
 
 # The (unrunnable) SWIFT example that lists every parameter; never used as
 # a base even if a profile points at it
-SWIFT_PARAMETER_EXAMPLE = "parameter_example.yml"
 
 
 def _kv_pair(arg: str) -> Tuple[str, str]:
@@ -160,9 +159,7 @@ def base_parameters(
         The parameters and a description of where they came from.
     """
     if params_file is None and template is None:
-        profile_file = load_swift_profile().parameter_file
-        if profile_file and profile_file.name != SWIFT_PARAMETER_EXAMPLE:
-            params_file = profile_file
+        params_file = own_parameter_file()
     if params_file is not None:
         params = _parse_parameters(Path(params_file).expanduser())
         return params, str(params_file)

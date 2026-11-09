@@ -25,6 +25,7 @@ from swiftsim_cli.cosmology import (
 )
 from swiftsim_cli.modes.common_args import add_params_argument, positive_float
 from swiftsim_cli.params import load_parameters
+from swiftsim_cli.profile import own_parameter_file
 from swiftsim_cli.utilities.messages import note
 
 # Units of the first/final outputs, and of the spacings
@@ -324,7 +325,8 @@ def generate_output_list(args: dict) -> None:
         raise ValueError(
             "converting between time and redshift or scale factor needs a "
             "cosmology: give a parameter file with a Cosmology section "
-            "(-P/--params), or give everything in time"
+            "(-P/--params, or the profile's parameter_file), or give "
+            "everything in time"
         )
 
     # Check the range against the run's
@@ -385,5 +387,14 @@ def generate_output_list(args: dict) -> None:
 
 
 def run(args: argparse.Namespace) -> None:
-    """Execute the output-times mode."""
+    """Execute the output-times mode.
+
+    Without -P/--params the profile's own parameter file (not SWIFT's
+    parameter_example.yml) supplies the cosmology and units.
+    """
+    if args.params is None:
+        params = own_parameter_file()
+        if params is not None:
+            note(f"using the profile's parameter file {params}")
+            load_parameters(params)
     generate_output_list(vars(args))

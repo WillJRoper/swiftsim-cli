@@ -88,6 +88,11 @@ interval are each given in one unit (``--first-snap-{z,time,scale-factor}``,
 errors. ``--delta-log-scale-factor`` is the interval in log\ :sub:`10`\ (a).
 The final output defaults to ``Cosmology:a_end`` from the parameter file.
 
+Without ``-P/--params``, the cosmology and units come from the profile's
+``parameter_file`` (set with ``init -P`` or ``profile --edit``), unless
+that is still SWIFT's ``examples/parameter_example.yml``; a note names the
+file used.
+
 The list is written to ``--output-list FILE`` (default: ``output_list.txt``
 in the current directory); an existing list is only replaced with
 ``--force``. The interval chooses the units of the list, and

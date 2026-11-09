@@ -322,6 +322,23 @@ def load_swift_profile() -> SWIFTCLIProfile:
     return get_profile()
 
 
+def own_parameter_file() -> Path | None:
+    """The active profile's parameter file, if it is the user's own.
+
+    SWIFT's ``examples/parameter_example.yml`` (the default) is only a
+    stand-in, so it does not count. Without profiles or a current one
+    there is none.
+    """
+    if not PROFILE_FILE.exists():
+        return None
+    if not (_PROFILE_OVERRIDE or load_store().current):
+        return None
+    path = get_profile().parameter_file
+    if path is None or path.name == "parameter_example.yml":
+        return None
+    return path
+
+
 def update_profile_fields(name: str, **changes: Any) -> SWIFTCLIProfile:
     """Update fields of a stored profile and save.
 

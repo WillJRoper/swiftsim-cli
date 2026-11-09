@@ -374,25 +374,19 @@ class TestOutputFile:
         assert f"Starting from {own}" in capsys.readouterr().out
 
     def test_profile_parameter_file(self, run_dir, monkeypatch):
-        """The profile's parameter_file is used unless it is the example."""
-        from types import SimpleNamespace
-
+        """The profile's own parameter_file is the default base file."""
         own = run_dir.parent / "own.yml"
         own.write_text("MetaData:\n  run_name: from-profile\n")
-        example = run_dir.parent / "parameter_example.yml"
-        example.write_text("Bad: [\n")
-        profile = SimpleNamespace(
-            parameter_file=own, softening_coeff=0.04, softening_pivot_z=2.7
-        )
+        mine: list = [own]
         monkeypatch.setattr(
-            "swiftsim_cli.modes.new.load_swift_profile", lambda: profile
+            "swiftsim_cli.modes.new.own_parameter_file", lambda: mine[0]
         )
         ics = write_ics(run_dir.parent / "ics.hdf5", box=10.0)
         make_new_run_dir(run_dir, ics)
         assert load(run_dir / "params.yml")["MetaData"]["run_name"] == (
             "from-profile"
         )
-        profile.parameter_file = example
+        mine[0] = None  # e.g. the profile has SWIFT's parameter_example.yml
         make_new_run_dir(run_dir, ics, force=True)
         assert (
             "isolated" in load(run_dir / "params.yml")["MetaData"]["run_name"]
