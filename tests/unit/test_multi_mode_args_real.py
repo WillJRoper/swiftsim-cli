@@ -50,13 +50,6 @@ def test_global_args():
     assert mode_args.nr_threads == 8
 
 
-def test_debug_after_mode_is_not_global():
-    """--debug after a mode is not the global flag (config passes it on)."""
-    parser = MultiModeCLIArgs(["config", "--debug"])
-    assert parser.global_args.debug is False
-    assert parser.modes[0][1].options == ["--debug"]
-
-
 def test_help_arg(capsys):
     """Test help argument handling."""
     with pytest.raises(SystemExit):
@@ -92,6 +85,24 @@ def test_unknown_leading_argument_is_a_usage_error(argv, capsys):
     err = capsys.readouterr().err
     assert "usage: swift-cli" in err
     assert f"unknown mode or option '{argv[0]}'" in err
+
+
+@pytest.mark.parametrize(
+    "argv, hint",
+    [
+        (["mkae"], "did you mean 'make'?"),
+        (["make", "--", "shwo"], "did you mean 'show'?"),
+        (["make", "--profile", "zoom"], "--profile is a global option"),
+        (["config", "--debug"], "--debug is a global option"),
+        (["show", "--profile=zoom"], "--profile is a global option"),
+    ],
+)
+def test_usage_error_hints(argv, hint, capsys):
+    """Mode typos suggest the closest mode; misplaced globals say where."""
+    with pytest.raises(SystemExit) as excinfo:
+        MultiModeCLIArgs(argv)
+    assert excinfo.value.code == 2
+    assert hint in capsys.readouterr().err
 
 
 @pytest.mark.parametrize("argv", [[], ["--debug"], ["--profile", "x"]])

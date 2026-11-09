@@ -12,6 +12,7 @@ must name a mode (``config --enable-debug -- make -j 8``).
 """
 
 import argparse
+import difflib
 import re
 import sys
 from typing import List, Sequence, Tuple, cast
@@ -143,6 +144,17 @@ class _ModeScanner:
             return False
         self.open, self.seen = (None if nargs == "?" else nargs), 1
         return True
+
+
+# Options only accepted before the first mode
+GLOBAL_OPTIONS = ("--profile", "--debug")
+
+
+def _choose_mode_hint(token: str) -> str:
+    """Return the "(choose from ...)" hint, naming a close mode first."""
+    close = difflib.get_close_matches(token, AVAILABLE_MODES, n=1)
+    hint = f"did you mean '{close[0]}'? " if close else ""
+    return f"{hint}choose from: {', '.join(AVAILABLE_MODES)}"
 
 
 def _finish_parser(parser: argparse.ArgumentParser) -> None:
@@ -279,8 +291,8 @@ class MultiModeCLIArgs:
             sys.exit(0)
         if unknown:
             parser.error(
-                f"unknown mode or option '{unknown[0]}' (choose from: "
-                f"{', '.join(AVAILABLE_MODES)})"
+                f"unknown mode or option '{unknown[0]}' "
+                f"({_choose_mode_hint(unknown[0])})"
             )
         if split == len(argv):
             self._print_help()
@@ -308,7 +320,7 @@ class MultiModeCLIArgs:
                 if arg not in AVAILABLE_MODES:
                     self._global_parser().error(
                         f"expected a mode after '{MODE_TERMINATOR}', got "
-                        f"'{arg}' (choose from: {', '.join(AVAILABLE_MODES)})"
+                        f"'{arg}' ({_choose_mode_hint(arg)})"
                     )
                 mode_name = cast(Mode, arg)
                 parser = self._mode_parser(mode_name)
@@ -352,6 +364,16 @@ class MultiModeCLIArgs:
         Returns:
             Parsed arguments namespace
         """
+        for arg in mode_argv:
+            name = arg.split("=", 1)[0]
+            if (
+                name in GLOBAL_OPTIONS
+                and name not in parser._option_string_actions
+            ):
+                parser.error(
+                    f"{name} is a global option: put it before the first "
+                    f"mode (swift-cli {name} ... {mode_name} ...)"
+                )
         # Config passes unknown --<option> flags through to ./configure
         if mode_name == "config":
             args, unknown = parser.parse_known_args(mode_argv)
