@@ -18,14 +18,11 @@ Installing
 Setting up
 ----------
 
-``swift-cli init`` sets everything up once, without prompts:
+.. include:: ../../../README.rst
+   :start-after: SETUP_START_LABEL
+   :end-before: SETUP_END_LABEL
 
-.. code-block:: bash
-
-   swift-cli init                           # clone SWIFT into ./swiftsim
-   swift-cli init --swift-path ~/swiftsim   # or use an existing clone
-
-It clones SWIFT from ``--swift-url`` (default: the GitHub mirror,
+``init`` runs without prompts. It clones SWIFT from ``--swift-url`` (default: the GitHub mirror,
 ``https://github.com/SWIFTSIM/SWIFT.git``) unless ``--swift-path`` is
 given (any directory inside the clone, or another worktree of it, means
 the clone itself), then creates the first profile:
@@ -33,6 +30,8 @@ the clone itself), then creates the first profile:
 + ``--name``: the profile's name (default: ``default``).
 + ``--upstream``: the branch it follows (default: ``origin/master``).
 + ``--configure-flags``: its configure flags, as one string.
++ ``-P/--params``: its parameter file (default: the worktree's
+  ``examples/parameter_example.yml``).
 + ``--worktree-root``: where profile worktrees are created (default:
   ``~/.swiftsim-cli/worktrees``).
 

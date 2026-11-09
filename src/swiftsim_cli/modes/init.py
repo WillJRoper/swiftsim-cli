@@ -1,8 +1,9 @@
 """Init mode: set up swift-cli in one command.
 
 Uses an existing SWIFT clone (``--swift-path``) or clones SWIFT into
-``./swiftsim``, then creates the first profile (a worktree of that clone).
-Later profiles are added with 'swift-cli profile --new NAME'.
+``./swiftsim``, then creates the first profile (a worktree of that clone)
+and prints where everything lives and the profile's settings. Later
+profiles are added with 'swift-cli profile --new NAME'.
 """
 
 import argparse
@@ -11,7 +12,8 @@ import subprocess
 from pathlib import Path
 
 from swiftsim_cli import profile as profile_mod
-from swiftsim_cli.modes.profile import DEFAULT_UPSTREAM
+from swiftsim_cli.modes.common_args import add_params_argument
+from swiftsim_cli.modes.profile import DEFAULT_UPSTREAM, display_profile
 from swiftsim_cli.profile import (
     ProfileError,
     ProfileStore,
@@ -23,6 +25,7 @@ from swiftsim_cli.profile import (
     save_store,
     validate_profile_name,
 )
+from swiftsim_cli.utilities.tables import create_ascii_table
 
 SWIFT_URL = "https://github.com/SWIFTSIM/SWIFT.git"
 
@@ -66,6 +69,11 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         metavar="FLAGS",
         help="The first profile's configure flags, as one string.",
     )
+    add_params_argument(
+        parser,
+        help="The first profile's parameter file, the source of its "
+        "cosmology (default: the worktree's examples/parameter_example.yml).",
+    )
 
 
 def run(args: argparse.Namespace) -> None:
@@ -81,6 +89,9 @@ def run(args: argparse.Namespace) -> None:
             )
     # Check before a long clone that would then be wasted
     validate_profile_name(args.name)
+    params = args.params.expanduser().resolve() if args.params else None
+    if params is not None and not params.is_file():
+        raise ProfileError(f"Parameter file not found: {params}")
 
     if args.swift_path is not None:
         path = Path(args.swift_path).expanduser().resolve()
@@ -112,14 +123,34 @@ def run(args: argparse.Namespace) -> None:
         args.upstream,
         configure_flags=shlex.split(args.configure_flags),
         data_dir=repo.parent,
+        parameter_file=params,
         # After starting over (~/.swiftsim-cli deleted) the clone still
         # has the profile's branch: pick it up again
         reuse_branch=True,
     )
     store.current = args.name
     save_store(store)
+    print_summary(store, args.name)
+
+
+def print_summary(store: ProfileStore, name: str) -> None:
+    """Print the new profile, where everything lives and what to do next."""
+    display_profile(name=name)
+    home = profile_mod.PROFILE_FILE.parent
+    rows = [
+        ["profile settings", str(profile_mod.PROFILE_FILE)],
+        ["SWIFT clone", str(store.repo)],
+        ["profile worktrees", str(store.worktree_root)],
+        ["caches", str(home / "cache" / name)],
+    ]
+    print()
+    print(create_ascii_table(["What", "Where"], rows, title="LOCATIONS"))
     print(
-        f"\nCreated profile '{args.name}'. Profiles saved to "
-        f"{profile_mod.PROFILE_FILE}"
+        f"""
+Created profile '{name}'. Next steps:
+  swift-cli make -j <N>                    build it
+  swift-cli config --list-options          list its configure options
+  swift-cli profile --edit NAME            change these settings
+  swift-cli new -o RUN --ics ICS.hdf5      set up a run directory
+  swift-cli <mode> --help                  help for any mode"""
     )
-    print("Build it with: swift-cli make -j <N>")

@@ -52,6 +52,15 @@ class TestUtilityFunctions:
         assert "Item" in table
         assert "Count" in table
 
+    def test_create_ascii_table_alignment(self):
+        """Columns of numbers are right-aligned, text left-aligned."""
+        table = create_ascii_table(
+            ["Key", "Count", "Path"],
+            [["a", "5", "/x"], ["b", "12.5%", "/longer/path"]],
+        )
+        assert "|     5 | /x           |" in table
+        assert "| 12.5% | /longer/path |" in table
+
     def test_create_ascii_table_empty_rows(self):
         """Test ASCII table creation with empty rows."""
         headers = ["Name", "Value"]

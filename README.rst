@@ -92,6 +92,35 @@ Check the installation with ``swift-cli --version``.
 
 .. INSTALL_END_LABEL
 
+Setting up
+----------
+
+.. SETUP_START_LABEL
+
+Run ``init`` once after installing:
+
+.. code-block:: bash
+
+   swift-cli init                          # clone SWIFT into ./swiftsim
+   swift-cli init --swift-path ~/swiftsim  # or use a SWIFT clone you have
+
+This creates the first profile, called ``default``: a git worktree of the
+clone on its own branch, following ``origin/master``. ``-P params.yml``
+gives it a parameter file of your own (default: SWIFT's
+``examples/parameter_example.yml``): ``new`` starts run directories from
+it and ``show`` displays its cosmology. ``init`` then prints the profile, its
+cosmology, where everything lives and what to run next. Build it with:
+
+.. code-block:: bash
+
+   swift-cli make -j 16
+
+or set up and build in one go with ``swift-cli init make -j 16``. All
+``swift-cli`` state lives in ``~/.swiftsim-cli``; change a profile's
+settings with ``swift-cli profile --edit default``.
+
+.. SETUP_END_LABEL
+
 Usage example
 -------------
 
@@ -99,11 +128,8 @@ Usage example
 
 .. code-block:: bash
 
-   # Clone SWIFT into ./swiftsim and create the "default" profile
-   # (or use an existing clone: swift-cli init --swift-path ~/swiftsim)
+   # Set up (see above), then configure and build a debug build
    swift-cli init
-
-   # Configure and build it
    swift-cli config --debug-build make -j 16
 
    # Add a second profile with its own branch, flags and build

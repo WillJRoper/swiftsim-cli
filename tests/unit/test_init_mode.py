@@ -59,6 +59,27 @@ def test_init_uses_swift_path(gitsetup):
     assert p.configure_flags == ["--enable-debug"]
 
 
+def test_init_params_and_summary(gitsetup, capsys):
+    """-P sets the parameter file; the summary shows it and the locations."""
+    params = gitsetup.tmp / "params.yml"
+    params.write_text("Cosmology:\n  h: 0.7\n  Omega_cdm: 0.25\n")
+    _run(["--swift-path", str(gitsetup.repo), "-P", str(params)])
+    assert load_store().profiles["default"].parameter_file == params
+    out = capsys.readouterr().out
+    assert "PROFILE: default" in out
+    assert "PARAMETER FILE COSMOLOGY" in out and "0.25" in out
+    assert "LOCATIONS" in out and str(profile_mod.PROFILE_FILE) in out
+    assert "swift-cli make -j <N>" in out
+
+
+def test_init_missing_params_never_clones(tmp_path, monkeypatch):
+    """A missing -P file fails before anything is cloned."""
+    monkeypatch.chdir(tmp_path)
+    with pytest.raises(ProfileError, match="Parameter file not found"):
+        _run(["-P", str(tmp_path / "nope.yml")])
+    assert not (tmp_path / "swiftsim").exists()
+
+
 def test_init_only_once(gitsetup):
     """Once profiles exist, init points at profile --new."""
     _run(["--swift-path", str(gitsetup.repo)])

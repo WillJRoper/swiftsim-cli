@@ -272,7 +272,9 @@ def add_nr_threads_argument(
 
 
 def add_params_argument(
-    parser: argparse.ArgumentParser, required: bool = False
+    parser: argparse.ArgumentParser,
+    required: bool = False,
+    help: str | None = None,
 ) -> None:
     """Add the ``-P/--params`` SWIFT parameter file option.
 
@@ -282,6 +284,7 @@ def add_params_argument(
     Args:
         parser: The parser to add the option to.
         required: Whether a parameter file must be given.
+        help: Help text (default: a generic description).
     """
     parser.add_argument(
         "-P",
@@ -290,6 +293,6 @@ def add_params_argument(
         required=required,
         default=None,
         metavar="FILE",
-        help="SWIFT parameter file"
-        + ("." if required else " (default: none)."),
+        help=help
+        or "SWIFT parameter file" + ("." if required else " (default: none)."),
     )
