@@ -34,6 +34,12 @@ Managing profiles
    swift-cli profile --remove zoom       # remove the worktree (and optionally the branch)
    swift-cli --profile zoom make -j 16   # build another profile without switching
 
+A new profile inherits the current profile's ``data_dir``, softenings and
+parameter file (unless that is SWIFT's ``examples/parameter_example.yml``,
+in which case it gets its own worktree's copy). ``--set KEY=VALUE`` with
+``--new`` overrides any of them, e.g.
+``profile --new zoom --set parameter_file=zoom_params.yml``.
+
 Editing
 ^^^^^^^
 

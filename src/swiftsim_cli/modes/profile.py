@@ -53,6 +53,7 @@ SETTINGS = (
     "softening_coeff",
     "softening_pivot_z",
 )
+NUMBERS = ("softening_coeff", "softening_pivot_z")
 
 
 def add_arguments(parser: argparse.ArgumentParser) -> None:
@@ -145,8 +146,8 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         action="append",
         default=[],
         metavar="KEY=VALUE",
-        help="Set a profile setting without prompting, for --edit "
-        f"(repeatable). KEY is one of: {', '.join(SETTINGS)}.",
+        help="Set a profile setting, for --new or --edit (without "
+        f"prompting; repeatable). KEY is one of: {', '.join(SETTINGS)}.",
     )
     parser.add_argument(
         "-y",
@@ -182,14 +183,17 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
 def run(args: argparse.Namespace) -> None:
     """Execute the profile mode."""
     settings = parse_settings(args.set)
+    if settings and args.new is None and args.edit is None:
+        raise ProfileError("--set only applies to --new and --edit.")
     if args.new is not None:
         new_profile(
             args.new,
-            upstream=args.upstream,
+            upstream=settings.pop("upstream", args.upstream),
             configure_flags=shlex.split(args.configure_flags),
             build=args.build,
             nr_threads=args.nr_threads,
             reuse_branch=args.reuse_branch,
+            settings=settings,
         )
     elif args.switch is not None:
         switch_profile(args.switch)
@@ -212,11 +216,20 @@ def run(args: argparse.Namespace) -> None:
 
 
 def _base_settings(store: ProfileStore) -> dict[str, Any]:
-    """Per-user settings new profiles inherit from the current profile."""
+    """Per-user settings new profiles inherit from the current profile.
+
+    That is the data directory, the softenings and the parameter file if
+    it is the user's own (not SWIFT's parameter_example.yml, which each
+    worktree has its own copy of).
+    """
     base = store.profiles.get(store.current or "")
     if base is None:
         return {}
+    own = base.parameter_file
+    if own is not None and own.name == "parameter_example.yml":
+        own = None
     return {
+        "parameter_file": own,
         "data_dir": base.data_dir,
         "softening_coeff": base.softening_coeff,
         "softening_pivot_z": base.softening_pivot_z,
@@ -254,7 +267,7 @@ def check_setting(key: str, text: str) -> None:
     Raises:
         ProfileError: If the value is unusable.
     """
-    if key in ("softening_coeff", "softening_pivot_z"):
+    if key in NUMBERS:
         try:
             float(text)
         except ValueError:
@@ -283,6 +296,7 @@ def _edit_in_editor(name: str, values: dict[str, str]) -> dict[str, str]:
     editor = os.environ.get("VISUAL") or os.environ.get("EDITOR") or "vi"
     yaml = YAML(typ="safe")
     yaml.default_flow_style = False
+    yaml.width = 4096  # keep long paths on one line
     with tempfile.TemporaryDirectory() as tmp:
         path = Path(tmp) / f"{name}.yaml"
         with path.open("w") as f:
@@ -290,8 +304,20 @@ def _edit_in_editor(name: str, values: dict[str, str]) -> dict[str, str]:
                 f"# Profile '{name}'. Save and quit to apply; blank paths "
                 "use the defaults.\n"
             )
-            yaml.dump(values, f)
-        subprocess.run([*shlex.split(editor), str(path)], check=True)
+            # Numbers as numbers, not quoted strings
+            yaml.dump(
+                {
+                    k: float(v) if k in NUMBERS else v
+                    for k, v in values.items()
+                },
+                f,
+            )
+        code = subprocess.run([*shlex.split(editor), str(path)]).returncode
+        if code:
+            raise ProfileError(
+                f"Editor '{editor}' exited with code {code}; profile "
+                f"'{name}' unchanged."
+            )
         try:
             edited = yaml.load(path) or {}
         except YAMLError as e:
@@ -345,8 +371,12 @@ def new_profile(
     build: bool = False,
     nr_threads: int = 1,
     reuse_branch: bool = False,
+    settings: dict[str, str] | None = None,
 ) -> None:
     """Create a profile with its own branch and worktree.
+
+    It inherits the current profile's data directory, softenings and own
+    parameter file; ``settings`` override them.
 
     Args:
         name: The new profile name.
@@ -355,6 +385,7 @@ def new_profile(
         build: Configure and build the new profile.
         nr_threads: Number of make threads when building.
         reuse_branch: Use an existing ``swift-cli/<name>`` branch.
+        settings: ``--set`` values (checked, without the upstream).
     """
     store = load_store()
     profile = add_profile(
@@ -365,6 +396,8 @@ def new_profile(
         reuse_branch=reuse_branch,
         **_base_settings(store),
     )
+    if settings:
+        _apply_settings(profile, settings)
     if store.current is None:
         store.current = name
     save_store(store)
@@ -743,6 +776,9 @@ def adopt_worktree(path: Path, name: str) -> None:
         upstream = None
     flags = _read_configured_flags(path)
 
+    base = _base_settings(store)
+    if base.get("parameter_file") is None:
+        base["parameter_file"] = path / "examples" / "parameter_example.yml"
     store.profiles[name] = SWIFTCLIProfile(
         name=name,
         worktree=path,
@@ -750,8 +786,7 @@ def adopt_worktree(path: Path, name: str) -> None:
         upstream=upstream,
         configure_flags=list(flags or []),
         configured_flags=flags,
-        parameter_file=path / "examples" / "parameter_example.yml",
-        **_base_settings(store),
+        **base,
     )
     if store.current is None:
         store.current = name

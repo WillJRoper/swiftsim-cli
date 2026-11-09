@@ -361,3 +361,57 @@ class TestMessages:
         ):
             config_mode.run(args.modes[0][1])
         assert _configure_runs(gitsetup.root / "dev") == []
+
+
+class TestNewProfileSettings:
+    """What profile --new inherits, and --set with --new."""
+
+    def test_inherits_own_parameter_file(self, gitsetup, tmp_path):
+        """The current profile's own parameter file carries over."""
+        gitsetup.store()
+        pm.new_profile("a")
+        pm.new_profile("b")  # inherits a's (the example): its own copy
+        b = get_profile("b")
+        assert b.parameter_file == (
+            gitsetup.root / "b" / "examples" / "parameter_example.yml"
+        )
+        own = tmp_path / "own.yml"
+        own.write_text("Cosmology:\n  h: 0.7\n")
+        pm.edit_profile("a", settings={"parameter_file": str(own)})
+        pm.new_profile("c")
+        assert get_profile("c").parameter_file == own
+
+    def test_set_with_new(self, gitsetup):
+        """--set overrides the inherited settings, upstream included."""
+        gitsetup.store()
+        assert (
+            _main(
+                [
+                    "profile",
+                    "--new",
+                    "a",
+                    "--set",
+                    "softening_coeff=0.02",
+                    "--set",
+                    "upstream=origin/feature",
+                ]
+            )
+            == 0
+        )
+        p = get_profile("a")
+        assert p.softening_coeff == 0.02
+        assert p.upstream == "origin/feature"
+
+    def test_set_needs_new_or_edit(self, gitsetup, capsys):
+        """--set with another action is an error, not silently ignored."""
+        gitsetup.store()
+        assert _main(["profile", "--list", "--set", "data_dir=/"]) == 1
+        assert "--set only applies" in capsys.readouterr().err
+
+    def test_failed_editor_changes_nothing(self, gitsetup, monkeypatch):
+        """An editor exiting non-zero leaves the profile unchanged."""
+        gitsetup.store()
+        pm.new_profile("a")
+        monkeypatch.setenv("VISUAL", "false")
+        with pytest.raises(ProfileError, match="exited with code 1"):
+            pm.edit_profile("a")
