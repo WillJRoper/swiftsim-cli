@@ -61,6 +61,14 @@ class TestUtilityFunctions:
         assert "|     5 | /x           |" in table
         assert "| 12.5% | /longer/path |" in table
 
+    def test_create_ascii_table_long_title(self):
+        """A title wider than the columns widens the table to fit."""
+        lines = create_ascii_table(
+            ["K", "V"], [["a", "1"]], title="A MUCH LONGER TITLE"
+        ).splitlines()
+        assert len({len(line) for line in lines}) == 1
+        assert "| A MUCH LONGER TITLE |" in lines[1]
+
     def test_create_ascii_table_empty_rows(self):
         """Test ASCII table creation with empty rows."""
         headers = ["Name", "Value"]

@@ -42,6 +42,11 @@ def create_ascii_table(
     # Add padding
     col_widths = [w + 2 for w in col_widths]
 
+    # Widen the last column if the title would not fit
+    if title:
+        table_width = sum(col_widths) + len(col_widths) + 1
+        col_widths[-1] += max(0, len(title) + 4 - table_width)
+
     # Create separator line
     separator = "+" + "+".join("-" * w for w in col_widths) + "+"
 

@@ -125,5 +125,10 @@ Showing a profile
 
 .. code-block:: bash
 
-   swift-cli show            # current profile and its parameter file's cosmology
+   swift-cli show            # current profile, its cosmology and derived quantities
    swift-cli show zoom --cosmo   # only the cosmology of profile zoom
+
+The cosmology is the parameter file's ``Cosmology`` section as written,
+followed by what SWIFT derives from it: Omega_m, Omega_k, N_eff, the CMB
+temperature, the present-day age, and the redshift and age at ``a_begin``
+and ``a_end``. An incomplete section is shown with a warning instead.

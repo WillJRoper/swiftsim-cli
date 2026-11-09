@@ -694,6 +694,45 @@ def display_cosmology(parameter_file: Path) -> None:
             ["Parameter", "Value"], rows, title="PARAMETER FILE COSMOLOGY"
         )
     )
+    try:
+        derived = derived_cosmology(cosmology)
+    except (ValueError, TypeError) as e:
+        warn(f"{parameter_file}: unusable Cosmology section: {e}")
+        return
+    print()
+    print(
+        create_ascii_table(
+            ["Quantity", "Value"],
+            derived,
+            title="DERIVED COSMOLOGY (as SWIFT computes it)",
+        )
+    )
+
+
+def derived_cosmology(cosmology: dict) -> list[list[str]]:
+    """Quantities SWIFT derives from a Cosmology section, as table rows.
+
+    Raises:
+        ValueError: If the section is incomplete.
+    """
+    from swiftsim_cli.cosmology import build_cosmology
+
+    cosmo = build_cosmology(cosmology)
+    rows = [
+        ["Omega_m", f"{cosmo.Om0:.6g}"],
+        ["Omega_k", f"{round(cosmo.Ok0, 12):.6g}"],  # no 1e-16 noise
+        ["N_eff", f"{cosmo.Neff:.6g}"],
+        ["T_CMB_0 [K]", f"{cosmo.Tcmb0.value:.6g}"],
+        ["age today [Gyr]", f"{cosmo.age(0).value:.6g}"],
+    ]
+    for which in ("begin", "end"):
+        if cosmology.get(f"a_{which}") is not None:
+            z = 1 / float(cosmology[f"a_{which}"]) - 1
+            rows.append([f"z_{which}", f"{z:.6g}"])
+            rows.append(
+                [f"age at a_{which} [Gyr]", f"{cosmo.age(z).value:.6g}"]
+            )
+    return rows
 
 
 def update_all_profiles(nr_threads: int = 1) -> None:
