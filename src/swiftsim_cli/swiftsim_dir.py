@@ -22,6 +22,7 @@ from swiftsim_cli.profile import (
     update_profile_fields,
 )
 from swiftsim_cli.utilities.io import run_command_in_dir
+from swiftsim_cli.utilities.messages import note
 
 # Matches an option at the start of a `./configure --help` line, e.g.
 # "  --enable-debug=[yes/no]" or "  -h, --help". Placeholder entries such as
@@ -231,15 +232,26 @@ def configure_profile(
     flags = list(profile.configure_flags if flags is None else flags)
     ensure_configure_script(worktree)
     validate_configure_flags(flags, worktree, profile.name)
+    dropped = [f for f in profile.configure_flags if f not in flags]
+    if dropped:
+        note(
+            f"the new flags replace the old ones, dropping: "
+            f"{shlex.join(dropped)}"
+        )
     print(
         f"Configuring profile '{profile.name}' with: "
         f"{shlex.join(flags) or '(no flags)'}"
     )
-    _run_command_in_swift_dir(["./configure", *flags], worktree)
+    # Keep the new flags but mark them unconfigured until configure
+    # succeeds: a failed configure leaves the old config.status behind,
+    # and the next make must retry rather than build the old setup
     update_profile_fields(
-        profile.name, configure_flags=flags, configured_flags=flags
+        profile.name, configure_flags=flags, configured_flags=None
     )
-    profile.configure_flags = profile.configured_flags = flags
+    profile.configure_flags, profile.configured_flags = flags, None
+    _run_command_in_swift_dir(["./configure", *flags], worktree)
+    update_profile_fields(profile.name, configured_flags=flags)
+    profile.configured_flags = flags
 
 
 def run_make(worktree: Path, nr_threads: int = 1, clean: bool = False) -> None:

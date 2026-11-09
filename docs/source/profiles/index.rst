@@ -97,7 +97,10 @@ checked against ``./configure --help`` in the profile's worktree, with
 suggestions for typos, and passed on, as are ``VAR=value`` assignments;
 anything else is rejected (``--with-hydro sphenix`` suggests
 ``--with-hydro=sphenix``). A later value for an option overrides an earlier
-one, with a warning. The result replaces the profile's stored flags.
+one, with a warning. The result replaces the profile's stored flags (a
+note lists any old flags dropped). If ``configure`` fails, the new flags
+are kept and the next ``make`` configures again, so a stale build is never
+used.
 
 ``make`` compiles the current profile, reconfiguring first if its flags
 changed. A failed ``configure`` or ``make`` exits with that command's own

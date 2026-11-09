@@ -20,6 +20,7 @@ from swiftsim_cli.profile import (
     set_profile_override,
 )
 from swiftsim_cli.swiftsim_dir import (
+    CommandError,
     configure_profile,
     get_swiftsim_dir,
     update_profile,
@@ -510,6 +511,12 @@ class TestConfig:
         # No flags: reconfigure with the stored ones
         config_mode.run(MultiModeCLIArgs(["config"]).modes[0][1])
         assert _configure_runs(wt)[-1] == " ".join(expected)
+        assert "dropping" not in capsys.readouterr().err
+
+        # New flags replace the old, with a note naming what was dropped
+        argv = ["config", "--debug-build"]
+        config_mode.run(MultiModeCLIArgs(argv).modes[0][1])
+        assert "dropping: --with-hydro=sphenix" in capsys.readouterr().err
 
         argv = ["config", "--list-options"]
         config_mode.run(MultiModeCLIArgs(argv).modes[0][1])
@@ -518,6 +525,34 @@ class TestConfig:
             config_mode.run(
                 MultiModeCLIArgs(["config", "--enable-ip"]).modes[0][1]
             )
+
+    def test_failed_configure_is_retried_by_make(self, gitsetup):
+        """After a failed configure, make reconfigures, never builds stale.
+
+        configure leaves the previous config.status behind when it fails,
+        so the new flags must be kept and marked as not configured.
+        """
+        gitsetup.store()
+        pm.new_profile("dev")
+        wt = gitsetup.root / "dev"
+        configure_profile(get_profile("dev"), ["--enable-debug"])
+        script = (wt / "configure").read_text()
+        (wt / "configure").write_text(
+            script.replace(
+                'echo "$*" >> configure.log',
+                'echo "$*" >> configure.log\n'
+                'case "$*" in *--enable-ipo*) exit 1;; esac',
+            )
+        )
+        with pytest.raises(CommandError):
+            configure_profile(get_profile("dev"), ["--enable-ipo"])
+        p = get_profile("dev")
+        assert p.configure_flags == ["--enable-ipo"]
+        assert p.configured_flags is None
+        with pytest.raises(CommandError):
+            make_mode.make_swift()  # retries configure, which fails again
+        assert _configure_runs(wt)[-2:] == ["--enable-ipo", "--enable-ipo"]
+        assert not (wt / "swift").exists()
 
 
 class TestOverride:
