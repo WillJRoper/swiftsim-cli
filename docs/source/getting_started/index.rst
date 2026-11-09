@@ -27,7 +27,8 @@ Setting up
 
 It clones SWIFT from ``--swift-url`` (default: the GitHub mirror,
 ``https://github.com/SWIFTSIM/SWIFT.git``) unless ``--swift-path`` is
-given, then creates the first profile:
+given (any directory inside the clone, or another worktree of it, means
+the clone itself), then creates the first profile:
 
 + ``--name``: the profile's name (default: ``default``).
 + ``--upstream``: the branch it follows (default: ``origin/master``).
@@ -36,7 +37,10 @@ given, then creates the first profile:
   ``~/.swiftsim-cli/worktrees``).
 
 ``init`` refuses to run again once profiles exist; add more with
-``swift-cli profile --new NAME`` (see :doc:`../profiles/index`).
+``swift-cli profile --new NAME`` (see :doc:`../profiles/index`). To start
+over, delete ``~/.swiftsim-cli`` and run ``init`` again: the profile's
+branch (``swift-cli/<name>``) is still in the clone, with any commits on
+it, and is picked up again.
 
 Everything ``swift-cli`` stores lives in ``~/.swiftsim-cli``: the profiles in
 ``profiles.yaml``, the worktrees in ``worktrees/`` and per-profile caches

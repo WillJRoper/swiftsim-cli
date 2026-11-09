@@ -116,7 +116,8 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         "--adopt",
         type=existing_dir,
         metavar="DIR",
-        help="Register an existing worktree of the SWIFT clone as a profile "
+        help="Register an existing SWIFT checkout (a worktree, or a separate "
+        "clone such as a fork) as a profile "
         "(requires --name).",
     )
 
@@ -700,7 +701,10 @@ def _read_configured_flags(worktree: Path) -> list[str] | None:
 
 
 def adopt_worktree(path: Path, name: str) -> None:
-    """Register an existing worktree of the main clone as a profile.
+    """Register an existing SWIFT checkout as a profile.
+
+    The checkout can be a worktree of the main clone or any other clone
+    (e.g. of a fork) or worktree of one.
 
     The worktree's checked-out branch becomes the profile's branch and that
     branch's upstream (if any) its upstream. If the worktree is already
@@ -714,12 +718,17 @@ def adopt_worktree(path: Path, name: str) -> None:
             raise ProfileError(
                 f"{path} is already the worktree of profile '{other}'."
             )
-    worktrees = list_worktrees(store.repo)
+    # Any SWIFT checkout works: a worktree of the main clone, a separate
+    # clone (e.g. a fork) or a worktree of one
+    try:
+        repo = main_clone_of(path)
+    except ProfileError:
+        raise ProfileError(f"{path} is not a git checkout.") from None
+    worktrees = list_worktrees(repo)
     if path not in worktrees:
-        known = "\n  ".join(str(w) for w in worktrees)
         raise ProfileError(
-            f"{path} is not a worktree of {store.repo}. Known worktrees:\n"
-            f"  {known}"
+            f"{path} is inside a git checkout but not its top level; adopt "
+            f"{next(iter(worktrees))} (or one of its worktrees) instead."
         )
     branch = worktrees[path]
     if branch is None:

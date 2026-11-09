@@ -17,8 +17,8 @@ from swiftsim_cli.profile import (
     ProfileStore,
     add_profile,
     default_worktree_root,
-    git,
     load_store,
+    main_clone_of,
     read_raw_profile_file,
     save_store,
     validate_profile_name,
@@ -83,10 +83,14 @@ def run(args: argparse.Namespace) -> None:
     validate_profile_name(args.name)
 
     if args.swift_path is not None:
-        repo = Path(args.swift_path).expanduser().resolve()
-        if not repo.is_dir():
-            raise ProfileError(f"SWIFT clone not found: {repo}")
-        git("rev-parse", "--git-dir", cwd=repo)  # fail early if not a repo
+        path = Path(args.swift_path).expanduser().resolve()
+        if not path.is_dir():
+            raise ProfileError(f"SWIFT clone not found: {path}")
+        # A subdirectory or another worktree of the clone means the clone
+        try:
+            repo = main_clone_of(path)
+        except ProfileError:
+            raise ProfileError(f"Not a git repository: {path}") from None
     else:
         repo = Path.cwd() / "swiftsim"
         if repo.exists():
@@ -108,6 +112,9 @@ def run(args: argparse.Namespace) -> None:
         args.upstream,
         configure_flags=shlex.split(args.configure_flags),
         data_dir=repo.parent,
+        # After starting over (~/.swiftsim-cli deleted) the clone still
+        # has the profile's branch: pick it up again
+        reuse_branch=True,
     )
     store.current = args.name
     save_store(store)

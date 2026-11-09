@@ -602,14 +602,31 @@ class TestAdopt:
         gitsetup.store()
         with pytest.raises(ProfileError, match="requires --name"):
             pm.run(_args(adopt=str(gitsetup.tmp)))
-        with pytest.raises(ProfileError, match="not a worktree"):
+        with pytest.raises(ProfileError, match="not a git checkout"):
             pm.adopt_worktree(gitsetup.tmp, "x")
+        sub = gitsetup.repo / "sub"
+        sub.mkdir()
+        with pytest.raises(ProfileError, match="not its top level"):
+            pm.adopt_worktree(sub, "x")
         det = gitsetup.tmp / "det"
         run_git(
             "worktree", "add", "-q", "--detach", str(det), cwd=gitsetup.repo
         )
         with pytest.raises(ProfileError, match="detached"):
             pm.adopt_worktree(det, "det")
+
+    def test_adopt_separate_clone(self, gitsetup):
+        """A clone unrelated to the main one (e.g. a fork) can be adopted."""
+        gitsetup.store()
+        fork = gitsetup.tmp / "fork"
+        run_git(
+            "clone", "-q", "-b", "feature", str(gitsetup.remote), str(fork)
+        )
+        pm.adopt_worktree(fork, "fork")
+        p = get_profile("fork")
+        assert p.worktree == fork.resolve()
+        assert p.branch == "feature"
+        assert p.upstream == "origin/feature"
 
     def test_adopt_main_clone_without_upstream(self, gitsetup):
         """The main clone can be adopted; branches without upstream work."""

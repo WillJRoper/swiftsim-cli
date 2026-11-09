@@ -1,5 +1,7 @@
 """Tests for 'swift-cli init' (clone or use SWIFT, first profile)."""
 
+import shutil
+
 import pytest
 
 from swiftsim_cli import profile as profile_mod
@@ -7,6 +9,7 @@ from swiftsim_cli.modes import init as init_mode
 from swiftsim_cli.multi_mode_args import MultiModeCLIArgs
 from swiftsim_cli.profile import ProfileError, load_store
 
+from .conftest import run_git
 from .test_profile_workflows import _main
 
 
@@ -65,12 +68,43 @@ def test_init_only_once(gitsetup):
 
 
 def test_init_refusals(tmp_path, monkeypatch):
-    """Bad names, missing paths and an existing ./swiftsim never clone."""
+    """Bad names, bad paths and an existing ./swiftsim never clone."""
     monkeypatch.chdir(tmp_path)
     with pytest.raises(ProfileError, match="Invalid profile name"):
         _run(["--name", "bad name"])
     with pytest.raises(ProfileError, match="not found"):
         _run(["--swift-path", str(tmp_path / "nope")])
+    (tmp_path / "plain").mkdir()
+    with pytest.raises(ProfileError, match="Not a git repository"):
+        _run(["--swift-path", str(tmp_path / "plain")])
     (tmp_path / "swiftsim").mkdir()
     with pytest.raises(ProfileError, match="--swift-path"):
         _run([])
+
+
+def test_init_resolves_the_main_clone(gitsetup):
+    """A subdirectory or another worktree of the clone means the clone."""
+    (gitsetup.repo / "src").mkdir()
+    _run(["--swift-path", str(gitsetup.repo / "src")])
+    assert load_store().repo == gitsetup.repo
+    profile_mod.PROFILE_FILE.unlink()
+    other = gitsetup.tmp / "other-worktree"
+    run_git(
+        "worktree", "add", "-q", str(other), "-b", "side", cwd=gitsetup.repo
+    )
+    _run(["--swift-path", str(other), "--name", "second"])
+    assert load_store().repo == gitsetup.repo
+
+
+def test_init_after_starting_over(gitsetup):
+    """Deleting ~/.swiftsim-cli (worktrees and all) and re-running works.
+
+    The clone still has the profile's branch and the deleted worktree
+    registered; init picks the branch up again.
+    """
+    argv = ["--swift-path", str(gitsetup.repo)]
+    _run(argv)
+    shutil.rmtree(profile_mod.PROFILE_FILE.parent)
+    _run(argv)
+    p = load_store().profiles["default"]
+    assert p.worktree is not None and (p.worktree / "src.c").exists()

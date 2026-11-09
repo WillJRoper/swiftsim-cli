@@ -60,11 +60,15 @@ the branch and prints the ``git branch -D`` command, and ``--force``
 removes a worktree with untracked files. ``profile --new NAME
 --reuse-branch`` recreates a profile on its kept branch.
 
-Worktrees made by hand can be registered as profiles:
+Any existing SWIFT checkout can be registered as a profile: a worktree
+made by hand, or a separate clone (e.g. of a fork) and its worktrees. The
+checked-out branch and its upstream become the profile's; an existing build
+is kept.
 
 .. code-block:: bash
 
    swift-cli profile --adopt ../swiftsim-my-feature --name my-feature
+   swift-cli profile --adopt ~/swift-colibre --name COLIBRE
 
 Building
 --------

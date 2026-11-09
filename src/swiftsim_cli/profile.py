@@ -516,6 +516,10 @@ def add_profile(
                 f"Unknown upstream branch '{upstream}' in {store.repo} "
                 f"(list them with 'git -C {store.repo} branch -a')."
             )
+        # A worktree deleted by hand (e.g. with ~/.swiftsim-cli) is still
+        # registered, and git refuses to reuse its path until it is dropped
+        if worktree.resolve() in list_worktrees(store.repo):
+            git("worktree", "remove", "--force", str(worktree), cwd=store.repo)
         store.worktree_root.mkdir(parents=True, exist_ok=True)
         if branch_exists:
             print(f"Creating worktree {worktree} on existing branch {branch}")
