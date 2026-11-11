@@ -79,7 +79,9 @@ class SWIFTCLIProfile:
         configure_flags: Flags to pass to ``./configure``.
         configured_flags: Flags used at the last successful configure, or
             None if never configured by SWIFT-CLI.
-        data_dir: Path to the directory containing additional data files.
+        data_dir: Directory of run input data (cooling, yield and
+            photometry tables, ...) that ``new`` resolves relative
+            parameter-file paths against.
         parameter_file: Path to the template SWIFT parameter file.
         softening_coeff: Softening coefficient in units of mean separation.
         softening_pivot_z: Maximal softening pivot redshift.

@@ -18,6 +18,7 @@ from swiftsim_cli.modes.new import (
     make_new_run_dir,
 )
 from swiftsim_cli.params import check_swift_parameter_text
+from swiftsim_cli.profile import load_swift_profile
 from swiftsim_cli.templates import TEMPLATES, choose_template, template_path
 
 EAGLE_BOX = 4.235625  # 6.25 Mpc in h^-1 Mpc (h = 0.6777)
@@ -372,6 +373,49 @@ class TestOutputFile:
         assert params["MetaData"]["run_name"] == "mine"
         assert params["Cosmology"]["a_begin"] == 0.02
         assert f"Starting from {own}" in capsys.readouterr().out
+
+    def test_relative_input_paths(self, run_dir, monkeypatch, capsys):
+        """Relative inputs are found next to -P or in data_dir.
+
+        Found paths become absolute (keeping a trailing "/"), outputs stay
+        relative and missing ./ paths are reported.
+        """
+        base = run_dir.parent / "example"
+        (base / "coolingtables").mkdir(parents=True)
+        (base / "stf.cfg").touch()
+        data_dir = run_dir.parent / "data"
+        (data_dir / "yieldtables").mkdir(parents=True)
+        own = base / "own.yml"
+        own.write_text(
+            "EAGLECooling:\n  dir_name: ./coolingtables/\n"
+            "EAGLEFeedback:\n  filename: ../yieldtables/\n"
+            "StructureFinding:\n  config_file_name: stf.cfg\n"
+            "  basename: ./stf\n"
+            "Stars:\n  luminosity_filename: ./photometry\n"
+            "Scheduler:\n  max_top_level_cells: 16\n"
+        )
+        profile = load_swift_profile()
+        profile.data_dir = data_dir
+        monkeypatch.setattr(
+            "swiftsim_cli.modes.new.load_swift_profile", lambda: profile
+        )
+        ics = write_ics(run_dir.parent / "ics.hdf5", box=10.0)
+        make_new_run_dir(run_dir, ics, params_file=own)
+        params = load(run_dir / "params.yml")
+        assert params["EAGLECooling"]["dir_name"] == (
+            f"{(base / 'coolingtables').resolve()}/"
+        )
+        assert params["EAGLEFeedback"]["filename"] == (
+            f"{(data_dir / 'yieldtables').resolve()}/"
+        )
+        assert params["StructureFinding"]["config_file_name"] == str(
+            (base / "stf.cfg").resolve()
+        )
+        assert params["StructureFinding"]["basename"] == "./stf"
+        assert params["Stars"]["luminosity_filename"] == "./photometry"
+        err = capsys.readouterr().err
+        assert "Stars:luminosity_filename: ./photometry" in err
+        assert "basename" not in err and "file_name" not in err
 
     def test_profile_parameter_file(self, run_dir, monkeypatch):
         """The profile's own parameter_file is the default base file."""

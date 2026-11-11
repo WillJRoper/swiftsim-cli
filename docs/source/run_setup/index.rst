@@ -31,6 +31,13 @@ fills in:
 
 + absolute paths to the ICs and to ``snapshots/`` and ``restart/`` in the
   run directory;
++ absolute paths for your file's relative inputs (``./coolingtables/``,
+  ``./yieldtables/``, ``stf_input.cfg``, ...), since SWIFT runs from the run
+  directory. Each is looked up next to your parameter file, then in the
+  profile's ``data_dir`` (without its leading ``./`` or ``../``), so
+  download such tables into ``data_dir`` once and every run finds them.
+  Relative ``./``/``../`` paths found in neither place are listed in a
+  warning; output names (``basename``, ``subdir``) stay relative;
 + the unit system from the ICs' ``Units`` group. Cosmological ICs without
   one are taken to be Gadget-style (h\ :sup:`-1` units, sqrt(a)
   velocities), so ``cleanup_h_factors`` and ``cleanup_velocity_factors``

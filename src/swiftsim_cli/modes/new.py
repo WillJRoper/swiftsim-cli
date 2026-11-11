@@ -34,8 +34,8 @@ from swiftsim_cli.utilities.messages import note, warn
 
 yaml = round_trip_yaml()
 
-# The (unrunnable) SWIFT example that lists every parameter; never used as
-# a base even if a profile points at it
+# Keys naming run outputs, which belong in the run directory
+OUTPUT_KEYS = ("basename", "subdir")
 
 
 def _kv_pair(arg: str) -> Tuple[str, str]:
@@ -143,7 +143,7 @@ def base_parameters(
     header: ICHeader,
     params_file: Path | None = None,
     template: str | None = None,
-) -> tuple[dict, str]:
+) -> tuple[dict, Path | str]:
     """Load the parameters a new run starts from.
 
     In order: ``params_file``, the named template, the profile's
@@ -156,17 +156,67 @@ def base_parameters(
         template: A template name, if one was chosen.
 
     Returns:
-        The parameters and a description of where they came from.
+        The parameters and where they came from: the parameter file, or a
+        description of the template.
     """
     if params_file is None and template is None:
         params_file = own_parameter_file()
     if params_file is not None:
-        params = _parse_parameters(Path(params_file).expanduser())
-        return params, str(params_file)
+        params_file = Path(params_file).expanduser()
+        return _parse_parameters(params_file), params_file
     if template is None:
         template = choose_template(header.is_cosmological, header.count(0) > 0)
     params = _parse_parameters(template_path(template))
     return params, f"template {template}"
+
+
+def absolute_input_paths(
+    params: dict, base_dir: Path, data_dir: Path | None
+) -> None:
+    """Make the relative input paths of a parameter file absolute.
+
+    SWIFT runs from the run directory, so a path relative to the original
+    parameter file (``./coolingtables/``, ``stf_input.cfg``) would break.
+    Each relative value naming something that exists next to the parameter
+    file, or in ``data_dir`` (without its leading ``./`` and ``../``), is
+    made absolute. Other ``./`` and ``../`` values are reported.
+
+    Args:
+        params: The parameters to update in place.
+        base_dir: The directory of the original parameter file.
+        data_dir: The profile's data directory, if any.
+    """
+    missing = []
+    for section, values in params.items():
+        if not isinstance(values, dict):
+            continue
+        for key, value in values.items():
+            if (
+                not isinstance(value, str)
+                or not ("/" in value or "." in value)
+                or Path(value).is_absolute()
+                or key in OUTPUT_KEYS
+            ):
+                continue
+            parts = [p for p in Path(value).parts if p not in (".", "..")]
+            candidates = [base_dir / value]
+            if data_dir is not None and parts:
+                candidates.append(data_dir.joinpath(*parts))
+            found = next((c for c in candidates if c.exists()), None)
+            if found is not None:
+                # Keep a trailing "/": SWIFT appends file names to some
+                # directories (e.g. EAGLECooling:dir_name) as text
+                slash = "/" if value.endswith("/") else ""
+                values[key] = f"{found.resolve()}{slash}"
+            elif value.startswith(("./", "../")):
+                missing.append(f"{section}:{key}: {value}")
+    if missing:
+        warn(
+            "these relative paths are not next to the parameter file or in "
+            f"the profile's data_dir ({data_dir}), and SWIFT runs in the run "
+            "directory; put the files in data_dir or fix the paths:\n  "
+            + "\n  ".join(missing)
+        )
 
 
 def _section(params: dict, name: str) -> dict:
@@ -387,10 +437,12 @@ def make_new_parameter_file(
     _section(params, "InitialConditions")["file_name"] = str(inicond_file)
     _section(params, "Snapshots")["subdir"] = str(output_dir / "snapshots")
     _section(params, "Restarts")["subdir"] = str(output_dir / "restart")
+    profile = load_swift_profile()
+    if isinstance(source, Path):
+        absolute_input_paths(params, source.resolve().parent, profile.data_dir)
     apply_ic_settings(params, header)
 
     # Softenings
-    profile = load_swift_profile()
     if not params.get("Cosmology") and not header.is_zoom:
         warn(
             "softenings for a non-cosmological run come from the box size "
