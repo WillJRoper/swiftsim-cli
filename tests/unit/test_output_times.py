@@ -210,6 +210,50 @@ class TestNonCosmological:
         assert header == "# Scale Factor"
         assert a == pytest.approx([0.5, 0.75, 1.0])
 
+    def test_time_integration_range(self, tmp_path):
+        """TimeIntegration gives the default final output and the range."""
+        path = tmp_path / "params.yml"
+        path.write_text("TimeIntegration:\n  time_begin: 0.5\n  time_end: 2\n")
+        load_parameters(path)
+        _, t, _ = read_list(run(tmp_path, first_snap_time=1.0, delta_time=0.5))
+        assert t == pytest.approx([1.0, 1.5, 2.0])
+        with pytest.raises(ValueError, match="before the start"):
+            run(tmp_path, first_snap_time=0.0, delta_time=0.5)
+        with pytest.raises(ValueError, match="after the end"):
+            run(
+                tmp_path,
+                first_snap_time=1.0,
+                delta_time=0.5,
+                final_snap_time=3.0,
+            )
+
+    def test_known_non_cosmological_run_needs_time_list(self, tmp_path):
+        """SWIFT rejects redshift/scale-factor lists without a cosmology.
+
+        Without parameters the run may be cosmological, so they are allowed.
+        """
+        path = tmp_path / "params.yml"
+        path.write_text("TimeIntegration:\n  time_end: 2\n")
+        load_parameters(path)
+        with pytest.raises(ValueError, match="cosmological run"):
+            run(
+                tmp_path,
+                first_snap_z=1.0,
+                delta_z=0.5,
+                final_snap_z=0.0,
+            )
+
+    def test_no_cosmology_flag_rejects_redshift_list(self, tmp_path, cosmo):
+        """--no-cosmology means a non-cosmological run."""
+        with pytest.raises(ValueError, match="cosmological run"):
+            run(
+                tmp_path,
+                first_snap_z=1.0,
+                delta_z=0.5,
+                final_snap_z=0.0,
+                no_cosmology=True,
+            )
+
     def test_time_cannot_mix(self, tmp_path):
         """Time with redshift needs a cosmology."""
         with pytest.raises(ValueError, match="needs a cosmology"):

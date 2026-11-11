@@ -299,18 +299,29 @@ def generate_output_list(args: dict) -> None:
         raise ValueError("give the snapshot spacing with --delta-*")
 
     a_begin = a_end = None
+    t_begin = t_end = None
     if cosmological:
         cosmo = params["Cosmology"]
         a_end = float(cosmo.get("a_end", 1.0))
         if cosmo.get("a_begin") is not None:
             a_begin = float(cosmo["a_begin"])
+    else:
+        steps = params.get("TimeIntegration") or {}
+        if steps.get("time_begin") is not None:
+            t_begin = float(steps["time_begin"])
+        if steps.get("time_end") is not None:
+            t_end = float(steps["time_end"])
     if final is None:
-        if a_end is None:
+        if a_end is not None:
+            final = Point("scale_factor", a_end)
+        elif t_end is not None:
+            final = Point("time", t_end)
+        else:
             raise ValueError(
                 "give the final output with --final-snap-* (it defaults to "
-                "Cosmology:a_end only for a cosmological run)"
+                "Cosmology:a_end or TimeIntegration:time_end from the "
+                "parameter file)"
             )
-        final = Point("scale_factor", a_end)
 
     list_units = args.get("list_units")
     if list_units is None:
@@ -318,6 +329,17 @@ def generate_output_list(args: dict) -> None:
             delta.unit, "scale-factor"
         )
     unit, header = LIST_UNITS[list_units]
+    # A non-cosmological run (known from its parameters or --no-cosmology)
+    # only reads time lists; SWIFT rejects the others
+    if (
+        unit != "time"
+        and not cosmological
+        and (params or args.get("no_cosmology"))
+    ):
+        raise ValueError(
+            f"SWIFT reads a {list_units} list only in a cosmological run; "
+            "use --list-units time (and times) for this non-cosmological run"
+        )
     units = {first.unit, final.unit, delta.unit, unit}
     if snip is not None:
         units.add(snip.unit)
@@ -341,6 +363,16 @@ def generate_output_list(args: dict) -> None:
         raise ValueError(
             f"the final output (a={a_final:.6g}) is after the end of the "
             f"run (Cosmology:a_end={a_end:.6g})"
+        )
+    if t_begin is not None and a_first < t_begin - 1e-9 * abs(t_begin):
+        raise ValueError(
+            f"the first output (t={a_first:.6g}) is before the start of the "
+            f"run (TimeIntegration:time_begin={t_begin:.6g})"
+        )
+    if t_end is not None and a_final > t_end + 1e-9 * abs(t_end):
+        raise ValueError(
+            f"the final output (t={a_final:.6g}) is after the end of the "
+            f"run (TimeIntegration:time_end={t_end:.6g})"
         )
 
     def outputs(spacing: Point) -> np.ndarray:
@@ -380,8 +412,9 @@ def generate_output_list(args: dict) -> None:
         print(f"Generated {n_snip} snipshots")
         note(
             "SWIFT needs Snapshots:select_output_on: 1 and a "
-            "Snapshots:select_output file defining the Snipshot output "
-            "selection to use this list"
+            "Snapshots:select_output file with Snapshot and Snipshot "
+            "sections to use this list (see SWIFT's examples/"
+            "SmallCosmoVolume/SmallCosmoVolume_Snipshots)"
         )
     print(f"Output list written to {out_file}.")
 

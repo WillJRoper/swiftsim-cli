@@ -93,7 +93,10 @@ interval are each given in one unit (``--first-snap-{z,time,scale-factor}``,
 ``--final-snap-...``, ``--delta-{z,time,scale-factor,log-scale-factor}``,
 ``--snipshot-delta-...``); contradictory, zero or negative values are usage
 errors. ``--delta-log-scale-factor`` is the interval in log\ :sub:`10`\ (a).
-The final output defaults to ``Cosmology:a_end`` from the parameter file.
+The final output defaults to ``Cosmology:a_end``, or
+``TimeIntegration:time_end`` for a non-cosmological run, from the
+parameter file, and outputs outside the run (``a_begin``/``a_end`` or
+``time_begin``/``time_end``) are errors.
 
 Without ``-P/--params``, the cosmology and units come from the profile's
 ``parameter_file`` (set with ``init -P`` or ``profile --edit``), unless
@@ -107,16 +110,19 @@ in the current directory); an existing list is only replaced with
 snapshot and snipshot entries are never duplicated (snapshots win), and it
 must hold at least two outputs. With snipshots the list gets a
 ``Select Output`` column, and SWIFT also needs
-``Snapshots:select_output_on: 1`` and a select-output file (a note is
-printed).
+``Snapshots:select_output_on: 1`` and a select-output file with
+``Snapshot`` and ``Snipshot`` sections (a note is printed; see SWIFT's
+``examples/SmallCosmoVolume/SmallCosmoVolume_Snipshots``).
 
 With a cosmology, ``--*-time`` values are ages of the Universe in Gyr, and
 the list is written as ages in SWIFT's *internal* time units
 (``UnitLength_in_cgs / UnitVelocity_in_cgs`` from the parameter file's
 ``InternalUnitSystem``), which is what SWIFT expects for a ``# Time`` list
 in a cosmological run. ``--no-cosmology`` ignores the parameter file's
-``Cosmology`` section. Redshifts and scale factors need no cosmology; only
-times do. Conversions follow SWIFT's own cosmology (radiation, neutrinos,
+``Cosmology`` section. Redshifts and scale factors convert without a
+cosmology, but SWIFT reads redshift and scale-factor lists only in a
+cosmological run, so a run known to be non-cosmological (its parameter
+file has no ``Cosmology``, or ``--no-cosmology``) must use a time list. Conversions follow SWIFT's own cosmology (radiation, neutrinos,
 w\ :sub:`0`/w\ :sub:`a`).
 
 Softenings (``utils softenings``)
