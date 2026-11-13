@@ -107,7 +107,13 @@ class ICHeader:
                         raise ValueError(
                             f"{self.path}: no {name} or MassTable entry"
                         )
-                    mass = float(np.min(hdf[name][:]))
+                    # In chunks: zoom ICs can hold billions of particles
+                    data = hdf[name]
+                    step = 1 << 24
+                    mass = min(
+                        float(np.min(data[i : i + step]))
+                        for i in range(0, len(data), step)
+                    )
             self.masses[part_type] = mass
         return self.masses[part_type]
 
@@ -221,7 +227,8 @@ def compute_softenings(
     separation follows from its particle mass,
     (m_DM / (Omega rho_crit))^(1/3), and the background softening is set
     through Gravity:softening_ratio_background. Omega is Omega_cdm when
-    there are baryons and Omega_m for DM-only ICs.
+    the ICs have gas and Omega_cdm + Omega_b otherwise (also when SWIFT
+    generates the gas from the DM).
 
     Lengths are in the IC units, converted to h-free units when
     InitialConditions:cleanup_h_factors is set.
@@ -266,8 +273,10 @@ def compute_softenings(
         rho_crit = 3 * hubble**2 / (8 * np.pi * _G_CGS)
         rho_crit *= float(units.get("UnitLength_in_cgs", _MPC_CGS)) ** 3
         rho_crit /= float(units.get("UnitMass_in_cgs", 1.98841e43))
+        # The ICs' DM particles carry the baryons' mass too unless the
+        # ICs have their own gas (not when SWIFT generates it)
         omega = float(cosmo["Omega_cdm"])
-        if not n_baryon:
+        if not header.count(0):
             omega += float(cosmo["Omega_b"])
         mass = header.particle_mass(1) / h_scale
         zoom_sep = (mass / (omega * rho_crit)) ** (1 / 3)
@@ -344,7 +353,7 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
 
 def format_softening_report(
     header: ICHeader,
-    param_source: str,
+    param_source: Path | str,
     params: Mapping[str, Any],
     softening_coeff: float,
     pivot_redshift: float,

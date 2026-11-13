@@ -226,9 +226,15 @@ class TestCosmological:
             grav["comoving_DM_softening"]
         )
 
-    @pytest.mark.parametrize("zoom_support", [True, False])
-    def test_zoom_ics(self, run_dir, tmp_path, zoom_support):
-        """Zoom softening comes from the high-res particle mass."""
+    @pytest.mark.parametrize(
+        "zoom_support, template",
+        [(True, None), (False, None), (True, "cosmo-hydro")],
+    )
+    def test_zoom_ics(self, run_dir, tmp_path, zoom_support, template):
+        """Zoom softening comes from the high-res particle mass.
+
+        DM-only ICs carry the baryon mass, also when SWIFT generates gas.
+        """
         swift_dir = tmp_path / "swift"
         (swift_dir / "src").mkdir(parents=True)
         if zoom_support:
@@ -244,13 +250,15 @@ class TestCosmological:
             redshift=127.0,
             masses={1: mass, 2: 10 * mass},
         )
-        make_new_run_dir(run_dir, ics, swift_dir=swift_dir)
+        make_new_run_dir(run_dir, ics, swift_dir=swift_dir, template=template)
 
         params = load(run_dir / "params.yml")
         grav = params["Gravity"]
         assert grav["comoving_DM_softening"] == pytest.approx(
             0.04 * sep, rel=1e-3
         )
+        if template:
+            assert params["InitialConditions"]["generate_gas_in_ics"] == 1
         assert grav["softening_ratio_background"] == 0.04
         assert ("ZoomRegion" in params) == zoom_support
 

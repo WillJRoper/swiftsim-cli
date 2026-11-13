@@ -136,5 +136,6 @@ Softenings (``utils softenings``)
 Prints the mean inter-particle separation and the comoving and maximal
 physical softening of each particle species (dark matter, baryons,
 neutrinos and the zoom background), with exactly the calculation ``new``
-uses. ``-P`` is optional (the default is the template ``new`` would pick);
-the coefficient and pivot redshift default to the profile's values.
+uses. ``-P`` is optional (the default is what ``new`` would start from:
+the profile's ``parameter_file`` or the template matching the ICs); the
+coefficient and pivot redshift default to the profile's values.
