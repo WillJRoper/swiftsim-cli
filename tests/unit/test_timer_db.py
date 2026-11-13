@@ -372,7 +372,26 @@ class TestCacheAndRevisions:
         """--swift-src wins over the profile."""
         db, status = resolve_timer_db("deadbeef", swift_src=swift_src_dir)
         assert "engine_rebuild" in db.by_function
-        assert "--swift-src" in status
+        assert str(swift_src_dir) in status
+
+    def test_swift_src_matches_revision(self, tiny_repo, monkeypatch):
+        """A --swift-src clone is read at the log's revision too.
+
+        E.g. a fork holding the commit the profile's clone lacks.
+        """
+        repo, first = tiny_repo
+        monkeypatch.setattr(
+            timer_db,
+            "load_swift_profile",
+            lambda: SimpleNamespace(swiftsim_dir=None),
+        )
+        db, status = resolve_timer_db(first[:8], swift_src=repo)
+        assert set(db.by_function) == {"old_fn"}
+        assert "matched log revision" in status
+        db, status = resolve_timer_db(
+            first[:8], swift_src=repo, match_revision=False
+        )
+        assert set(db.by_function) == {"new_fn"}
 
     def test_no_source_raises(self, monkeypatch):
         """Without a checkout there is a clear error."""

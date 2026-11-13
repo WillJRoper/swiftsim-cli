@@ -376,3 +376,39 @@ def test_dense_time_series(tmp_path, fast_plots):
     assert list(x) == [2, 3, 4, 5, 6, 7] and list(y) == [2, 3, 4, 5, 6, 7]
     x, y = timing_plots._rolling_median(np.arange(3.0), np.arange(3.0), 5)
     assert len(y) == 3
+
+
+def test_time_series_sparse_timer_keeps_its_line(tmp_path, monkeypatch):
+    """A timer missing from most steps is a median of its own calls.
+
+    Counting the steps where it did not run as 0 made the median 0, so the
+    line vanished from the log axis.
+    """
+    import numpy as np
+
+    from swiftsim_cli.timing.log_scan import Record, Step
+    from swiftsim_cli.timing.timer_nesting import Node
+    from swiftsim_cli.timing.timing_hierarchy import StepTree, aggregate
+
+    figures = []
+
+    def keep(fig, path, show=False):
+        figures.append(fig)
+        return path
+
+    monkeypatch.setattr(timing_plots, "save_figure", keep)
+    trees = []
+    for n in range(1, timing_plots.DENSE_STEPS + 50):
+        step = Step(number=n, kind="step", wallclock_ms=20.0)
+        roots = [Node(Record(0, 1.0, 9.0, "f", "function", "f", None, n))]
+        if n % 5 == 0:  # e.g. the mesh, every few steps
+            roots.append(
+                Node(Record(0, 1.0, 4.0, "g", "function", "g", None, n))
+            )
+        trees.append(StepTree(step, 0, roots))
+    h = aggregate(trees, 0, 20.0 * len(trees))
+    timing_plots.step_time_series(trees, h, tmp_path / "t.png", False)
+    (line,) = [
+        ln for ln in figures[0].axes[0].get_lines() if ln.get_label() == "g"
+    ]
+    assert np.nanmin(line.get_ydata()) == 4.0

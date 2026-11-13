@@ -119,8 +119,9 @@ def add_timer_db_arguments(parser: argparse.ArgumentParser) -> None:
         type=existing_dir,
         default=None,
         metavar="DIR",
-        help="SWIFT source tree to read the timers from (default: the "
-        "active profile's checkout, at each log's revision).",
+        help="SWIFT clone or source tree to read the timers from "
+        "(default: the active profile's checkout). A clone is read at "
+        "each log's revision.",
     )
     parser.add_argument(
         "--no-match-revision",

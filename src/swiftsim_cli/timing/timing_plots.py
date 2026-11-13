@@ -122,7 +122,10 @@ def step_breakdown_pie(
     )
     ax.legend(
         wedges[0],
-        [f"{n[:50]} ({100 * v / total:.1f}%)" for n, v in zip(names, values)],
+        [
+            f"{n if len(n) <= 50 else n[:49] + '…'} ({100 * v / total:.1f}%)"
+            for n, v in zip(names, values)
+        ],
         loc="center left",
         bbox_to_anchor=(1.0, 0.5),
         frameon=False,
@@ -263,9 +266,13 @@ def step_time_series(
     else:
         ax.plot(steps, wall, "k-", lw=1.5, label="step wall-clock")
     for key in keys:
+        # NaN where the timer did not run: a timer running every few steps
+        # (the mesh) or rarely (snapshots) would otherwise have a median
+        # of 0 and vanish from the log axis
         series = np.array(
             [
                 sum(r.inclusive for r in t.roots if r.record.key == key)
+                or np.nan
                 for t in trees
             ]
         )
@@ -294,7 +301,12 @@ def _rolling_median(
 
     if len(y) < window:
         return x, y
-    medians = np.nanmedian(sliding_window_view(y, window), axis=1)
+    import warnings
+
+    with warnings.catch_warnings():
+        # Windows where the timer never ran give NaN (a gap in the line)
+        warnings.simplefilter("ignore", RuntimeWarning)
+        medians = np.nanmedian(sliding_window_view(y, window), axis=1)
     return x[window // 2 : window // 2 + len(medians)], medians
 
 

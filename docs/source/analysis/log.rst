@@ -19,8 +19,9 @@ How it works
   source with tree-sitter (including ``examples/main.c``). By default the
   source is taken at the revision printed in the log, extracted with
   ``git archive`` from the profile's repository into the profile cache (the
-  checkout is not touched). ``--no-match-revision`` uses the checkout as it
-  is, and ``--swift-src DIR`` any other source tree. The parsed database is
+  checkout is not touched). ``--swift-src DIR`` reads another clone (e.g.
+  of the fork the run was built from) the same way, or a plain source tree
+  as it is; ``--no-match-revision`` uses the checkout as it is. The parsed database is
   cached and rebuilt only when the source changes (``--regenerate-db``
   forces a rebuild). The share of timer lines matched to the source is
   always reported, with a warning when more than 5% are unmatched.
@@ -51,8 +52,10 @@ Reading the numbers
   including the untimed remainder, sums to 100%; a warning is given if any
   step's coverage exceeds 105%.
 + **Revision matching**: if the log's revision is not in the profile's
-  repository (e.g. an unpushed commit), use ``--no-match-revision`` or
-  ``--swift-src``; the match rate shows how many timer lines were
+  repository (e.g. a fork's commit), pass ``--swift-src`` with a clone
+  that has it; otherwise the working tree is used and timers missing from
+  it are placed by looser rules, so the breakdown can double count (a
+  negative untimed share). The match rate shows how many timer lines were
   recognised.
 
 Outputs

@@ -1012,15 +1012,16 @@ def resolve_timer_db(
     """Pick the timer database to analyse a log with.
 
     By default the database is built from the revision the log reports
-    (if the profile's repository has it), otherwise from the profile's
-    working tree. When the log's revision is the checkout's HEAD but the
-    checkout has uncommitted changes, a clean log is analysed with the
-    committed source (``git archive``) and a dirty one with the working
-    tree.
+    (if the repository, ``swift_src`` or the profile's, has it),
+    otherwise from the working tree. When the log's revision is the
+    checkout's HEAD but the checkout has uncommitted changes, a clean log
+    is analysed with the committed source (``git archive``) and a dirty
+    one with the working tree.
 
     Args:
         log_revision: Commit hash from the log's "Revision:" line.
-        swift_src: Explicit source tree to use instead of the profile's.
+        swift_src: Source tree or repository to use instead of the
+            profile's.
         match_revision: Whether to build from the log's revision.
         regenerate: Rebuild the database even if cached.
         log_dirty: Whether the log's revision was marked ``-dirty``.
@@ -1031,12 +1032,11 @@ def resolve_timer_db(
     Raises:
         ValueError: If no source tree is available.
     """
-    if swift_src is not None:
-        return (
-            load_source_db(swift_src, regenerate),
-            f"source tree {swift_src} (--swift-src)",
-        )
-    root = load_swift_profile().swiftsim_dir
+    root = (
+        swift_src
+        if swift_src is not None
+        else (load_swift_profile().swiftsim_dir)
+    )
     if root is None:
         raise ValueError(
             "Cannot build the timer database: the active profile has no "
@@ -1045,9 +1045,9 @@ def resolve_timer_db(
         )
     head = _git_head(root)
     if log_revision is None:
-        status = "log has no revision; using the profile's working tree"
+        status = "log has no revision; using the working tree"
     elif not match_revision:
-        status = "revision matching disabled; using the profile's working tree"
+        status = "revision matching disabled; using the working tree"
     elif head is not None and head.startswith(log_revision):
         status = f"log revision {log_revision} matches the working tree HEAD"
         if _source_status(root):
@@ -1068,7 +1068,9 @@ def resolve_timer_db(
         except (ProfileError, subprocess.CalledProcessError):
             status = (
                 f"log revision {log_revision} not found in {root}; using "
-                f"the working tree at {head[:8]} (timers may not match)"
+                f"the working tree at {head[:8]} (timers may not match; pass "
+                "--swift-src with a clone that has it, e.g. of the fork the "
+                "run was built from)"
             )
     else:
         status = f"{root} is not a git checkout; using it as is"
