@@ -137,6 +137,12 @@ def run_swift_task_counts(args: argparse.Namespace) -> None:
     )
 
 
+def _is_fof_block(counts: dict[str, int]) -> bool:
+    """Whether a block is the FOF task list (only fof_* tasks active)."""
+    active = [n for n, c in counts.items() if c and n != "skipped"]
+    return bool(active) and all(n.startswith("fof_") for n in active)
+
+
 def task_count_series(
     log_file: str,
     task_filter: list[str] | None = None,
@@ -167,8 +173,18 @@ def task_count_series(
             step_range[0] <= step.number <= step_range[1]
         ):
             continue
-        # The last block each rank printed in this step
-        snaps = list({s.rank: s for s in step.task_counts}.values())
+        # The last block each rank printed in this step, except FOF
+        # blocks (engine_fof prints its own task list, e.g. at a snapshot
+        # after the step's tasks ran)
+        snaps = list(
+            {
+                s.rank: s
+                for s in step.task_counts
+                if not _is_fof_block(s.counts)
+            }.values()
+        )
+        if not snaps:
+            continue
         ranks_seen.update(s.rank for s in snaps)
         steps.append(step.number)
         sim_times.append(step.sim_time)
@@ -334,13 +350,18 @@ def analyse_swift_task_counts(
     ]
 
     # Plot 2: per-type counts per step (skipped tasks are not a type)
-    names = task_filter or sorted(
-        name
-        for name in set().union(*(c.task_series for *_, c in results))
-        if any(
-            np.any(c.task_series.get(name, np.zeros(1)) > 0)
+    # Largest first, so the main types get the clearest colours and lead
+    # the legend
+    peak = {
+        name: max(
+            float(c.task_series.get(name, np.zeros(1)).max())
             for *_, c in results
         )
+        for name in set().union(*(c.task_series for *_, c in results))
+    }
+    names = task_filter or sorted(
+        (name for name, value in peak.items() if value > 0),
+        key=lambda name: (-peak[name], name),
     )
     if names:
         colours = colour_map(names)
@@ -448,8 +469,10 @@ def _print_summary(
     )
     print("  " + "-" * 78)
     rows = sorted(
-        counts.task_series.items(), key=lambda item: -float(item[1].sum())
+        (item for item in counts.task_series.items() if item[1].any()),
+        key=lambda item: -float(item[1].sum()),
     )
+    idle = len(counts.task_series) - len(rows)
     rows.append(("skipped (any type)", counts.skipped))
     for name, values in rows:
         print(
@@ -460,4 +483,5 @@ def _print_summary(
     print(
         "  Per-type rows count tasks that run; skipped tasks are counted "
         "once under 'skipped'."
+        + (f" {plural(idle, 'task type')} never ran." if idle else "")
     )

@@ -11,7 +11,11 @@ Task counts
 Plots the ``engine_print_task_counts`` output (SWIFT run with ``-v 1``) per
 step. The total is SWIFT's ``System total`` (all ranks) when it is printed,
 otherwise the sum of each rank's total; the per-type counts are the tasks
-that run (skipped tasks are one ``skipped (any type)`` row). A log with
+that run (skipped tasks are one ``skipped (any type)`` row; types that
+never ran are left out of the summary). Each step uses the last block each
+rank printed, except FOF task lists (``engine_fof`` prints its own, e.g.
+at a snapshot). The per-type plot gives the largest types the first
+colours and lists them first. A log with
 only some ranks' counts (typically rank 0 of an MPI run) gives a warning,
 and the axis labels say "(rank 0 only)". Unknown ``--tasks`` names are
 errors.

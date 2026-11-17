@@ -28,10 +28,13 @@ from swiftsim_cli.timing.log_scan import (
 )
 from swiftsim_cli.timing.timer_db import resolve_timer_db
 from swiftsim_cli.timing.timing_hierarchy import hierarchy_for, select_steps
-from swiftsim_cli.utilities.messages import reading
+from swiftsim_cli.utilities.messages import note, reading, warn
 
 Statistic = Literal["sum", "mean"]
 RankSource = Literal["root", "all"]
+
+# Step counts differing by more than this fraction trigger a warning.
+STEP_COUNT_TOLERANCE = 0.01
 
 
 @dataclass
@@ -98,13 +101,22 @@ class LogTimers:
 
 @dataclass
 class LogRuntime:
-    """Runtime of one log: summed wall-clock time of its steps."""
+    """Wall-clock time (ms) of each step of one log."""
 
     path: str
     label: str
     n_ranks: int
-    n_steps: int
-    runtime: float
+    steps: dict[int, float]
+
+    @property
+    def n_steps(self) -> int:
+        """Number of steps."""
+        return len(self.steps)
+
+    @property
+    def runtime(self) -> float:
+        """Summed wall-clock time of the steps (ms)."""
+        return sum(self.steps.values())
 
 
 def resolve_log_files(log_files: list[Path]) -> list[str]:
@@ -197,9 +209,47 @@ def load_log_runtime(
         path=path,
         label=Path(path).name,
         n_ranks=scan.n_ranks,
-        n_steps=len(steps),
-        runtime=sum(s.wallclock_ms or 0.0 for s in steps),
+        steps={s.number: s.wallclock_ms or 0.0 for s in steps},
     )
+
+
+def common_steps(logs: list[LogRuntime]) -> tuple[int, int] | None:
+    """The step range every log covers, if some log has steps outside it.
+
+    Summed times are only comparable over the same steps, and runs of a
+    scaling test usually stop at different steps (e.g. a wall-clock
+    limit), so a note names the range used.
+    """
+    first = max(min(log.steps) for log in logs)
+    last = min(max(log.steps) for log in logs)
+    if first > last:
+        raise ValueError(
+            "the logs share no steps ("
+            + ", ".join(
+                f"{log.label}: {min(log.steps)}-{max(log.steps)}"
+                for log in logs
+            )
+            + "); are they runs of the same problem?"
+        )
+    if all(first <= n <= last for log in logs for n in log.steps):
+        return None
+    note(
+        f"using steps {first}-{last}, the steps all logs cover "
+        "(summed times are only comparable over the same steps); pass "
+        "--steps to choose others"
+    )
+    return first, last
+
+
+def check_step_counts(logs: list[LogTimers] | list[LogRuntime]) -> None:
+    """Warn if the logs cover different numbers of steps."""
+    counts = [log.n_steps for log in logs]
+    if max(counts) > (1 + STEP_COUNT_TOLERANCE) * min(counts):
+        warn(
+            f"the logs cover different numbers of steps ({min(counts)} to "
+            f"{max(counts)}); summed times are not comparable. Use --steps "
+            "to pick the same steps from each log."
+        )
 
 
 def require_rank_counts(rank_counts: list[int]) -> None:

@@ -222,6 +222,30 @@ class TestRuntime:
         )
         assert load_log_runtime(str(log)).runtime == pytest.approx(30.0)
 
+    def test_common_steps(self, tmp_path, capsys):
+        """Runs that stop at different steps compare their common steps."""
+        logs = [
+            str(_write_log(tmp_path / "a.log", 2, [800.0] * 4)),
+            str(_write_log(tmp_path / "b.log", 4, [400.0] * 2)),
+        ]
+        scaling.analyse_swift_runtime_scaling(logs, output_path=tmp_path)
+        captured = capsys.readouterr()
+        assert "using steps 1-2" in captured.err
+        assert "2.00x" in captured.out and "Only steps 1-2" in captured.out
+        scaling.analyse_swift_runtime_scaling(
+            logs, output_path=tmp_path, step_range=(1, 4)
+        )
+        assert "different numbers of steps (2 to 4)" in capsys.readouterr().err
+        late = tmp_path / "c.log"
+        late.write_text(
+            Path(logs[1])
+            .read_text()
+            .replace("       1   1.0e", "       7   1.0e")
+            .replace("       2   1.0e", "       8   1.0e")
+        )
+        with pytest.raises(ValueError, match="share no steps"):
+            scaling.analyse_swift_runtime_scaling([logs[0], str(late)])
+
     def test_end_to_end(self, tmp_path, capsys):
         """Summary, plot and the rank-count check."""
         logs = _logs(tmp_path)
@@ -314,12 +338,24 @@ class TestTimers:
     def test_step_count_warning(
         self, synthetic_scaling_db, tmp_path, capsys, fast_plots
     ):
-        """Logs covering different numbers of steps warn."""
+        """Logs default to their common steps; --steps past one warns."""
         logs = [
             str(_write_log(tmp_path / "a.log", 2, [800.0] * 4)),
             str(_write_log(tmp_path / "b.log", 4, [400.0] * 2)),
         ]
         scaling.analyse_swift_scaling(logs, output_path=tmp_path)
+        captured = capsys.readouterr()
+        assert "using steps 1-2, the steps all logs cover" in captured.err
+        assert "different numbers of steps" not in captured.err
+        total = next(
+            line
+            for line in captured.out.splitlines()
+            if "Total (timed)" in line
+        )
+        assert "-1.00" in total and "1.60s" in total
+        scaling.analyse_swift_scaling(
+            logs, output_path=tmp_path, step_range=(1, 4)
+        )
         assert "different numbers of steps (2 to 4)" in capsys.readouterr().err
 
     def test_validation(self, synthetic_scaling_db, tmp_path):

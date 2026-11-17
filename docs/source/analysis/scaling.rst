@@ -7,9 +7,13 @@ Scaling (``analyse scaling``)
    swift-cli analyse scaling timers logs/*.log --rank-source all --swift-src ~/swiftsim
    swift-cli analyse scaling runtime logs/*.log
 
-Both compare logs of runs with at least two different MPI rank counts, and
-warn when their step counts differ by more than 1%. Both leave out step 0
-and restart rows, like ``analyse log``.
+Both compare logs of runs with at least two different MPI rank counts.
+Summed times are only comparable over the same steps, so without
+``--steps`` both use the steps every log covers (runs of a scaling test
+usually stop at different steps, e.g. at a wall-clock limit) and a note
+names the range; with ``--steps`` they warn when the logs' step counts
+still differ by more than 1%. Both leave out step 0 and restart rows, like
+``analyse log``.
 
 ``scaling timers`` uses the same per-step timer trees as
 :doc:`analyse log <log>` (and the same timer database flags

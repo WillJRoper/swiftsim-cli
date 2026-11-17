@@ -224,6 +224,20 @@ class TestAnalyseSwiftTaskCounts:
         filtered = task_count_series(str(log), ["self", "pair"]).totals
         assert filtered == [17]
 
+    def test_fof_block_ignored(self, tmp_path):
+        """A snapshot's FOF task list (after the step's) is not the step's."""
+        log = tmp_path / "log.txt"
+        log.write_text(
+            _block(0, "Total = 10 (per cell = 1.0)", "self=4 fof_self=0")
+            + _block(0, "Total = 12 (per cell = 1.0)", "self=0 fof_self=3")
+            + ROW.format(n=1)
+            + _block(0, "Total = 12 (per cell = 1.0)", "self=0 fof_pair=3")
+            + ROW.format(n=2)
+        )
+        counts = task_count_series(str(log))
+        assert counts.steps == [1] and counts.totals == [10]
+        assert counts.task_series["self"].tolist() == [4]
+
     def test_incomplete_step_skipped(self, tmp_path):
         """Blocks after the last row have no simulation time."""
         log = tmp_path / "log.txt"

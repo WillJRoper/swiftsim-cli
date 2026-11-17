@@ -5,7 +5,9 @@ from __future__ import annotations
 from pathlib import Path
 
 from swiftsim_cli.modes.analyse.scaling.data import (
+    check_step_counts,
     clear_outputs,
+    common_steps,
     fit_slope,
     format_slope,
     format_time,
@@ -46,6 +48,15 @@ def analyse_swift_runtime_scaling(
     for path in log_files:
         print(f"\nProcessing runtime scaling input: {path}")
         logs.append(load_log_runtime(path, step_range))
+    if step_range is None:
+        step_range = common_steps(logs)
+        if step_range is not None:
+            first, last = step_range
+            for log in logs:
+                log.steps = {
+                    n: ms for n, ms in log.steps.items() if first <= n <= last
+                }
+    check_step_counts(logs)
     logs.sort(key=lambda log: (log.n_ranks, log.label))
     ranks = [log.n_ranks for log in logs]
     require_rank_counts(ranks)

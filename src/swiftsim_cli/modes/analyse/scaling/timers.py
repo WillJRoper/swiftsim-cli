@@ -10,11 +10,14 @@ from swiftsim_cli.modes.analyse.scaling.data import (
     LogTimers,
     RankSource,
     Statistic,
+    check_step_counts,
     clear_outputs,
+    common_steps,
     describe_slope,
     fit_slope,
     format_slope,
     format_time,
+    load_log_runtime,
     load_log_timers,
     require_rank_counts,
 )
@@ -24,9 +27,6 @@ from swiftsim_cli.utilities.messages import plural, warn
 from swiftsim_cli.utilities.tables import create_ascii_table
 
 OUT_SUBDIR = "scaling_timers_analysis"
-
-# Step counts differing by more than this fraction trigger a warning.
-STEP_COUNT_TOLERANCE = 0.01
 
 _VIEW = {
     ("sum", "root"): "exclusive time summed over the run, rank 0",
@@ -224,16 +224,6 @@ def imbalance_table(logs: list[LogTimers], timers: list[str]) -> str | None:
     )
 
 
-def _check_step_counts(logs: list[LogTimers]) -> None:
-    counts = [log.n_steps for log in logs]
-    if max(counts) > (1 + STEP_COUNT_TOLERANCE) * min(counts):
-        warn(
-            f"the logs cover different numbers of steps ({min(counts)} to "
-            f"{max(counts)}); summed times are not comparable. Use --steps "
-            "to pick the same steps from each log."
-        )
-
-
 def analyse_swift_scaling(
     log_files: list[str],
     output_path: str | Path | None = None,
@@ -264,6 +254,8 @@ def analyse_swift_scaling(
     print(
         f"Analysing timer scaling across {plural(len(log_files), 'log file')}"
     )
+    if step_range is None:
+        step_range = common_steps([load_log_runtime(p) for p in log_files])
     logs = []
     for path in log_files:
         print(f"\nProcessing scaling input: {path}")
@@ -274,7 +266,7 @@ def analyse_swift_scaling(
         )
     logs.sort(key=lambda log: (log.n_ranks, log.label))
     require_rank_counts([log.n_ranks for log in logs])
-    _check_step_counts(logs)
+    check_step_counts(logs)
     if rank_source == "all":
         partial = [
             f"{log.label} ({len(log.exclusive)}/{log.n_ranks})"
