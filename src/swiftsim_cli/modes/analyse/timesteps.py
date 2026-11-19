@@ -163,17 +163,26 @@ def _read_step_rows(file: str | Path) -> list[StepRow]:
     reader = StepTableReader()
     rows: list[StepRow] = []
     superseded = malformed = 0
+    cut_off = False
     with open(file, "r") as f:
         for line in f:
             row = reader.feed(line)
             if row is None:
                 if _looks_like_row(line):
                     malformed += 1
+                    # Only the file's last line lacks a newline.
+                    cut_off = not line.endswith("\n")
                 continue
             while rows and rows[-1]["Step"] >= row["Step"]:
                 rows.pop()
                 superseded += 1
             rows.append(row)
+    if cut_off:
+        malformed -= 1
+        warn(
+            f"{file}: the last line is cut off (was the run killed?); "
+            "ignoring it."
+        )
     if malformed:
         warn(
             f"{file}: skipped {plural(malformed, 'malformed step-table row')} "
@@ -283,19 +292,23 @@ def _compare_runtimes(
                 "--time-column)."
             )
             return None
-    # Interpolating/truncating at a common x only makes sense when x grows
-    # monotonically (e.g. not for redshift).
-    if not all(np.all(np.diff(run.x) >= 0) for run in runs):
+    # Interpolating/truncating at a common x needs x to be monotonic in
+    # the same direction in every run (redshift decreases); `sign` turns
+    # a decreasing column into an increasing one.
+    for sign in (1, -1):
+        if all(np.all(np.diff(sign * run.x) >= 0) for run in runs):
+            break
+    else:
         warn(
-            "x-axis column is not monotonically increasing; skipping the "
-            "runtime comparison and --match-runtimes."
+            "x-axis column is not monotonic; skipping the runtime "
+            "comparison and --match-runtimes."
         )
         return None
 
-    x_limit = float(min(run.x[-1] for run in runs))
+    x_limit = sign * float(min(sign * run.x[-1] for run in runs))
     if match_runtimes:
         for i, run in enumerate(runs):
-            mask = run.x <= x_limit
+            mask = sign * run.x <= sign * x_limit
             runs[i] = _Run(
                 run.label,
                 run.step[mask],
@@ -307,7 +320,10 @@ def _compare_runtimes(
         return None
     runtimes = sorted(
         (
-            (run.label, float(np.interp(x_limit, run.x, run.wall)))
+            (
+                run.label,
+                float(np.interp(sign * x_limit, sign * run.x, run.wall)),
+            )
             for run in runs
         ),
         key=lambda item: item[1],

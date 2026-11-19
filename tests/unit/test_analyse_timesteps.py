@@ -295,12 +295,12 @@ def test_non_monotonic_x_skips_runtime_comparison(
     tmp_path: Path,
     capsys,
 ):
-    """A decreasing x column (e.g. redshift) must not be interpolated."""
+    """An x column that turns round must not be interpolated."""
     files = []
     for name, wallclock in (("slow.txt", 5000.0), ("fast.txt", 4000.0)):
         path = tmp_path / name
         path.write_text(
-            _table((3.0, wallclock), (2.0, wallclock), (1.0, wallclock)),
+            _table((1.0, wallclock), (3.0, wallclock), (2.0, wallclock)),
             encoding="utf-8",
         )
         files.append(str(path))
@@ -310,7 +310,7 @@ def test_non_monotonic_x_skips_runtime_comparison(
     analyse_timestep_files(files, ["slow", "fast"], show_plot=False)
 
     captured = capsys.readouterr()
-    assert "warning: x-axis column is not monotonically" in captured.err
+    assert "warning: x-axis column is not monotonic" in captured.err
     assert "RUNTIME COMPARISON" not in captured.out
 
 
@@ -551,6 +551,40 @@ def test_malformed_rows_are_counted(tmp_path: Path, capsys):
     _run_plot([path])
 
     assert "skipped 1 malformed step-table row" in capsys.readouterr().err
+
+
+def test_redshift_axis_compares_runtimes(tmp_path: Path, capsys):
+    """Redshift decreases; runs are still compared at the shared redshift."""
+    files = []
+    for name, wall, n in (("long.txt", 1000.0, 5), ("short.txt", 2000.0, 3)):
+        path = tmp_path / name
+        path.write_text(
+            _HEADER
+            + "".join(_row(s, s, 0.1 * (s + 1), wall) for s in range(n))
+        )
+        files.append(path)
+
+    ax1, _ = _run_plot(files, time_column="redshift", match_runtimes=True)
+
+    out = capsys.readouterr().out
+    # Shared redshift is short's last (z = 1/0.3 - 1); long is trimmed.
+    assert "SHARED Redshift 2.33333" in out
+    assert "2.00x" in out
+    assert len(ax1.plot.call_args_list[0].args[0]) == 3
+
+
+def test_cut_off_last_line_is_named(tmp_path: Path, capsys):
+    """A last line cut mid-write (killed run) is not called malformed."""
+    path = tmp_path / "killed.txt"
+    path.write_text(
+        _HEADER + _row(0, 0.0, 1.0, 1000.0) + _row(1, 0.1, 1.0, 1000.0)[:30]
+    )
+
+    _run_plot([path])
+
+    err = capsys.readouterr().err
+    assert "last line is cut off" in err
+    assert "malformed" not in err
 
 
 def test_step_gaps_are_reported_and_break_the_line(tmp_path: Path, capsys):

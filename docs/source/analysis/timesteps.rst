@@ -13,11 +13,14 @@ in every input and time otherwise (non-cosmological runs), with a note when
 it falls back; ``step``, ``time``, ``scale-factor`` and ``redshift`` choose
 explicitly. ``--cores-per-run N ...`` (MPI ranks x threads per rank, one
 per run) turns the times into core-hours, and ``--match-runtimes`` trims
-every run to the shortest x range. The runtime comparison table is skipped,
-with a warning, when the x column is constant or decreasing.
+every run to the shortest x range. The runtime comparison table compares
+the runs at the x value all of them reach (the lowest redshift, for
+``redshift``); it is skipped, with a warning, when the x column is constant
+or not monotonic.
 
 Steps repeated after a restart replace the earlier rows ("N rows superseded
-by a restart"), malformed rows are counted and skipped, and gaps in the step
+by a restart"), malformed rows are counted and skipped (a last line cut off by a killed
+run is named as such), and gaps in the step
 sequence are warned about and break the plotted lines. The
 ``Dead time [ms]`` column is optional (older SWIFT versions). The plot is
 ``timesteps_analysis/timesteps_analysis.png``.
