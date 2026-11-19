@@ -12,7 +12,8 @@ Plots the cumulative wall-clock and dead time of each run against
 in every input and time otherwise (non-cosmological runs), with a note when
 it falls back; ``step``, ``time``, ``scale-factor`` and ``redshift`` choose
 explicitly. ``--cores-per-run N ...`` (MPI ranks x threads per rank, one
-per run) turns the times into core-hours, and ``--match-runtimes`` trims
+per run) turns the times into core-hours (with no values, each run's
+cores are read from its timesteps header or its log's start-up line), and ``--match-runtimes`` trims
 every run to the shortest x range. The runtime comparison table compares
 the runs at the x value all of them reach (the lowest redshift, for
 ``redshift``); it is skipped, with a warning, when the x column is constant

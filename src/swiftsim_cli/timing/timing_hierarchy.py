@@ -333,8 +333,16 @@ def _pct(value: float) -> str:
 
 
 def top_level_table(h: Hierarchy, top_n: int, title: str) -> str:
-    """Top-level timers plus the untimed remainder (sums to 100%)."""
-    headers = ["Timer", "Time (ms)", "% of step time", "Calls", "Steps"]
+    """Top-level timers plus the untimed remainder (sums to 100%).
+
+    Times are in seconds once the total reaches a minute (ms otherwise).
+    """
+    scale, unit = (1000.0, "s") if h.total >= 60_000 else (1.0, "ms")
+
+    def fmt(ms: float) -> str:
+        return _fmt(ms / scale)
+
+    headers = ["Timer", f"Time ({unit})", "% of step time", "Calls", "Steps"]
     rows = []
     kids = h.children(())
     for path in kids[:top_n]:
@@ -342,7 +350,7 @@ def top_level_table(h: Hierarchy, top_n: int, title: str) -> str:
         rows.append(
             [
                 path[-1],
-                _fmt(s.inclusive),
+                fmt(s.inclusive),
                 _pct(h.percent(s.inclusive)),
                 s.calls,
                 len(s.steps),
@@ -354,16 +362,14 @@ def top_level_table(h: Hierarchy, top_n: int, title: str) -> str:
         rows.append(
             [
                 f"({len(rest)} other timers)",
-                _fmt(rest_time),
+                fmt(rest_time),
                 _pct(h.percent(rest_time)),
                 sum(h.paths[p].calls for p in rest),
                 "",
             ]
         )
-    rows.append([UNTIMED, _fmt(h.untimed), _pct(h.percent(h.untimed)), "", ""])
-    rows.append(
-        ["TOTAL", _fmt(h.total), _pct(100.0 if h.total else 0), "", ""]
-    )
+    rows.append([UNTIMED, fmt(h.untimed), _pct(h.percent(h.untimed)), "", ""])
+    rows.append(["TOTAL", fmt(h.total), _pct(100.0 if h.total else 0), "", ""])
     return create_ascii_table(headers, rows, title)
 
 

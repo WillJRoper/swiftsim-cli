@@ -653,5 +653,38 @@ def test_cli_defaults_and_cores_per_run():
     assert args.time_column == "auto"
     args = parser.parse_args(["timesteps", __file__, "--cores-per-run", "8"])
     assert args.threads_per_run == [8]
+    args = parser.parse_args(["timesteps", __file__, "--cores-per-run"])
+    assert args.threads_per_run == []
     with pytest.raises(SystemExit):
         parser.parse_args(["timesteps", __file__, "--threads-per-run", "8"])
+
+
+def test_cores_per_run_read_from_files(tmp_path: Path, capsys):
+    """--cores-per-run without values uses ranks x threads from each file."""
+    header = tmp_path / "timesteps.txt"
+    header.write_text(
+        "# Number of threads: 32\n# Number of MPI ranks: 2\n"
+        + _HEADER
+        + _row(0, 0.0, 1.0, 3600.0)
+        + _row(1, 1.0, 1.0, 3600.0)
+    )
+    log = tmp_path / "log.txt"
+    log.write_text(
+        "[0000] [00002.5] main: from t=1.0e-05 until t=1.0e-02 with 4 "
+        "ranks, 8 threads / rank and 8 task queues / rank\n"
+        + _HEADER
+        + _row(0, 0.0, 1.0, 3600.0)
+        + _row(1, 1.0, 1.0, 3600.0)
+    )
+
+    ax1, _ = _run_plot([header, log], nthreads=[])
+
+    # 7.2 s of wall-clock on 64 and 32 cores
+    for i, cores in ((0, 64), (2, 32)):
+        hours = np.asarray(ax1.plot.call_args_list[i].args[1])
+        np.testing.assert_allclose(hours[-1] * 3600, 7.2 * cores)
+
+    bare = tmp_path / "bare.txt"
+    bare.write_text(_HEADER + _row(0, 0.0, 1.0, 1.0))
+    with pytest.raises(ValueError, match="give --cores-per-run a number"):
+        _run_plot([bare], nthreads=[])

@@ -70,6 +70,15 @@ class TestCoverage:
         table = top_level_table(h, 50, "T")
         assert UNTIMED in table and "100.0%" in table
 
+    def test_top_level_unit_follows_total(self, sample):
+        """Short runs are shown in ms, runs of a minute or more in s."""
+        from dataclasses import replace
+
+        _, _, h = sample
+        assert h.total < 60_000 and "Time (ms)" in top_level_table(h, 5, "T")
+        table = top_level_table(replace(h, total=9e7), 5, "T")
+        assert "Time (s)" in table and "90000.0" in table
+
     def test_exclusive_sums_to_timed(self, sample):
         """Exclusive times add up to the timed time, never more."""
         _, _, h = sample

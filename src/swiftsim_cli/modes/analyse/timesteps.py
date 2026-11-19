@@ -11,6 +11,7 @@ Key functions:
 
 import argparse
 import math
+import re
 from pathlib import Path
 from typing import Any, NamedTuple, Sequence
 
@@ -112,12 +113,14 @@ def add_timestep_arguments(
     timestep_parser.add_argument(
         "--cores-per-run",
         dest="threads_per_run",
-        nargs="+",
+        nargs="*",
         metavar="N",
         help=(
             "Cores used by each run (MPI ranks x threads per rank), in the "
             "same order as the files. When given, wall-clock and dead time "
-            "are multiplied by these to give core-hours."
+            "are multiplied by these to give core-hours. Without values, "
+            "each run's cores are read from its file (the timesteps header "
+            "or the log's start-up line)."
         ),
         type=positive_int,
         default=None,
@@ -136,6 +139,36 @@ def run_timestep(args: argparse.Namespace) -> None:
         match_runtimes=args.match_runtimes,
         nthreads=args.threads_per_run,
         step_range=args.steps,
+    )
+
+
+# Where SWIFT records the ranks and threads per rank: the timesteps file
+# header, and main's start-up line in the log
+_HEADER_RANKS_RE = re.compile(r"^# Number of MPI ranks: (\d+)")
+_HEADER_THREADS_RE = re.compile(r"^# Number of threads: (\d+)")
+_LOG_CORES_RE = re.compile(r"with (\d+) ranks, (\d+) threads / rank")
+
+
+def _cores_from_file(file: str | Path) -> int:
+    """Return MPI ranks x threads per rank, as recorded in the file.
+
+    Raises:
+        ValueError: If the file does not record them.
+    """
+    ranks = threads = None
+    with open(file, "r") as f:
+        for line in f:
+            if match := _LOG_CORES_RE.search(line):
+                return int(match.group(1)) * int(match.group(2))
+            if match := _HEADER_RANKS_RE.match(line):
+                ranks = int(match.group(1))
+            elif match := _HEADER_THREADS_RE.match(line):
+                threads = int(match.group(1))
+            if ranks is not None and threads is not None:
+                return ranks * threads
+    raise ValueError(
+        f"'{file}' does not record its MPI ranks and threads; give "
+        "--cores-per-run a number per file."
     )
 
 
@@ -479,7 +512,8 @@ def analyse_timestep_files(
             x-axis extent found in the inputs.
         nthreads: Optional number of cores (MPI ranks x threads per rank)
             used by each run. If provided, cumulative wall-clock and dead
-            time are multiplied by these values to give core-hours.
+            time are multiplied by these values to give core-hours. An
+            empty list reads each run's cores from its file.
         step_range: Optional inclusive ``(start, end)`` step range.
 
     Raises:
@@ -489,6 +523,8 @@ def analyse_timestep_files(
     if len(files) != len(labels):
         raise ValueError("Number of files and labels must match.")
 
+    if nthreads == []:
+        nthreads = [_cores_from_file(file) for file in files]
     if nthreads is not None:
         if len(files) != len(nthreads):
             raise ValueError(

@@ -22,3 +22,5 @@ per-subtype plots, per-rank tables and plots with ``--per-rank``, and
 per-step CSV files with ``--format csv|both``. ``--subtypes gpart
 grav_counts`` restricts everything, including the in-flight high-water
 mark, to those subtypes; ``--steps START END`` restricts the steps.
+Byte axes use the largest unit (bytes, KB, MB, GB or TB, powers of 1024)
+the values reach.

@@ -449,3 +449,12 @@ class TestAnalyseSwiftMpiuse:
         assert "warning: no mpiuse_report files matched" in (
             capsys.readouterr().err
         )
+
+
+def test_byte_unit():
+    """Byte axes use the largest unit the values reach."""
+    from swiftsim_cli.modes.analyse.mpiuse import _byte_unit
+
+    assert _byte_unit(500) == (1.0, "bytes")
+    assert _byte_unit(3 * 1024**2) == (1024.0**2, "MB")
+    assert _byte_unit(7.35e10) == (1024.0**3, "GB")

@@ -828,9 +828,15 @@ def _plot_step_series(
 
     fig, ax = plt.subplots(figsize=(10, 6))
     values: list[float] = []
+    scale, unit = 1.0, ""
+    if value_column != "count":
+        scale, unit = _byte_unit(
+            max(float(series[value_column].max()) for series in step_frames)
+        )
+        ylabel = f"{ylabel} [{unit}]"
 
     for index, (data, series) in enumerate(zip(all_data, step_frames)):
-        yvals = series[value_column].to_numpy(dtype=float)
+        yvals = series[value_column].to_numpy(dtype=float) / scale
         values.extend(yvals[yvals > 0])
         plot_values = np.where(yvals > 0, yvals, np.nan)
         ax.plot(
@@ -907,6 +913,12 @@ def _plot_subtype_bars(
     if not subtype_keys:
         return
 
+    scale, unit = 1.0, ""
+    if value_column == "bytes":
+        scale, unit = _byte_unit(
+            max(float(data["per_subtype"]["bytes"].max()) for data in all_data)
+        )
+        ylabel = f"{ylabel} [{unit}]"
     labels = [_format_subtype_label(key) for key in subtype_keys]
     x = np.arange(len(subtype_keys), dtype=float)
     width = 0.8 / max(1, len(all_data))
@@ -924,6 +936,7 @@ def _plot_subtype_bars(
                 ]
                 .sum()
             )
+            / scale
             for key in subtype_keys
         ]
         values.extend([value for value in heights if value > 0])
@@ -1023,20 +1036,26 @@ def _draw_rank_stack(
     ranks = sorted(int(value) for value in rank_df["rank"].unique())
     x = np.arange(len(ranks))
     bottom = np.zeros(len(ranks), dtype=float)
+    scale, unit = _byte_unit(
+        float(rank_df.groupby("rank")["bytes"].sum().max())
+    )
 
     for index, key in enumerate(subtype_keys):
-        heights = np.array(
-            [
-                float(
-                    rank_df.loc[
-                        (rank_df["rank"] == rank)
-                        & (rank_df["type"] == key[0])
-                        & (rank_df["subtype"] == key[1]),
-                        "bytes",
-                    ].sum()
-                )
-                for rank in ranks
-            ]
+        heights = (
+            np.array(
+                [
+                    float(
+                        rank_df.loc[
+                            (rank_df["rank"] == rank)
+                            & (rank_df["type"] == key[0])
+                            & (rank_df["subtype"] == key[1]),
+                            "bytes",
+                        ].sum()
+                    )
+                    for rank in ranks
+                ]
+            )
+            / scale
         )
         if not np.any(heights > 0):
             continue
@@ -1053,7 +1072,7 @@ def _draw_rank_stack(
     axis.set_xticklabels([str(rank) for rank in ranks])
     axis.set_xlabel("Rank")
     side = "sent" if data["direction"] == "send" else "received"
-    axis.set_ylabel(f"Bytes {side}")
+    axis.set_ylabel(f"Bytes {side} [{unit}]")
     axis.set_title(f"MPI bytes {side} per rank: {data['label']}")
     axis.grid(True, axis="y", alpha=0.3, linestyle="--")
     axis.legend(
@@ -1063,6 +1082,19 @@ def _draw_rank_stack(
         ncol=max(1, -(-len(subtype_keys) // 20)),
         borderaxespad=0.0,
     )
+
+
+def _byte_unit(largest: float) -> tuple[float, str]:
+    """Scale and name of the unit that shows ``largest`` bytes best.
+
+    Units are powers of 1024, named KB/MB/GB/TB like the tables.
+    """
+    scale, unit = 1.0, "bytes"
+    for name in ("KB", "MB", "GB", "TB"):
+        if largest < 1024 * scale:
+            break
+        scale, unit = scale * 1024, name
+    return scale, unit
 
 
 def _has_gpart(all_data: list[MpiuseData]) -> bool:

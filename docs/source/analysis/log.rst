@@ -49,8 +49,9 @@ Reading the numbers
   timers do not.
 + **Every percentage** is a share of the summed step wall-clock time of the
   analysed steps, not of the sum of the timers. The top-level breakdown,
-  including the untimed remainder, sums to 100%; a warning is given if any
-  step's coverage exceeds 105%.
+  including the untimed remainder, sums to 100% (its times are in seconds
+  once the total reaches a minute); a warning is given if any step's
+  coverage exceeds 105%.
 + **Revision matching**: if the log's revision is not in the profile's
   repository (e.g. a fork's commit), pass ``--swift-src`` with a clone
   that has it; otherwise the working tree is used and timers missing from
