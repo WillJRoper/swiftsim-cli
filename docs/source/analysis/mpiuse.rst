@@ -10,7 +10,9 @@ MPI communication (``analyse mpiuse``)
 Compares the MPI communication SWIFT records when built with
 ``--enable-mpiuse-reports``. Each input is a directory, a glob or a set of
 ``mpiuse_report-rank*-step*.dat`` files for one run; several inputs are
-compared side by side.
+compared side by side. Totals are only comparable over the same steps, so
+without ``--steps`` several inputs are restricted to the steps they all
+have reports for, and a note names the range.
 
 Each message is logged by SWIFT as a send and a receive; volumes are
 counted once (from the send side), and bytes sent and received are reported

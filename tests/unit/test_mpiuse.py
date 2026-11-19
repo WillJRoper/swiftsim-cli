@@ -379,6 +379,27 @@ class TestAnalyseSwiftMpiuse:
         assert "master bytes" in comparison
         assert "Δ % (branch)" in comparison
 
+    def test_comparison_uses_common_steps(self, tmp_path, capsys):
+        """A run with fewer step reports is compared over shared steps."""
+        full = _make_sample_input(tmp_path / "full")
+        short = _make_sample_input(tmp_path / "short")
+        (short / "mpiuse_report-rank0-step2.dat").unlink()
+
+        analyse_swift_mpiuse(
+            inputs=[str(full), str(short)],
+            labels=["full", "short"],
+            output_path=str(tmp_path),
+        )
+
+        captured = capsys.readouterr()
+        assert "comparing the 1 step every input covers (1-1)" in captured.err
+        [total] = [
+            line
+            for line in captured.out.splitlines()
+            if "TOTAL send" in line and "|" in line and "220" in line
+        ][-1:]
+        assert total.split("|")[-2].strip() == "0.00"
+
     def test_step_filter_excludes_everything(self, tmp_path, capsys):
         """A step filter removing all data is an error, not empty output."""
         run_dir = _make_sample_input(tmp_path / "run_a")

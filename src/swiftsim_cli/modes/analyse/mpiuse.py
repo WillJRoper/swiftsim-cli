@@ -16,7 +16,7 @@ from swiftsim_cli.modes.common_args import (
     resolve_labels,
 )
 from swiftsim_cli.utilities.io import create_output_path, slugify
-from swiftsim_cli.utilities.messages import plural, warn
+from swiftsim_cli.utilities.messages import note, plural, warn
 from swiftsim_cli.utilities.plotting import save_figure, should_use_log_scale
 from swiftsim_cli.utilities.tables import create_ascii_table
 
@@ -185,8 +185,12 @@ def analyse_swift_mpiuse(
     csv_rows: list[pd.DataFrame] = []
     seen_subtypes: set[str] = set()
 
+    input_files = {path: _discover_files(path) for path in inputs}
+    if step_range is None:
+        input_files = _common_step_files(input_files)
+
     for input_path, label in zip(inputs, labels):
-        files = _discover_files(input_path)
+        files = input_files[input_path]
         if not files:
             warn(f"no mpiuse_report files matched '{input_path}'; skipping it")
             continue
@@ -388,6 +392,42 @@ def _discover_files(input_path: str | Path) -> list[Path]:
         )
 
     return []
+
+
+def _common_step_files(
+    input_files: dict[str, list[Path]],
+) -> dict[str, list[Path]]:
+    """Keep only the report files of the steps every input covers.
+
+    Totals are only comparable over the same steps, and runs usually dump
+    reports for different steps (e.g. one stopped earlier). A note names
+    the range; inputs that share no steps are left as they are, with a
+    warning.
+    """
+    steps = {
+        path: {_parse_rank_step(file)[1] for file in files}
+        for path, files in input_files.items()
+        if files
+    }
+    if len(steps) < 2:
+        return input_files
+    common = set.intersection(*steps.values())
+    if all(step_set == common for step_set in steps.values()):
+        return input_files
+    if not common:
+        warn(
+            "the inputs share no steps, so the comparison sums each over "
+            "different steps; pass --steps to choose a range."
+        )
+        return input_files
+    note(
+        f"comparing the {plural(len(common), 'step')} every input covers "
+        f"({min(common)}-{max(common)}); pass --steps to choose others."
+    )
+    return {
+        path: [file for file in files if _parse_rank_step(file)[1] in common]
+        for path, files in input_files.items()
+    }
 
 
 def _parse_rank_step(path: Path) -> tuple[int, int]:
