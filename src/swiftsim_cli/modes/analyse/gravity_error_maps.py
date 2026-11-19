@@ -119,6 +119,13 @@ def add_gravity_error_maps_arguments(
         default=None,
     )
 
+    error_map_parser.add_argument(
+        "--all-orders",
+        action="store_true",
+        help="For an exact file, map the SWIFT files of every multipole "
+        "order (default: the lowest order only).",
+    )
+
 
 def run_gravity_error_maps(args: argparse.Namespace) -> None:
     """Execute the gravity error map analysis.
@@ -137,6 +144,7 @@ def run_gravity_error_maps(args: argparse.Namespace) -> None:
         vmin=args.vmin,
         vmax=args.vmax,
         box_size=args.box_size,
+        all_orders=args.all_orders,
     )
 
 
@@ -151,6 +159,7 @@ def analyse_gravity_error_maps(
     vmin: Optional[float] = None,
     vmax: Optional[float] = None,
     box_size: Optional[float] = None,
+    all_orders: bool = False,
 ) -> None:
     """Create error maps for gravity check files.
 
@@ -177,6 +186,8 @@ def analyse_gravity_error_maps(
         vmax: Upper end of the colour scale (default: 99th percentile).
         box_size: Periodic box size; when given, distances from the centre
             use the nearest periodic image.
+        all_orders: For an exact file with SWIFT files of several
+            multipole orders, map every order (default: the lowest).
 
     Inputs that cannot be processed are reported as warnings and skipped.
 
@@ -195,7 +206,7 @@ def analyse_gravity_error_maps(
     used_slugs: set[str] = set()
     processed = 0
     for input_file, label, exact_file, swift_file in _resolve_inputs(
-        [str(f) for f in files], labels, all_orders=False
+        [str(f) for f in files], labels, all_orders
     ):
         try:
             pair = _load_force_pair(exact_file, swift_file)

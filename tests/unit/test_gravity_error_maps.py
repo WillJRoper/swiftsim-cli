@@ -139,3 +139,25 @@ def test_error_maps_fail_when_no_input_is_usable(tmp_path, capsys):
 
     assert "warning: skipping" in capsys.readouterr().err
     assert not (tmp_path / "gravity_error_maps_analysis").exists()
+
+
+def test_all_orders_maps_each_order(tmp_path, capsys):
+    """--all-orders (named in the several-orders warning) maps each order."""
+    exact = tmp_path / "gravity_checks_exact_step0001.dat"
+    write_force_file(exact, list(range(5)))
+    for order in (4, 5):
+        write_force_file(
+            tmp_path / f"gravity_checks_swift_step0001_order{order}.dat",
+            list(range(5)),
+        )
+
+    with patch("matplotlib.pyplot.close"):
+        analyse_gravity_error_maps(
+            [str(exact)], ["run"], output_path=tmp_path, all_orders=True
+        )
+
+    out = capsys.readouterr().out
+    assert "for: run order 4" in out and "for: run order 5" in out
+    maps = tmp_path / "gravity_error_maps_analysis"
+    assert (maps / "gravity_error_map_run_order_4.png").is_file()
+    assert (maps / "gravity_error_map_run_order_5.png").is_file()

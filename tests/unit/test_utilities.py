@@ -68,6 +68,9 @@ class TestUtilityFunctions:
         ).splitlines()
         assert len({len(line) for line in lines}) == 1
         assert "| A MUCH LONGER TITLE |" in lines[1]
+        # The extra width is shared, not all given to the last column
+        widths = [len(cell) for cell in lines[2].split("+")[1:-1]]
+        assert max(widths) - min(widths) <= 1
 
     def test_create_ascii_table_empty_rows(self):
         """Test ASCII table creation with empty rows."""
