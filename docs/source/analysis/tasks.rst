@@ -42,7 +42,13 @@ Task, subtype and cell-type names are parsed from the SWIFT source
 (``src/task.c``, ``src/cell.h``) of the active profile's checkout, or of
 ``--swift-src DIR``, and cached per profile. Without a source tree,
 built-in tables are used with a warning; indices outside the tables warn
-and show as ``unknown_N``. Unknown ``--tasks`` labels or cell names are
+and show as ``unknown_N``. The dump does not record its SWIFT version, and
+task types are often added or reordered, so names from another version
+give plausible but wrong labels. A subtype on a task type other than
+self, pair, sub_self, sub_pair, send, recv, pack or unpack is the
+telltale, and gives a warning: pass ``--swift-src`` with a checkout of the
+version the run used. A dump whose last line was cut off (a killed run)
+is read without that line, with a warning. Unknown ``--tasks`` labels or cell names are
 errors listing the valid names, and ranks with no matching task are
 skipped with a warning. All ranks share one time window (by default the
 longest step in the dump headers; ``--limit``, ``--mintic``).

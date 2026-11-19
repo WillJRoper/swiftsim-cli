@@ -31,6 +31,13 @@ from .task_names import TaskNames, resolve_task_names
 if TYPE_CHECKING:
     import pandas as pd
 
+# The only task types SWIFT gives a subtype (sub_self and sub_pair in
+# older versions); a subtype on any other type means the name tables are
+# from another SWIFT version than the dump.
+SUBTYPED_TASKS = frozenset(
+    ("self", "pair", "sub_self", "sub_pair", "send", "recv", "pack", "unpack")
+)
+
 CELL_FIELDS = (
     "ci_type",
     "cj_type",
@@ -291,9 +298,11 @@ class TaskDebugData:
             )
             for col in usecols
         }
+        nrows = _complete_lines(self.file_path, layout.ncols)
         try:
             return pd.read_csv(
                 self.file_path,
+                nrows=nrows,
                 sep=r"\s+",
                 header=None,
                 names=list(range(layout.ncols)),
@@ -344,6 +353,21 @@ class TaskDebugData:
                 len(names.cell_subtypes),
             ),
         ]
+        with_subtype = np.unique(task_type[subtype > 0])
+        odd = [
+            names.task_types[t]
+            for t in with_subtype
+            if t < len(names.task_types)
+            and names.task_types[t] not in SUBTYPED_TASKS
+        ]
+        if odd:
+            warn(
+                f"{', '.join(odd)} tasks carry subtypes, which SWIFT only "
+                "gives self/pair/send/recv/pack/unpack tasks: the names "
+                f"({names.source}) are probably from another SWIFT version "
+                "than the dump, so the labels are wrong. Pass --swift-src "
+                "with a checkout of the version the run used."
+            )
         for kind, values, size in checks:
             bad = np.unique(values[values >= size])
             if bad.size:
@@ -418,6 +442,32 @@ class TaskDebugData:
                 col("cj_depth") == task_filter.depth
             )
         return mask
+
+
+def _complete_lines(path: Path, ncols: int) -> int | None:
+    """Lines to read if the last one was cut off (a killed run), else None.
+
+    Raises:
+        ValueError: If no complete line is left.
+    """
+    with open(path, "rb") as handle:
+        handle.seek(0, 2)
+        size = handle.tell()
+        handle.seek(max(0, size - 4096))
+        tail = handle.read()
+        if tail.endswith(b"\n") or len(tail.rsplit(b"\n", 1)[-1].split()) >= (
+            ncols
+        ):
+            return None
+        handle.seek(0)
+        lines = sum(
+            chunk.count(b"\n")
+            for chunk in iter(lambda: handle.read(1 << 24), b"")
+        )
+    warn(
+        f"{path}: the last line is cut off (was the run killed?); ignoring it"
+    )
+    return lines
 
 
 def _contiguous_threads(ranks: np.ndarray, threads: np.ndarray) -> np.ndarray:

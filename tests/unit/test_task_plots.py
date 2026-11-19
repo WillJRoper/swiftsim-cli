@@ -228,6 +228,30 @@ class TestLayouts:
         assert "task type indices 999" in err
         assert "task subtype indices 888" in err
 
+    def test_subtypes_on_other_types_warn(self, tmp_path, capsys):
+        """Subtypes outside self/pair/... mean names of another version."""
+        init_grav = UPSTREAM.task_types.index("init_grav")
+        pair = UPSTREAM.task_types.index("pair")
+        rows = [
+            _mpi_row(0, 0, 0, 1000, 2000, 1000000),
+            _mpi_row(0, pair, 1, 1000, 1500, 0),
+        ]
+        TaskDebugData(_write_rows(tmp_path / "a.dat", rows), names=UPSTREAM)
+        assert "carry subtypes" not in capsys.readouterr().err
+        rows.append(_mpi_row(0, init_grav, 1, 1500, 2000, 0))
+        TaskDebugData(_write_rows(tmp_path / "b.dat", rows), names=UPSTREAM)
+        err = capsys.readouterr().err
+        assert "init_grav tasks carry subtypes" in err
+        assert "another SWIFT version" in err
+
+    def test_cut_off_last_line_ignored(self, tmp_path, capsys):
+        """A dump cut mid-line (killed run) loads without its last line."""
+        cut = tmp_path / "cut.dat"
+        cut.write_text(EAGLE.read_text().rstrip("\n") + "\n 3 2 1 0 12345")
+        data = TaskDebugData(cut, names=UPSTREAM)
+        assert len(data.tasks) == 39
+        assert "last line is cut off" in capsys.readouterr().err
+
     def test_cell_filter_without_cells_raises(self):
         """Cell filters on a dump without cell columns are an error."""
         data = TaskDebugData(EAGLE, names=UPSTREAM)
