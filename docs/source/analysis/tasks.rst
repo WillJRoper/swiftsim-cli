@@ -46,8 +46,13 @@ and show as ``unknown_N``. The dump does not record its SWIFT version, and
 task types are often added or reordered, so names from another version
 give plausible but wrong labels. A subtype on a task type other than
 self, pair, sub_self, sub_pair, send, recv, pack or unpack is the
-telltale, and gives a warning: pass ``--swift-src`` with a checkout of the
-version the run used. A dump whose last line was cut off (a killed run)
+telltale, and gives a warning. Pass the run's log with ``--log LOG``: the
+names are then read at the log's ``Revision:`` (``git show``, the
+checkout is not touched), like ``analyse log`` matches its timers, unless
+the log is from a ``-dirty`` build of the checkout's HEAD (then the working
+tree is used). If the clone lacks that revision (e.g. a fork's commit) it
+warns and uses the working tree; ``--swift-src`` with a clone that has it
+fixes that. A dump whose last line was cut off (a killed run)
 is read without that line, with a warning. Unknown ``--tasks`` labels or cell names are
 errors listing the valid names, and ranks with no matching task are
 skipped with a warning. All ranks share one time window (by default the

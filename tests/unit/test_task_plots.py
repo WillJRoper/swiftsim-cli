@@ -325,6 +325,37 @@ class TestTaskNames:
         again = resolve_task_names(SRC, has_cells=True)
         assert again.task_types == names.task_types
 
+    @pytest.mark.usefixtures("git_env")
+    def test_names_at_log_revision(self, tmp_path, capsys):
+        """--log reads the names at the run's revision, not the tree's."""
+        import shutil
+
+        from .conftest import run_git
+
+        repo = tmp_path / "swift"
+        shutil.copytree(SRC / "src", repo / "src")
+        run_git("init", "-q", cwd=repo)
+        run_git("add", ".", cwd=repo)
+        run_git("commit", "-qm", "run", cwd=repo)
+        run_sha = run_git("rev-parse", "HEAD", cwd=repo)
+        task_c = repo / "src" / "task.c"
+        task_c.write_text(
+            task_c.read_text().replace("my_new_task", "later_task")
+        )
+        run_git("commit", "-qam", "later", cwd=repo)
+
+        def names_for(revision):
+            log = tmp_path / "log.txt"
+            log.write_text(f" Revision: v1.0-1-g{revision[:8]}, Branch: x\n")
+            return resolve_task_names(repo, has_cells=True, log_file=log)
+
+        names = names_for(run_sha)
+        assert names.task_types[-1] == "my_new_task"
+        assert names.source == f"names at revision {run_sha[:8]}"
+        # A revision the clone lacks: the working tree, with a warning
+        assert names_for("0123abcd").task_types[-1] == "later_task"
+        assert "0123abcd not found" in capsys.readouterr().err
+
     def test_bad_swift_src_raises(self, tmp_path):
         """An explicit --swift-src without src/task.c is an error."""
         with pytest.raises(ValueError, match="--swift-src"):

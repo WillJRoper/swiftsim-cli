@@ -64,7 +64,8 @@ def add_task_plots_arguments(
         "Requires SWIFT configured with --enable-task-debugging and run with "
         "-y N (and, for --threadpool, --enable-threadpool-debugging and "
         "-Y N). Task and cell names are read from the SWIFT source (the "
-        "active profile's checkout or --swift-src).",
+        "active profile's checkout or --swift-src), at the run's revision "
+        "with --log.",
     )
     parser.set_defaults(func=run_swift_task_plots)
 
@@ -97,6 +98,14 @@ def add_task_plots_arguments(
         metavar="DIR",
         help="SWIFT source tree to read task and cell names from (default: "
         "the active profile's checkout; built-in tables if neither exists).",
+    )
+    parser.add_argument(
+        "--log",
+        type=existing_file,
+        default=None,
+        metavar="FILE",
+        help="The run's log: task and cell names are read from the SWIFT "
+        "revision it reports (git show), like 'analyse log' does.",
     )
     parser.add_argument(
         "--limit",
@@ -216,6 +225,7 @@ def run_swift_task_plots(args: argparse.Namespace) -> None:
         activity_plot=args.activity_plot,
         sort_threads=args.sort_threads,
         swift_src=args.swift_src,
+        log_file=args.log,
     )
 
 
@@ -237,6 +247,7 @@ def analyse_swift_task_plots(
     sort_threads: bool = False,
     swift_src: Path | None = None,
     names: TaskNames | None = None,
+    log_file: Path | None = None,
 ) -> None:
     """Create per-rank timeline plots, timing tables and activity maps.
 
@@ -253,6 +264,7 @@ def analyse_swift_task_plots(
         ranks=None if rank is None else [rank],
         names=names,
         swift_src=swift_src,
+        log_file=log_file,
     )
     pool: ThreadpoolData | None = None
     pool_rank: int | None = None

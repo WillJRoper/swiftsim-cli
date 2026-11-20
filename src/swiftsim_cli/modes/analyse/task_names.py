@@ -7,7 +7,9 @@ from ``taskID_names``/``subtaskID_names`` in ``src/task.c`` and the
 ``cell_types``/``cell_subtypes`` enums in ``src/cell.h`` of the active
 profile's checkout (or ``--swift-src``). The result is cached in the
 profile cache, keyed like the timer database by HEAD and the state of
-uncommitted changes.
+uncommitted changes. Given the run's log (``--log``), the names are read
+at the log's ``Revision:`` with ``git show`` instead, like ``analyse log``
+matches its timers.
 
 Without a source tree, the built-in tables in :mod:`.task_plot_metadata`
 are used (upstream master's for dumps without cell columns, the zoom
@@ -25,9 +27,12 @@ from typing import Any, Iterable
 from swiftsim_cli.profile import (
     ProfileError,
     get_profile_cache_dir,
+    git,
     load_swift_profile,
 )
+from swiftsim_cli.timing.log_scan import read_log_revision
 from swiftsim_cli.timing.timer_db import (
+    _git_head,
     _load_cached,
     _store,
     _tree_sitter,
@@ -243,6 +248,13 @@ def parse_source_names(task_c: bytes, cell_h: bytes | None) -> dict[str, Any]:
     return names
 
 
+def _names_cache() -> Path:
+    """Directory holding the cached name tables of the active profile."""
+    cache = get_profile_cache_dir() / "task_names"
+    cache.mkdir(parents=True, exist_ok=True)
+    return cache
+
+
 def load_source_names(root: Path) -> dict[str, Any]:
     """Names parsed from a SWIFT tree, cached per profile.
 
@@ -254,10 +266,8 @@ def load_source_names(root: Path) -> dict[str, Any]:
     if not task_c.is_file():
         raise ValueError(f"{root} has no src/task.c")
     key = f"n{NAMES_VERSION}-{source_key(root)}"
-    cache = get_profile_cache_dir() / "task_names"
-    cache.mkdir(parents=True, exist_ok=True)
     path = (
-        cache
+        _names_cache()
         / f"tree-{hashlib.sha1(str(root).encode()).hexdigest()[:12]}.json"
     )
     payload = _load_cached(path, key)
@@ -271,8 +281,67 @@ def load_source_names(root: Path) -> dict[str, Any]:
     return payload
 
 
+def load_revision_names(repo: Path, revision: str) -> dict[str, Any]:
+    """Names parsed from a commit's source (``git show``), cached.
+
+    Raises:
+        ProfileError: If the repository does not have the revision.
+    """
+    sha = git("rev-parse", f"{revision}^{{commit}}", cwd=repo)
+    key = f"n{NAMES_VERSION}-{sha}"
+    path = _names_cache() / f"rev-{sha}.json"
+    payload = _load_cached(path, key)
+    if payload is None:
+        task_c = git("show", f"{sha}:src/task.c", cwd=repo)
+        try:
+            cell_h: str | None = git("show", f"{sha}:src/cell.h", cwd=repo)
+        except ProfileError:
+            cell_h = None
+        payload = parse_source_names(
+            task_c.encode(), cell_h.encode() if cell_h else None
+        )
+        _store(path, key, payload)
+    return payload
+
+
+def _names_payload(
+    root: Path, log_file: Path | None
+) -> tuple[dict[str, Any], str]:
+    """Names from ``root``, at the log's revision when one is given.
+
+    Returns:
+        The parsed names and where they came from.
+
+    Raises:
+        OSError, ValueError: If ``root`` cannot be read.
+    """
+    if log_file is not None:
+        revision, dirty = read_log_revision(log_file)
+        head = _git_head(root)
+        if revision is None:
+            warn(f"{log_file} has no Revision line; using {root} as is")
+        elif head is None:
+            warn(f"{root} is not a git checkout; using it as is")
+        elif not (dirty and head.startswith(revision)):
+            # A clean build's names are the commit's, whatever the tree
+            try:
+                payload = load_revision_names(root, revision)
+                return payload, f"names at revision {revision[:8]}"
+            except ProfileError:
+                warn(
+                    f"log revision {revision} not found in {root}; using the "
+                    f"working tree at {head[:8]} (pass --swift-src with a "
+                    "clone that has it, e.g. of the fork the run was built "
+                    "from)"
+                )
+    return load_source_names(root), f"names from {root}"
+
+
 def resolve_task_names(
-    swift_src: Path | None, has_cells: bool, max_cell_type: int = 0
+    swift_src: Path | None,
+    has_cells: bool,
+    max_cell_type: int = 0,
+    log_file: Path | None = None,
 ) -> TaskNames:
     """Pick the name tables for a dump.
 
@@ -281,6 +350,7 @@ def resolve_task_names(
             no src/task.c.
         has_cells: Whether the dump has cell type/subtype columns.
         max_cell_type: Largest cell type index in the dump.
+        log_file: The run's log; names are read at its revision.
 
     Returns:
         Names from the source tree if one is available, else the built-in
@@ -295,7 +365,7 @@ def resolve_task_names(
     fallback = builtin_names(has_cells, max_cell_type)
     if root is not None:
         try:
-            payload = load_source_names(Path(root))
+            payload, source = _names_payload(Path(root), log_file)
         except (OSError, ValueError) as error:
             if swift_src is not None:
                 raise ValueError(
@@ -325,7 +395,7 @@ def resolve_task_names(
                 tuple(payload["cell_subtypes"])
                 if cells
                 else fallback.cell_subtypes,
-                f"names from {root}",
+                source,
             )
     warn(
         "no SWIFT source tree to read task names from; using the "

@@ -169,6 +169,7 @@ class TaskDebugData:
         ranks: Iterable[int] | None = None,
         names: TaskNames | None = None,
         swift_src: Path | None = None,
+        log_file: Path | None = None,
     ):
         """Read a dump, keeping only ``ranks`` (default: all)."""
         import pandas as pd
@@ -243,7 +244,9 @@ class TaskDebugData:
                     cells["cj_type"].max(initial=0),
                 )
             )
-            names = resolve_task_names(swift_src, layout.has_cells, max_cell)
+            names = resolve_task_names(
+                swift_src, layout.has_cells, max_cell, log_file
+            )
         self.names = names
 
         # Subtract in int64 first: ticks exceed float precision.
@@ -365,8 +368,9 @@ class TaskDebugData:
                 f"{', '.join(odd)} tasks carry subtypes, which SWIFT only "
                 "gives self/pair/send/recv/pack/unpack tasks: the names "
                 f"({names.source}) are probably from another SWIFT version "
-                "than the dump, so the labels are wrong. Pass --swift-src "
-                "with a checkout of the version the run used."
+                "than the dump, so the labels are wrong. Pass the run's log "
+                "with --log (or --swift-src with a checkout of the version "
+                "the run used)."
             )
         for kind, values, size in checks:
             bad = np.unique(values[values >= size])
@@ -375,7 +379,7 @@ class TaskDebugData:
                     f"{kind} indices {', '.join(map(str, bad))} are outside "
                     f"the {size}-name table ({names.source}); shown as "
                     "unknown_<index>. The dump may come from another SWIFT "
-                    "version (pass --swift-src)."
+                    "version (pass its log with --log, or --swift-src)."
                 )
 
     def step_duration_ms(self, rank: int) -> float:
