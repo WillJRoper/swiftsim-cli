@@ -6,6 +6,8 @@ exactly what ``new`` writes.
 """
 
 import argparse
+import shutil
+import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Mapping
@@ -350,6 +352,20 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         "(default: from the profile).",
     )
 
+    get_data = subparsers.add_parser(
+        "get-data",
+        help="Download data tables (cooling, yields, ...) into the "
+        "profile's data_dir with SWIFT's example scripts.",
+    )
+    get_data.set_defaults(func=run_get_data)
+    get_data.add_argument(
+        "scripts",
+        nargs="*",
+        metavar="SCRIPT",
+        help="Scripts to run, e.g. getEagleCoolingTable (without any, "
+        "list them).",
+    )
+
 
 def format_softening_report(
     header: ICHeader,
@@ -440,6 +456,74 @@ def run_softenings(args: argparse.Namespace) -> None:
             gravity,
         )
     )
+
+
+def data_scripts(swift_dir: Path) -> dict[str, list[Path]]:
+    """SWIFT's scripts that download data tables, by name.
+
+    These are the ``examples/**/get*table*.sh`` scripts (initial conditions
+    and glass files are run specific). Names are the script stems, or the
+    path under ``examples`` when same-named scripts differ.
+
+    Args:
+        swift_dir: The SWIFT worktree.
+
+    Returns:
+        {name: [script, ...]} (several identical copies per name).
+    """
+    examples = swift_dir / "examples"
+    by_stem: dict[str, list[Path]] = {}
+    for script in sorted(examples.rglob("get*.sh")):
+        if "table" in script.name.lower():
+            by_stem.setdefault(script.stem, []).append(script)
+    names: dict[str, list[Path]] = {}
+    for stem, scripts in by_stem.items():
+        # Copies differing only in blank lines/spacing are the same
+        if len({"".join(s.read_text().split()) for s in scripts}) == 1:
+            names[stem] = scripts
+        else:
+            for s in scripts:
+                rel = s.relative_to(examples).with_suffix("").as_posix()
+                names[rel] = [s]
+    return names
+
+
+def run_get_data(args: argparse.Namespace) -> None:
+    """List or run SWIFT's data-table download scripts in data_dir."""
+    from swiftsim_cli.swiftsim_dir import get_swiftsim_dir
+
+    swift_dir = get_swiftsim_dir()
+    names = data_scripts(swift_dir)
+    if not names:
+        raise ValueError(f"no get*table*.sh scripts in {swift_dir}/examples")
+    if not args.scripts:
+        width = max(map(len, names))
+        for name, scripts in names.items():
+            where = scripts[0].parent.relative_to(swift_dir)
+            print(f"{name:<{width}}  {where}")
+        return
+
+    data_dir = load_swift_profile().data_dir
+    if data_dir is None:
+        raise ValueError(
+            "the profile has no data_dir; set one with "
+            "'profile --edit NAME --set data_dir=DIR'"
+        )
+    chosen = []
+    for name in args.scripts:
+        name = name.removesuffix(".sh")
+        if name not in names:
+            raise ValueError(
+                f"unknown data script '{name}'; "
+                "run 'utils get-data' to list them"
+            )
+        chosen.append(names[name][0])
+    if shutil.which("wget") is None:
+        raise ValueError("SWIFT's download scripts need wget; install it")
+    data_dir.mkdir(parents=True, exist_ok=True)
+    for script in chosen:
+        print(f"Running {script.relative_to(swift_dir)} in {data_dir}")
+        subprocess.run(["bash", str(script)], cwd=data_dir, check=True)
 
 
 def run(args: argparse.Namespace) -> None:

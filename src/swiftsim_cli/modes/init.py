@@ -18,6 +18,7 @@ from swiftsim_cli.profile import (
     ProfileError,
     ProfileStore,
     add_profile,
+    default_data_dir,
     default_worktree_root,
     load_store,
     main_clone_of,
@@ -117,12 +118,14 @@ def run(args: argparse.Namespace) -> None:
         else default_worktree_root()
     )
     store = ProfileStore(repo=repo, worktree_root=root)
+    data_dir = default_data_dir()
+    data_dir.mkdir(parents=True, exist_ok=True)
     add_profile(
         store,
         args.name,
         args.upstream,
         configure_flags=shlex.split(args.configure_flags),
-        data_dir=repo.parent,
+        data_dir=data_dir,
         parameter_file=params,
         # After starting over (~/.swiftsim-cli deleted) the clone still
         # has the profile's branch: pick it up again
@@ -142,6 +145,7 @@ def print_summary(store: ProfileStore, name: str) -> None:
         ["SWIFT clone", str(store.repo)],
         ["profile worktrees", str(store.worktree_root)],
         ["caches", str(home / "cache" / name)],
+        ["run input data", str(store.profiles[name].data_dir)],
     ]
     print()
     print(create_ascii_table(["What", "Where"], rows, title="LOCATIONS"))
@@ -151,6 +155,7 @@ Created profile '{name}'. Next steps:
   swift-cli make -j <N>                    build it
   swift-cli config --list-options          list its configure options
   swift-cli profile --edit NAME            change these settings
+  swift-cli utils get-data                 list SWIFT's data tables to download
   swift-cli new -o RUN --ics ICS.hdf5      set up a run directory
   swift-cli <mode> --help                  help for any mode"""
     )

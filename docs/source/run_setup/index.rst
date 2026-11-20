@@ -34,8 +34,10 @@ fills in:
 + absolute paths for your file's relative inputs (``./coolingtables/``,
   ``./yieldtables/``, ``stf_input.cfg``, ...), since SWIFT runs from the run
   directory. Each is looked up next to your parameter file, then in the
-  profile's ``data_dir`` (without its leading ``./`` or ``../``), so
-  download such tables into ``data_dir`` once and every run finds them.
+  profile's ``data_dir`` (``~/.swiftsim-cli/data`` by default; without
+  the path's leading ``./`` or ``../``), so download such tables into
+  ``data_dir`` once (:ref:`utils get-data <get-data>`) and every run finds
+  them.
   Relative ``./``/``../`` paths found in neither place are listed in a
   warning; output names (``basename``, ``subdir``) stay relative;
 + the unit system from the ICs' ``Units`` group. Cosmological ICs without
@@ -55,6 +57,10 @@ fills in:
   (``src/zoom_region``);
 + ``generate_gas_in_ics`` when a hydro template is used with
   dark-matter-only ICs;
++ the ``cosmo-hydro`` template's initial gas temperature (268.7 K, for
+  z = 127) scaled adiabatically, T ∝ (1+z)\ :sup:`2`, to the ICs'
+  redshift, but not below ``SPH:minimal_temperature`` (SWIFT refuses an
+  initial temperature below it);
 + your ``--set SECTION:KEY=VALUE`` overrides (repeatable). Integers and
   floats are written as numbers, ``[a, b]`` as a list and anything else
   verbatim; new keys or sections are added with a warning (in case of a
@@ -139,3 +145,22 @@ neutrinos and the zoom background), with exactly the calculation ``new``
 uses. ``-P`` is optional (the default is what ``new`` would start from:
 the profile's ``parameter_file`` or the template matching the ICs); the
 coefficient and pivot redshift default to the profile's values.
+
+.. _get-data:
+
+Data tables (``utils get-data``)
+--------------------------------
+
+.. code-block:: bash
+
+   swift-cli utils get-data
+   swift-cli utils get-data getEagleCoolingTable getEagleYieldTable
+
+Runs SWIFT's own download scripts (``examples/**/get*Table*.sh`` in the
+profile's worktree) in the profile's ``data_dir``, where ``new`` looks for
+the tables a parameter file names with relative paths (``./coolingtables/``,
+``./yieldtables/``, ...). Without names it lists the scripts. Same-named
+copies of one script are run once; when same-named scripts differ (e.g.
+``getXrayTables``) each is named by its path under ``examples``, such as
+``FLAMINGO/getXrayTables``. The scripts need ``wget``; scripts with options
+(GEAR's) run with their defaults.

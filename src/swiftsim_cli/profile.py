@@ -193,6 +193,11 @@ def default_worktree_root() -> Path:
     return PROFILE_FILE.parent / "worktrees"
 
 
+def default_data_dir() -> Path:
+    """Where run input data goes by default: ``~/.swiftsim-cli/data``."""
+    return PROFILE_FILE.parent / "data"
+
+
 # ---------- reading and writing the profile file ----------
 
 

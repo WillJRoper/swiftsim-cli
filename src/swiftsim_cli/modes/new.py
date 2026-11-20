@@ -293,6 +293,40 @@ def apply_ic_settings(
                 params[name]["time_first"] = time_begin
 
 
+# The templates' SPH:initial_temperature and the redshift it is for
+_TEMPLATE_TEMPERATURE = (268.7, 127.0)
+
+
+def _scale_initial_temperature(params: dict) -> None:
+    """Set a template's initial gas temperature for the ICs' redshift.
+
+    After decoupling from the CMB the gas cools adiabatically, T ∝ (1+z)^2,
+    so the template's value (for z = 127) is scaled to ``a_begin``, but
+    never below ``SPH:minimal_temperature`` (SWIFT refuses that).
+
+    Args:
+        params: The parameters, after ``apply_ic_settings``.
+    """
+    sph = params.get("SPH")
+    cosmo = params.get("Cosmology")
+    if not sph or not cosmo or "initial_temperature" not in sph:
+        return
+    t_ref, z_ref = _TEMPLATE_TEMPERATURE
+    if float(sph["initial_temperature"]) != t_ref:
+        return
+    z = 1 / float(cosmo["a_begin"]) - 1
+    temperature = t_ref * ((1 + z) / (1 + z_ref)) ** 2
+    floor = float(sph.get("minimal_temperature", 0))
+    sph["initial_temperature"] = round(max(temperature, floor), 1)
+    if isinstance(sph, CommentedMap):
+        sph.ca.items.pop("initial_temperature", None)
+    note(
+        f"SPH:initial_temperature set to {sph['initial_temperature']} K "
+        f"for z = {z:.4g}"
+        + (" (SPH:minimal_temperature)" if temperature < floor else "")
+    )
+
+
 def _round12(value: float) -> float:
     """Round to 12 significant figures (drops float noise)."""
     return float(f"{value:.12g}")
@@ -441,6 +475,8 @@ def make_new_parameter_file(
     if isinstance(source, Path):
         absolute_input_paths(params, source.resolve().parent, profile.data_dir)
     apply_ic_settings(params, header)
+    if not isinstance(source, Path):
+        _scale_initial_temperature(params)
 
     # Softenings
     if not params.get("Cosmology") and not header.is_zoom:

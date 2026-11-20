@@ -190,3 +190,45 @@ class TestSofteningsCLI:
         assert "Non-cosmological" in out
         assert "Dark matter" not in out
         assert "4.0000e-01" in out
+
+
+def test_get_data(tmp_path, monkeypatch, capsys):
+    """get-data lists SWIFT's table scripts and runs them in data_dir."""
+    from types import SimpleNamespace
+
+    from swiftsim_cli import swiftsim_dir
+    from swiftsim_cli.modes import utils
+
+    examples = tmp_path / "swift" / "examples"
+    scripts = {
+        "A/getFooTable.sh": "echo foo > foo.txt",
+        "B/getFooTable.sh": "\necho  foo > foo.txt",  # same but spacing
+        "C/getXrayTables.sh": "echo c > x.txt",
+        "D/getXrayTables.sh": "echo d > x.txt",  # differs: named by path
+        "E/getIC.sh": "exit 1",  # not a table
+    }
+    for name, body in scripts.items():
+        (examples / name).parent.mkdir(parents=True, exist_ok=True)
+        (examples / name).write_text(body + "\n")
+    data_dir = tmp_path / "data"
+    monkeypatch.setattr(
+        swiftsim_dir, "get_swiftsim_dir", lambda: examples.parent
+    )
+    monkeypatch.setattr(
+        utils,
+        "load_swift_profile",
+        lambda: SimpleNamespace(data_dir=data_dir),
+    )
+    monkeypatch.setattr(utils.shutil, "which", lambda _: "/usr/bin/wget")
+
+    main(["utils", "get-data"])
+    listed = [line.split()[0] for line in capsys.readouterr().out.splitlines()]
+    assert listed[:3] == ["getFooTable", "C/getXrayTables", "D/getXrayTables"]
+
+    main(["utils", "get-data", "getFooTable.sh", "D/getXrayTables"])
+    assert (data_dir / "foo.txt").read_text() == "foo\n"
+    assert (data_dir / "x.txt").read_text() == "d\n"
+
+    with pytest.raises(SystemExit):
+        main(["utils", "get-data", "getXrayTables"])
+    assert "unknown data script 'getXrayTables'" in capsys.readouterr().err

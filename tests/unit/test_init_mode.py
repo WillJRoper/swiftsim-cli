@@ -31,7 +31,8 @@ def test_init_clones_swift(gitsetup, tmp_path, monkeypatch, capsys):
     assert store.current == "default"
     p = store.profiles["default"]
     assert p.worktree is not None and (p.worktree / "src.c").exists()
-    assert p.data_dir == work.resolve()
+    assert p.data_dir == profile_mod.default_data_dir()
+    assert p.data_dir.is_dir()
     assert "swift-cli make -j" in capsys.readouterr().out
 
 

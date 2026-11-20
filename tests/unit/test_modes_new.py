@@ -214,6 +214,20 @@ class TestCosmological:
         # 0.04 x 10 / 2 (no h-scaling with a Units group)
         assert params["Gravity"]["comoving_baryon_softening"] == 0.2
 
+    @pytest.mark.parametrize(
+        "a_begin, temperature",
+        [(1 / 128, 268.7), (1 / 256, 1074.8), (0.1, 100.0)],
+    )
+    def test_initial_temperature_follows_redshift(
+        self, run_dir, a_begin, temperature
+    ):
+        """The template's z = 127 gas temperature is scaled to a_begin."""
+        ics = write_ics(run_dir.parent / "ics.hdf5", time=a_begin)
+        make_new_run_dir(run_dir, ics, template="cosmo-hydro")
+        sph = load(run_dir / "params.yml")["SPH"]
+        # Never below minimal_temperature (100 K), which SWIFT refuses
+        assert sph["initial_temperature"] == temperature
+
     def test_hydro_template_on_dmo_ics_generates_gas(self, run_dir):
         """A hydro run from DM-only ICs asks SWIFT to generate the gas."""
         ics = write_ics(run_dir.parent / "ics.hdf5", time=0.01)

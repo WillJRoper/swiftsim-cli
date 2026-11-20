@@ -41,7 +41,7 @@ SPH:
   h_min_ratio: 0.01
   CFL_condition: 0.2
   minimal_temperature: 100.0
-  initial_temperature: 268.7        # (1 + z_ini)^2 * 2.72 K at z_ini = 127
+  initial_temperature: 268.7        # At z = 127; new scales it to a_begin
 
 Snapshots:
   basename: snap
